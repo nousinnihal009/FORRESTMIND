@@ -19,6 +19,13 @@ from forestmind.data.synthetic import SyntheticForestGenerator, HEALTH_STATES, D
 
 
 def main():
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+            sys.stderr.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(description="Generate synthetic ForestMind data")
     parser.add_argument("--num-train", type=int, default=2000, help="Number of training samples")
     parser.add_argument("--num-val", type=int, default=400, help="Number of validation samples")
@@ -71,7 +78,7 @@ def main():
         print(f"\n  Health distribution:")
         for state, count in health_counts.items():
             pct = count / num_samples * 100
-            bar = "█" * int(pct / 5)
+            bar = "#" * int(pct / 5)
             print(f"    {state:20s}: {count:4d} ({pct:5.1f}%) {bar}")
 
         print(f"\n  Average health score: {sum(scores) / len(scores):.1f}")
@@ -81,7 +88,7 @@ def main():
             print(f"    {driver:20s}: {count:4d} ({pct:5.1f}%)")
 
     print(f"\n{'=' * 50}")
-    print(f"  ✓ Dataset generation complete")
+    print(f"  [OK] Dataset generation complete")
     print(f"  Total: {sum(n for n, _ in splits.values())} samples")
     print(f"{'=' * 50}")
 
