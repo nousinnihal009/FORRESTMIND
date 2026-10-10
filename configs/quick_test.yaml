@@ -1,0 +1,90 @@
+# ForestMind — Quick Test Configuration
+# Runs quickly on disk-cached synthetic data for integration testing
+
+data:
+  source: data/synthetic
+  patch_size: 128
+  num_bands: 12
+  sar_channels: 2
+  time_steps: 12
+  num_train_samples: 10
+  num_val_samples: 2
+  num_test_samples: 2
+  batch_size: 2
+  num_workers: 0
+
+foundation:
+  name: custom_vit
+  embedding_dim: 128
+  custom_vit:
+    patch_embed_size: 16
+    depth: 2
+    num_heads: 4
+    mlp_ratio: 2.0
+    drop_rate: 0.0
+
+fusion:
+  method: cross_attention
+  num_heads: 2
+  num_layers: 1
+  dropout: 0.0
+
+temporal:
+  depth: 2
+  num_heads: 4
+  dim_feedforward: 256
+  dropout: 0.0
+  max_seq_len: 24
+  use_continuous_pe: true
+
+heads:
+  health:
+    num_classes: 5
+    continuous_score: true
+  attribution:
+    num_drivers: 8
+    multi_label: true
+  trajectory:
+    horizons: [30, 180, 365, 1095, 1825]
+    predict_uncertainty: true
+
+training:
+  epochs: 2
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-5
+  scheduler: cosine
+  warmup_epochs: 0
+  gradient_clip: 1.0
+  loss_weights:
+    health_ce: 1.0
+    health_mse: 0.5
+    attribution_bce: 1.0
+    trajectory_mse: 2.0
+    trajectory_huber: 1.0
+  use_amp: false
+  checkpoint_dir: checkpoints/quick_test
+  save_every: 1
+
+risk_engine:
+  csd:
+    window_size: 4
+    ar1_threshold: 0.8
+  variance:
+    window_size: 4
+    amplification_threshold: 1.5
+  tipping_point:
+    risk_weights:
+      csd: 0.25
+      variance: 0.20
+      autocorrelation: 0.20
+      fragmentation: 0.15
+      drought_sensitivity: 0.20
+  intervention:
+    scenarios:
+      - name: no_intervention
+        driver_reduction: {}
+      - name: conservation_corridor
+        driver_reduction: { logging: 0.6, road: 0.4 }
+
+device: cpu
+seed: 42
