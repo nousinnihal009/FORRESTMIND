@@ -1,0 +1,123 @@
+# ForestMind — Sentinel-2 + Sentinel-1 Real Data Configuration
+# Uses real satellite data from Planetary Computer
+
+# ─── Data ───────────────────────────────────────────────
+data:
+  source: sentinel2              # sentinel2 | landsat | multi
+  cache_dir: data/real           # local cache for downloaded tiles
+  patch_size: 128                # pixels (128 × 128)
+  num_bands: 12                  # Sentinel-2 equivalent bands
+  sar_channels: 2                # VV + VH from Sentinel-1
+  time_steps: 12                 # temporal observations per sample
+  batch_size: 4
+  num_workers: 2
+
+  # Sentinel-2 specific
+  sentinel2:
+    max_cloud_cover: 20          # percent
+    resolution: 10               # meters
+
+  # Sentinel-1 specific
+  sentinel1:
+    orbit_direction: null        # ascending | descending | null (both)
+    resolution: 10               # meters
+
+  # Study region (Amazon Basin subset)
+  region:
+    name: amazon_rondonia
+    west: -63.5
+    south: -11.5
+    east: -62.5
+    north: -10.5
+    start_date: "2023-01-01"
+    end_date: "2024-01-01"
+
+# ─── Foundation Model ──────────────────────────────────
+foundation:
+  name: custom_vit               # custom_vit | prithvi | terramind
+  embedding_dim: 256
+  custom_vit:
+    patch_embed_size: 16
+    depth: 6
+    num_heads: 8
+    mlp_ratio: 4.0
+    drop_rate: 0.1
+  prithvi:
+    model_name: "ibm-nasa-geospatial/Prithvi-EO-2.0-300M"
+    freeze: true
+  terramind:
+    model_name: "terramind-base"
+    freeze: true
+
+# ─── Fusion ────────────────────────────────────────────
+fusion:
+  method: cross_attention
+  num_heads: 4
+  num_layers: 2
+  dropout: 0.1
+
+# ─── Temporal Transformer ─────────────────────────────
+temporal:
+  depth: 4
+  num_heads: 8
+  dim_feedforward: 512
+  dropout: 0.1
+  max_seq_len: 48
+  use_continuous_pe: true
+
+# ─── Prediction Heads ─────────────────────────────────
+heads:
+  health:
+    num_classes: 5
+    continuous_score: true
+  attribution:
+    num_drivers: 8
+    multi_label: true
+  trajectory:
+    horizons: [30, 180, 365, 1095, 1825]
+    predict_uncertainty: true
+
+# ─── Training ─────────────────────────────────────────
+training:
+  epochs: 50
+  learning_rate: 3.0e-4
+  weight_decay: 1.0e-4
+  scheduler: cosine
+  warmup_epochs: 5
+  gradient_clip: 1.0
+  loss_weights:
+    health_ce: 1.0
+    health_mse: 0.5
+    attribution_bce: 1.0
+    trajectory_mse: 2.0
+    trajectory_huber: 1.0
+  use_amp: false
+  checkpoint_dir: checkpoints/sentinel2
+  save_every: 5
+
+# ─── Risk Engine ───────────────────────────────────────
+risk_engine:
+  csd:
+    window_size: 6
+    ar1_threshold: 0.8
+  variance:
+    window_size: 6
+    amplification_threshold: 1.5
+  tipping_point:
+    risk_weights:
+      csd: 0.25
+      variance: 0.20
+      autocorrelation: 0.20
+      fragmentation: 0.15
+      drought_sensitivity: 0.20
+  intervention:
+    scenarios:
+      - name: no_intervention
+        driver_reduction: {}
+      - name: conservation_corridor
+        driver_reduction: { logging: 0.6, road: 0.4 }
+      - name: full_protection
+        driver_reduction: { agriculture: 0.9, cattle_pasture: 0.9, logging: 0.9, mining: 0.9 }
+
+device: cpu
+seed: 42
