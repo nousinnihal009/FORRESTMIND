@@ -43,6 +43,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="ForestMind demo prediction")
     parser.add_argument("--checkpoint", type=str, default=None, help="Optional trained checkpoint")
+    parser.add_argument("--config", type=str, default=None, help="Optional config file")
     parser.add_argument("--seed", type=int, default=123, help="Random seed for sample generation")
     parser.add_argument("--visualize", action="store_true", help="Show matplotlib plots")
     args = parser.parse_args()
@@ -58,9 +59,9 @@ def main():
     generator = SyntheticForestGenerator(seed=args.seed)
     sample = generator.generate_sample()
 
-    logger.info(f"  Patch: {sample['optical'].shape[0]} timesteps × "
-                f"{sample['optical'].shape[1]} bands × "
-                f"{sample['optical'].shape[2]}×{sample['optical'].shape[3]} pixels")
+    logger.info(f"  Patch: {sample['optical'].shape[0]} timesteps x "
+                f"{sample['optical'].shape[1]} bands x "
+                f"{sample['optical'].shape[2]}x{sample['optical'].shape[3]} pixels")
     logger.info(f"  Ground-truth health: {HEALTH_STATES[sample['health_state']]} "
                 f"({sample['health_score']:.1f}/100)")
     active = [DRIVER_CLASSES[i] for i, d in enumerate(sample['drivers']) if d > 0]
@@ -68,23 +69,31 @@ def main():
 
     # ─── Build Model ─────────────────────────────────────
     import yaml
-    config_path = Path(__file__).resolve().parent.parent / "configs" / "default.yaml"
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
-
-    # Use smaller config for demo
-    config["foundation"]["custom_vit"]["depth"] = 4
-    config["temporal"]["depth"] = 2
-
-    logger.info("Building ForestMind model...")
     from forestmind.models.forestmind_model import ForestMindModel
 
-    model = ForestMindModel(config)
+    if args.config:
+        with open(args.config) as f:
+            config = yaml.safe_load(f)
+    else:
+        config_path = Path(__file__).resolve().parent.parent / "configs" / "default.yaml"
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
 
     if args.checkpoint:
         logger.info(f"Loading checkpoint: {args.checkpoint}")
         checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        if "config" in checkpoint:
+            config = checkpoint["config"]
+            logger.info("Using config from checkpoint")
+        logger.info("Building ForestMind model...")
+        model = ForestMindModel(config)
         model.load_state_dict(checkpoint["model_state_dict"])
+    else:
+        # Use smaller config for untrained demo
+        config["foundation"]["custom_vit"]["depth"] = 4
+        config["temporal"]["depth"] = 2
+        logger.info("Building ForestMind model...")
+        model = ForestMindModel(config)
 
     # ─── Run Prediction ──────────────────────────────────
     logger.info("Running model prediction...")
@@ -136,7 +145,7 @@ def main():
 
     report = risk_engine.analyze(
         health_history=sample["health_history"],
-        health_state=model.predict(optical, sar, timestamps)["health_state"],
+        health_state=prediction["health_state"],
         health_score=prediction["health_score"],
         health_confidence=prediction["health_confidence"],
         active_drivers=prediction["active_drivers"],
