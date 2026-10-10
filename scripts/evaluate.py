@@ -32,6 +32,13 @@ def setup_logging():
 
 
 def main():
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+            sys.stderr.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(description="Evaluate ForestMind")
     parser.add_argument("--checkpoint", type=str, required=True, help="Model checkpoint path")
     parser.add_argument("--config", type=str, default="configs/default.yaml", help="Config file")
@@ -112,7 +119,7 @@ def main():
     avg_loss = total_loss / max(1, num_batches)
 
     print("\n" + "=" * 60)
-    print(f"  ForestMind Evaluation — {args.split} split")
+    print(f"  ForestMind Evaluation -- {args.split} split")
     print(f"  Checkpoint: {args.checkpoint}")
     print(f"  Epoch: {checkpoint.get('epoch', '?')}")
     print("=" * 60)
