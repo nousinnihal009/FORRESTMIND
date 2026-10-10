@@ -36,6 +36,13 @@ def load_config(config_path: str) -> dict:
 
 
 def main():
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+            sys.stderr.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(description="Train ForestMind")
     parser.add_argument("--config", type=str, default="configs/default.yaml", help="Config file path")
     parser.add_argument("--resume", type=str, default=None, help="Checkpoint to resume from")
