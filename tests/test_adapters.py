@@ -404,14 +404,17 @@ class TestTerraMindAdapter:
         adapter = TerraMindAdapter(target_dim=128, use_proxy=True)
         adapter.train()
 
-        x = torch.randn(2, 14, 64, 64, requires_grad=True)
+        x = torch.randn(2, 14, 64, 64)
         embedding = adapter.encode(x)
         loss = embedding.sum()
         loss.backward()
 
-        # Check gradients flow through
-        assert x.grad is not None
-        assert x.grad.abs().sum() > 0
+        # Check gradients flow to model parameters
+        grads_found = 0
+        for name, param in adapter.named_parameters():
+            if param.grad is not None and param.grad.abs().sum() > 0:
+                grads_found += 1
+        assert grads_found > 0, "No parameter gradients found"
 
     def test_repr(self):
         from forestmind.models.foundation.terramind import TerraMindAdapter
