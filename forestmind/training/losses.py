@@ -43,7 +43,10 @@ class HealthLoss(nn.Module):
             score_gt: (B,) ground-truth continuous score [0, 100].
         """
         ce = self.ce_loss(logits, state_gt)
-        mse = F.mse_loss(score_pred, score_gt)
+        # Scores are reported on a 0-100 scale, while the other tasks use
+        # probabilities. Normalize this term so regression does not overwhelm
+        # classification and attribution by four orders of magnitude.
+        mse = F.mse_loss(score_pred / 100.0, score_gt / 100.0)
 
         total = self.ce_weight * ce + self.mse_weight * mse
 
@@ -144,6 +147,7 @@ class TrajectoryLoss(nn.Module):
 
         if self.use_heteroscedastic and logvar_pred is not None:
             # Heteroscedastic loss: learns uncertainty
+            logvar_pred = logvar_pred.clamp(-10.0, 2.0)
             precision = torch.exp(-logvar_pred)
             hetero_loss = 0.5 * (precision * (mean_pred - trajectory_gt) ** 2 + logvar_pred).mean()
             total = self.mse_weight * hetero_loss + self.huber_weight * huber
@@ -202,6 +206,8 @@ class ForestMindLoss(nn.Module):
             Dictionary with all individual and total losses.
         """
         all_losses = {}
+        if "label_valid" in targets and not torch.as_tensor(targets["label_valid"]).all():
+            raise ValueError("Supervised loss requires observed labels, not unlabeled acquisitions")
 
         # Health loss
         health_losses = self.health_loss(
