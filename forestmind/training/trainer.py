@@ -112,7 +112,7 @@ class ForestMindTrainer:
 
         # State
         self.current_epoch = 0
-        self.best_val_score = 0.0
+        self.best_val_score = float("-inf")
         self.train_history = []
         self.val_history = []
 
@@ -147,6 +147,15 @@ class ForestMindTrainer:
             "sar": batch["sar"].to(self.device),
             "timestamps": batch["timestamps"].to(self.device),
         }
+        if "label_valid" in batch and not torch.as_tensor(batch["label_valid"]).all():
+            raise ValueError("Unlabeled satellite acquisitions cannot be used for supervised training/evaluation")
+        required = {"health_state", "health_score", "drivers", "driver_strengths", "trajectory"}
+        if not required.issubset(batch):
+            raise ValueError(f"Supervised targets are missing: {sorted(required.difference(batch))}")
+        for key in ("observation_mask", "optical_mask", "sar_mask", "quality_mask",
+                    "climate_context", "activity_context"):
+            if key in batch:
+                inputs[key] = batch[key].to(self.device)
         targets = {
             "health_state": batch["health_state"].to(self.device),
             "health_score": batch["health_score"].to(self.device),
@@ -256,7 +265,7 @@ class ForestMindTrainer:
         state = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(state["model_state_dict"])
         self.optimizer.load_state_dict(state["optimizer_state_dict"])
-        self.current_epoch = state.get("epoch", 0)
+        self.current_epoch = state.get("epoch", -1) + 1
         self.best_val_score = state.get("best_val_score", 0.0)
         self.train_history = state.get("train_history", [])
         self.val_history = state.get("val_history", [])
