@@ -260,7 +260,10 @@ class MultimodalFusion(nn.Module):
         else:
             raise ValueError(f"Unknown fusion method: {method}")
 
-    def forward(self, embedding: Tensor) -> Tensor:
+    def forward(
+        self, embedding: Tensor, climate_context: Tensor | None = None,
+        activity_context: Tensor | None = None,
+    ) -> Tensor:
         """Produce fused embedding from primary foundation model output.
         
         Args:
@@ -269,6 +272,14 @@ class MultimodalFusion(nn.Module):
         Returns:
             (B, D) fused embedding enriched with context.
         """
-        climate_ctx = self.climate_encoder(embedding)
-        activity_ctx = self.activity_encoder(embedding)
-        return self.fusion(embedding, [climate_ctx, activity_ctx])
+        if climate_context is None and activity_context is None:
+            return embedding
+        # Context must be independently supplied; transformed image features
+        # are not observations of climate or human activity.
+        contexts = []
+        for context, encoder in ((climate_context, self.climate_encoder),
+                                 (activity_context, self.activity_encoder)):
+            if context is not None and context.shape != embedding.shape:
+                raise ValueError("Context streams must match the primary (B, D) embedding")
+            contexts.append(encoder(context) if context is not None else torch.zeros_like(embedding))
+        return self.fusion(embedding, contexts)
