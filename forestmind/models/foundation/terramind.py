@@ -69,7 +69,7 @@ class TerraMindAdapter(FoundationModelBase):
 
     def __init__(
         self,
-        model_name: str = "terramind-base",
+        model_name: str = "terramind_v1_base",
         target_dim: int = 256,
         freeze_backbone: bool = True,
         optical_channels: int = 12,
@@ -88,8 +88,14 @@ class TerraMindAdapter(FoundationModelBase):
         else:
             loaded = False
 
-        if not loaded:
+        if use_proxy:
             self._init_proxy(target_dim, optical_channels, sar_channels)
+        elif not loaded:
+            raise RuntimeError(
+                f"Could not load pretrained TerraMind '{model_name}'. No proxy was substituted. "
+                "Install terratorch and use a supported registry model, or explicitly set "
+                "use_proxy=true for an untrained development baseline."
+            )
 
     def _try_load_checkpoint(
         self, model_name: str, target_dim: int, freeze_backbone: bool
@@ -98,30 +104,18 @@ class TerraMindAdapter(FoundationModelBase):
 
         Returns True if successful, False if fallback to proxy needed.
         """
-        if not _check_transformers_available():
-            return False
-
         try:
-            from transformers import AutoModel, AutoConfig
+            from terratorch.registry import BACKBONE_REGISTRY
 
             logger.info(f"Attempting to load TerraMind: {model_name}")
 
-            config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-            self.backbone = AutoModel.from_pretrained(
-                model_name, trust_remote_code=True, config=config,
+            self.backbone = BACKBONE_REGISTRY.build(
+                model_name, pretrained=True, modalities=["S2L2A", "S1GRD"],
+                merge_method="mean",
             )
 
-            self._native_dim = getattr(config, "hidden_size", 768)
+            self._native_dim = self.backbone.embed_dim
             self._is_proxy = False
-
-            # Channel adapters for our input format
-            self.optical_adapter = nn.Conv2d(
-                self._optical_channels, 3, kernel_size=1, bias=False,
-            )
-            self.sar_adapter = nn.Conv2d(
-                self._sar_channels, 1, kernel_size=1, bias=False,
-            )
-            self.input_merger = nn.Conv2d(4, 3, kernel_size=1, bias=False)
 
             # Projection head
             self.projection = nn.Sequential(
@@ -237,6 +231,8 @@ class TerraMindAdapter(FoundationModelBase):
         Returns:
             (B, D) embedding vector.
         """
+        if x.ndim != 4 or x.shape[1] != self._optical_channels + self._sar_channels:
+            raise ValueError("TerraMind expects optical and SAR channels in a 4D tensor")
         # Split into modalities
         optical = x[:, :self._optical_channels]
         sar = x[:, self._optical_channels:self._optical_channels + self._sar_channels]
@@ -276,28 +272,12 @@ class TerraMindAdapter(FoundationModelBase):
 
     def _encode_full(self, optical: Tensor, sar: Tensor) -> Tensor:
         """Full mode encoding with actual TerraMind backbone."""
-        # Adapt channels for TerraMind's expected input
-        opt_adapted = self.optical_adapter(optical)  # (B, 3, H, W)
-        sar_adapted = self.sar_adapter(sar)            # (B, 1, H, W)
-
-        # Merge modalities
-        combined = torch.cat([opt_adapted, sar_adapted], dim=1)  # (B, 4, H, W)
-        merged = self.input_merger(combined)  # (B, 3, H, W)
-
-        # Forward through backbone
-        outputs = self.backbone(merged)
-
-        # Extract embedding
-        if hasattr(outputs, "last_hidden_state"):
-            embedding = outputs.last_hidden_state[:, 0]
-        elif hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
-            embedding = outputs.pooler_output
-        elif isinstance(outputs, Tensor):
-            embedding = outputs.mean(dim=1) if outputs.dim() == 3 else outputs
-        else:
-            embedding = outputs[0].mean(dim=1) if isinstance(outputs, tuple) else outputs
-
-        return self.projection(embedding)
+        # Inputs must already use the checkpoint's per-modality normalization.
+        outputs = self.backbone({"S2L2A": optical, "S1GRD": sar})
+        if not isinstance(outputs, (list, tuple)) or outputs[-1].ndim != 3:
+            raise RuntimeError("Unexpected TerraTorch TerraMind output: expected layer token tensors")
+        # TerraMind has no CLS token; pool the final layer's spatial tokens.
+        return self.projection(outputs[-1].mean(dim=1))
 
     @property
     def embedding_dim(self) -> int:
@@ -305,7 +285,7 @@ class TerraMindAdapter(FoundationModelBase):
 
     @property
     def supports_modalities(self) -> list[str]:
-        return ["optical", "sar", "dem"]
+        return ["optical", "sar"]
 
     @property
     def is_proxy_mode(self) -> bool:
