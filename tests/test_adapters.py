@@ -567,7 +567,7 @@ class TestPhase2Integration:
 
         config = {
             "foundation": {"name": "prithvi", "embedding_dim": 128,
-                           "prithvi": {"model_name": "test", "freeze": False}},
+                           "prithvi": {"model_name": "test", "freeze": False, "use_proxy": True}},
             "fusion": {"method": "cross_attention", "num_heads": 2, "num_layers": 1, "dropout": 0.0},
             "temporal": {"depth": 2, "num_heads": 4, "dim_feedforward": 256,
                          "dropout": 0.0, "max_seq_len": 24, "use_continuous_pe": True},
@@ -595,7 +595,7 @@ class TestPhase2Integration:
 
         config = {
             "foundation": {"name": "terramind", "embedding_dim": 128,
-                           "terramind": {"model_name": "test", "freeze": False}},
+                           "terramind": {"model_name": "test", "freeze": False, "use_proxy": True}},
             "fusion": {"method": "cross_attention", "num_heads": 2, "num_layers": 1, "dropout": 0.0},
             "temporal": {"depth": 2, "num_heads": 4, "dim_feedforward": 256,
                          "dropout": 0.0, "max_seq_len": 24, "use_continuous_pe": True},
