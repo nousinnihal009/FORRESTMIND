@@ -67,7 +67,22 @@ class Store:
     def save_analysis(self, analysis: dict, job: dict):
         with self.connection() as connection:
             self._save_analysis(connection, analysis)
-            connection.execute("INSERT INTO jobs (id,payload) VALUES (?,?)", (job["id"], self._json(job)))
+            connection.execute("INSERT OR REPLACE INTO jobs (id,payload) VALUES (?,?)", (job["id"], self._json(job)))
+
+    def save_job(self, job: dict):
+        with self.connection() as connection:
+            connection.execute("INSERT OR REPLACE INTO jobs (id,payload) VALUES (?,?)", (job["id"], self._json(job)))
+
+    def recover_jobs(self, timestamp: str):
+        """Single-process service: incomplete jobs cannot survive a process restart."""
+        with self.connection() as connection:
+            rows = connection.execute("SELECT id,payload FROM jobs").fetchall()
+            for row in rows:
+                job = json.loads(row["payload"])
+                if job["status"] in {"pending", "running"}:
+                    job.update({"status": "failed", "completed_at": timestamp,
+                                "error": "The local service restarted before this analysis completed. Run the analysis again."})
+                    connection.execute("UPDATE jobs SET payload=? WHERE id=?", (self._json(job), row["id"]))
 
     def analysis(self, region_id: str) -> dict | None:
         with self.connection() as connection:
