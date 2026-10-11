@@ -17,6 +17,10 @@ ENV/
 # Data and Checkpoints
 checkpoints/
 data/synthetic/
+data/*.db
+data/*.db-shm
+data/*.db-wal
+artifacts/
 
 # OS artifacts
 .DS_Store
