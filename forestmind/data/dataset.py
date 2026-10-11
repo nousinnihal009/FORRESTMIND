@@ -141,96 +141,79 @@ class ForestMindDataset(Dataset):
         return sample
 
     def _load_npz(self, path: Path) -> dict:
-        """Load a sample from a .npz file.
+        """Load numeric data only. Unlabeled acquisitions remain unlabeled."""
+        with np.load(path, allow_pickle=False) as data:
+            if "data" in data and "optical" not in data:
+                patch, sensor, timestamp, quality = _read_observation(data)
+                return _assemble_observations([(patch, sensor, timestamp, quality)],
+                                              self.config.get("time_steps", 12))
+            sample = {key: data[key].copy() for key in data.files}
+        for key, cast in (("health_state", int), ("health_score", float)):
+            if key in sample:
+                sample[key] = cast(sample[key])
+        return sample
 
-        Handles both synthetic-format .npz files (with all labels) and
-        real-data .npz files (which may lack labels and need synthetic fill).
-        """
-        data = np.load(path, allow_pickle=True)
 
-        # Check if this is a real-data adapter cache file (has 'data' key)
-        if "data" in data and "optical" not in data:
-            return self._load_real_data_npz(data, path)
+def _read_observation(data):
+    patch = np.asarray(data["data"], dtype=np.float32)
+    sensor = str(data["sensor"])
+    timestamp = float(data["timestamp"])
+    if patch.ndim != 3 or not np.isfinite(timestamp):
+        raise ValueError("Cached observations need (C, H, W) data and a finite UTC timestamp")
+    quality = np.asarray(data.get("quality_mask", np.ones(patch.shape[-2:], dtype=bool)), dtype=bool)
+    if quality.shape != patch.shape[-2:]:
+        raise ValueError("Cached quality mask must match the observation grid")
+    if sensor in ("landsat", "landsat8", "landsat9"):
+        from forestmind.data.adapters.harmonize import BandHarmonizer
+        patch = BandHarmonizer(interpolate_red_edge=False).harmonize_landsat(patch)
+    expected = 2 if sensor == "sentinel1" else 12
+    if patch.shape[0] != expected:
+        raise ValueError(f"{sensor} requires {expected} bands, got {patch.shape[0]}")
+    quality = quality & np.isfinite(patch).all(axis=0)
+    patch = np.where(quality[None], patch, 0).astype(np.float32)
+    return patch, sensor, timestamp, quality
 
-        # Standard synthetic / pre-generated format
-        return {
-            "optical": data["optical"],
-            "sar": data["sar"],
-            "timestamps": data["timestamps"],
-            "health_state": int(data["health_state"]),
-            "health_score": float(data["health_score"]),
-            "drivers": data["drivers"],
-            "driver_strengths": data["driver_strengths"],
-            "trajectory": data["trajectory"],
-            "health_history": data["health_history"],
-        }
 
-    def _load_real_data_npz(self, data: np.lib.npyio.NpzFile, path: Path) -> dict:
-        """Load a real-data adapter cache file and format for the model.
-
-        Real-data .npz files from adapters contain raw sensor patches
-        but lack labels (health state, drivers, etc.). We provide
-        placeholder labels so the data can flow through the pipeline
-        for inference (not training).
-
-        For training on real data, labels should be provided via external
-        annotation files (GFC, GLAD, MapBiomas).
-        """
-        patch = data["data"]  # (C, H, W) for single timestep
-        sensor = str(data.get("sensor", "unknown"))
-
-        # Determine if this is optical or SAR
-        config = self.config
-        num_bands = config.get("num_bands", 12)
-        sar_channels = config.get("sar_channels", 2)
-        time_steps = config.get("time_steps", 12)
-        patch_size = patch.shape[-1] if patch.ndim >= 2 else config.get("patch_size", 128)
-
-        if sensor in ("sentinel1",):
-            # SAR-only: create placeholder optical
-            optical = np.zeros((time_steps, num_bands, patch_size, patch_size), dtype=np.float32)
-            sar = np.broadcast_to(
-                patch[np.newaxis],  # (1, 2, H, W)
-                (time_steps, sar_channels, patch_size, patch_size),
-            ).copy()
+def _assemble_observations(observations, time_steps, sar_observations=None,
+                           sar_max_age_days=12.0):
+    """Pad with masked zeros and match SAR only from the same date or past."""
+    if time_steps < 1 or not observations:
+        raise ValueError("At least one observation and positive time_steps are required")
+    observations = sorted(observations, key=lambda item: item[2])[-time_steps:]
+    height, width = observations[0][0].shape[-2:]
+    optical = np.zeros((time_steps, 12, height, width), dtype=np.float32)
+    sar = np.zeros((time_steps, 2, height, width), dtype=np.float32)
+    optical_mask = np.zeros(time_steps, dtype=bool)
+    sar_mask = np.zeros(time_steps, dtype=bool)
+    quality = np.zeros((time_steps, height, width), dtype=bool)
+    timestamps = np.full(time_steps, observations[-1][2], dtype=np.float64)
+    for index, (patch, sensor, timestamp, valid) in enumerate(observations):
+        if patch.shape[-2:] != (height, width):
+            raise ValueError("All observations must share a spatial grid")
+        timestamps[index] = timestamp
+        if sensor == "sentinel1":
+            sar[index] = patch
+            sar_mask[index] = valid.any()
         else:
-            # Optical data: may need harmonization for Landsat
-            if sensor in ("landsat", "landsat8", "landsat9") and patch.shape[0] == 7:
-                from forestmind.data.adapters.harmonize import BandHarmonizer
-                harmonizer = BandHarmonizer()
-                patch = harmonizer.harmonize_landsat(patch)
-
-            # Ensure we have 12 bands
-            if patch.shape[0] < num_bands:
-                # Pad with zeros
-                pad = np.zeros((num_bands - patch.shape[0], patch_size, patch_size), dtype=np.float32)
-                patch = np.concatenate([patch, pad], axis=0)
-            elif patch.shape[0] > num_bands:
-                patch = patch[:num_bands]
-
-            optical = np.broadcast_to(
-                patch[np.newaxis],
-                (time_steps, num_bands, patch_size, patch_size),
-            ).copy()
-            sar = np.zeros((time_steps, sar_channels, patch_size, patch_size), dtype=np.float32)
-
-        # Generate timestamps (monthly spacing as placeholder)
-        timestamps = np.arange(time_steps, dtype=np.float32) * 30.0
-
-        # Placeholder labels for inference mode
-        health_history = np.linspace(0.5, 0.5, time_steps, dtype=np.float32)
-
-        return {
-            "optical": optical,
-            "sar": sar,
-            "timestamps": timestamps,
-            "health_state": 0,  # placeholder — Healthy
-            "health_score": 50.0,  # placeholder
-            "drivers": np.zeros(8, dtype=np.float32),
-            "driver_strengths": np.zeros(8, dtype=np.float32),
-            "trajectory": np.full(5, 0.5, dtype=np.float32),
-            "health_history": health_history,
-        }
+            optical[index] = patch
+            optical_mask[index] = valid.any()
+            quality[index] = valid
+            # Indexing SAR by list position incorrectly pairs unrelated dates.
+            candidates = [item for item in (sar_observations or [])
+                          if 0 <= timestamp - item[2] <= sar_max_age_days * 86400]
+            if candidates:
+                match = max(candidates, key=lambda item: item[2])
+                if match[0].shape != (2, height, width):
+                    raise ValueError("SAR and optical grids must match before temporal alignment")
+                sar[index] = match[0]
+                sar_mask[index] = match[3].any()
+    return {
+        "optical": optical, "sar": sar,
+        "timestamps": ((timestamps - timestamps[0]) / 86400).astype(np.float32),
+        "observation_mask": optical_mask | sar_mask,
+        "optical_mask": optical_mask, "sar_mask": sar_mask,
+        "quality_mask": quality, "label_valid": False,
+    }
 
 
 class RealDataTimeSeriesDataset(Dataset):
@@ -292,105 +275,48 @@ class RealDataTimeSeriesDataset(Dataset):
         )
 
     def _group_by_location(self, files: list[Path]) -> dict[str, list[Path]]:
-        """Group cache files by bbox hash (location identifier)."""
+        """Group by actual footprint, then order by acquisition time."""
         groups = {}
-        for f in files:
-            # Filename format: {scene_id}_{bbox_hash}.npz
-            parts = f.stem.rsplit("_", 1)
-            if len(parts) == 2:
-                bbox_hash = parts[1]
-            else:
-                bbox_hash = "unknown"
-
-            if bbox_hash not in groups:
-                groups[bbox_hash] = []
-            groups[bbox_hash].append(f)
-
-        # Sort each group by filename (which includes datetime)
-        for key in groups:
-            groups[key].sort()
-
+        timestamps = {}
+        for path in files:
+            with np.load(path, allow_pickle=False) as data:
+                bbox_keys = ["bbox_west", "bbox_south", "bbox_east", "bbox_north"]
+                if all(key in data for key in bbox_keys):
+                    location = ",".join(f"{float(data[key]):.6f}" for key in bbox_keys)
+                else:
+                    parts = path.stem.rsplit("_", 1)
+                    if len(parts) != 2:
+                        raise ValueError(f"Cache {path} has no geographic location metadata")
+                    location = parts[-1]
+                timestamps[path] = float(data["timestamp"])
+            groups.setdefault(location, []).append(path)
+        for paths in groups.values():
+            paths.sort(key=lambda path: timestamps[path])
         return groups
 
     def _load_labels(self, label_file: str | Path) -> dict:
-        """Load label annotations from file. Placeholder for future integration."""
-        logger.info(f"Label loading from {label_file} — not yet implemented")
-        return {}
+        raise NotImplementedError(
+            "External annotation ingestion is not implemented. Supply labeled sequence NPZ "
+            "files in explicit train/val/test directories for supervised learning."
+        )
 
     def __len__(self) -> int:
         return len(self.location_groups)
 
     def __getitem__(self, idx: int) -> dict:
-        location_key = list(self.location_groups.keys())[idx]
-        optical_paths = self.location_groups[location_key]
-
-        # Load optical patches
-        optical_patches = []
-        timestamps = []
-        for path in optical_paths[:self.time_steps]:
-            npz = np.load(path, allow_pickle=True)
-            patch = npz["data"].astype(np.float32)
-
-            # Harmonize if needed
-            sensor = str(npz.get("sensor", "sentinel2"))
-            if self.harmonize and sensor in ("landsat", "landsat8", "landsat9"):
-                from forestmind.data.adapters.harmonize import BandHarmonizer
-                harmonizer = BandHarmonizer()
-                patch = harmonizer.harmonize_landsat(patch)
-
-            # Ensure 12 bands
-            if patch.shape[0] < 12:
-                pad = np.zeros((12 - patch.shape[0], *patch.shape[1:]), dtype=np.float32)
-                patch = np.concatenate([patch, pad], axis=0)
-
-            optical_patches.append(patch[:12])
-            timestamps.append(float(npz["timestamp"]))
-
-        # Pad if fewer than time_steps
-        while len(optical_patches) < self.time_steps:
-            optical_patches.append(optical_patches[-1].copy())
-            timestamps.append(timestamps[-1] + 30.0 * 86400)
-
-        # Stack: (T, 12, H, W)
-        optical = np.stack(optical_patches[:self.time_steps], axis=0)
-
-        # Convert timestamps to day offsets from first observation
-        ts_array = np.array(timestamps[:self.time_steps], dtype=np.float64)
-        ts_days = ((ts_array - ts_array[0]) / 86400.0).astype(np.float32)
-
-        # Load SAR if available
-        sar_patches = []
-        if location_key in self.sar_files:
-            for path in self.sar_files[location_key][:self.time_steps]:
-                npz = np.load(path, allow_pickle=True)
-                sar_patches.append(npz["data"].astype(np.float32))
-
-        # Pad / create placeholder SAR
-        if sar_patches:
-            while len(sar_patches) < self.time_steps:
-                sar_patches.append(sar_patches[-1].copy())
-            sar = np.stack(sar_patches[:self.time_steps], axis=0)
-        else:
-            sar = np.zeros((self.time_steps, 2, self.patch_size, self.patch_size), dtype=np.float32)
-
-        # Placeholder labels (for inference)
-        health_history = np.linspace(0.5, 0.5, self.time_steps, dtype=np.float32)
-
-        sample = {
-            "optical": optical,
-            "sar": sar,
-            "timestamps": ts_days,
-            "health_state": 0,
-            "health_score": 50.0,
-            "drivers": np.zeros(8, dtype=np.float32),
-            "driver_strengths": np.zeros(8, dtype=np.float32),
-            "trajectory": np.full(5, 0.5, dtype=np.float32),
-            "health_history": health_history,
-        }
-
+        location = list(self.location_groups)[idx]
+        def read(paths):
+            observations = []
+            for path in paths:
+                with np.load(path, allow_pickle=False) as data:
+                    observations.append(_read_observation(data))
+            return observations
+        sample = _assemble_observations(
+            read(self.location_groups[location]), self.time_steps,
+            read(self.sar_files.get(location, [])),
+        )
         if self.transform is not None:
             sample = self.transform(sample)
-
         return sample
 
 
@@ -416,14 +342,21 @@ def create_dataloaders(
 
     source = data_cfg.get("source", "synthetic")
     source_p = Path(source)
-    if source_p.is_dir() and (source_p / "train").is_dir():
-        train_source = str(source_p / "train")
-        val_source = str(source_p / "val") if (source_p / "val").is_dir() else str(source_p)
-        test_source = str(source_p / "test") if (source_p / "test").is_dir() else str(source_p)
+    if source == "synthetic":
+        train_source = val_source = test_source = source
+    elif source in REAL_DATA_SOURCES:
+        raise ValueError(
+            "Raw satellite caches have no supervised targets. Prepare labeled sequence NPZ "
+            "files in geographically independent train/val/test directories first."
+        )
     else:
-        train_source = source
-        val_source = source
-        test_source = source
+        split_paths = [source_p / split for split in ("train", "val", "test")]
+        if not all(path.is_dir() for path in split_paths):
+            raise ValueError(
+                "Disk datasets require explicit train/val/test directories; reusing the same "
+                "files across splits would leak evaluation data. Split by geography and time."
+            )
+        train_source, val_source, test_source = map(str, split_paths)
 
     train_dataset = ForestMindDataset(
         source=train_source,
@@ -455,7 +388,7 @@ def create_dataloaders(
         shuffle=True,
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
-        drop_last=True,
+        drop_last=False,
     )
 
     val_loader = torch.utils.data.DataLoader(
