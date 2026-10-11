@@ -110,13 +110,15 @@ class TemporalTransformerBlock(nn.Module):
         mask = torch.triu(torch.ones(seq_len, seq_len, device=device), diagonal=1)
         return mask.bool()
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, observation_mask: Tensor | None = None) -> Tensor:
         # Self-attention with optional causal mask
         h = self.norm1(x)
         attn_mask = None
         if self.causal:
             attn_mask = self._get_causal_mask(x.shape[1], x.device)
-        attn_out, _ = self.attn(h, h, h, attn_mask=attn_mask)
+        padding_mask = ~observation_mask if observation_mask is not None else None
+        attn_out, _ = self.attn(h, h, h, attn_mask=attn_mask, key_padding_mask=padding_mask,
+                                need_weights=False)
         x = x + attn_out
 
         # Feedforward
@@ -185,6 +187,7 @@ class TemporalTransformer(nn.Module):
         self,
         embeddings: Tensor,
         timestamps: Tensor | None = None,
+        observation_mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         """Process temporal sequence of embeddings.
         
@@ -198,6 +201,24 @@ class TemporalTransformer(nn.Module):
             summary: (B, D) summary embedding from last timestep.
         """
         B, T, D = embeddings.shape
+        if T == 0:
+            raise ValueError("Temporal sequence cannot be empty")
+        if observation_mask is None:
+            observation_mask = torch.ones(B, T, device=embeddings.device, dtype=torch.bool)
+        if observation_mask.shape != (B, T) or not observation_mask.any(dim=1).all():
+            raise ValueError("observation_mask must be (B, T) with at least one observation per sample")
+        observation_mask = observation_mask.bool()
+        if timestamps is not None:
+            if timestamps.shape != (B, T):
+                raise ValueError("timestamps must have shape (B, T)")
+            if not torch.isfinite(timestamps[observation_mask]).all():
+                raise ValueError("Observed timestamps must be finite")
+            for row, mask in zip(timestamps, observation_mask):
+                observed = row[mask]
+                if (observed[1:] < observed[:-1]).any():
+                    raise ValueError("Observed timestamps must be chronological")
+            timestamps = timestamps.masked_fill(~observation_mask, 0).float()
+        embeddings = embeddings.masked_fill(~observation_mask[..., None], 0)
 
         # Add positional encoding
         if self.use_continuous_pe:
@@ -214,11 +235,14 @@ class TemporalTransformer(nn.Module):
 
         # Transformer blocks
         for block in self.blocks:
-            x = block(x)
+            x = block(x, observation_mask)
+            x = x.masked_fill(~observation_mask[..., None], 0)
 
         x = self.output_norm(x)
 
         # Summary: last timestep embedding
-        summary = x[:, -1]  # (B, D)
+        last_observed = torch.arange(T, device=x.device).expand(B, -1).masked_fill(
+            ~observation_mask, -1).max(dim=1).values
+        summary = x[torch.arange(B, device=x.device), last_observed]
 
         return x, summary
