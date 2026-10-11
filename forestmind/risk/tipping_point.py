@@ -1,19 +1,8 @@
-"""
-Tipping-Point Estimator for ForestMind.
+"""Transparent condition screening with explicit gaps in ecological evidence.
 
-Combines multiple ecological indicators into a unified tipping-point
-risk score. Goes beyond Critical Slowing Down by incorporating:
-  - Vegetation resilience metrics
-  - Spatial fragmentation analysis
-  - Drought sensitivity assessment
-  - Degradation momentum
-
-The output is a continuous risk score [0, 1] with interpretive categories:
-  0.0-0.2: Low risk — ecosystem appears resilient
-  0.2-0.4: Moderate risk — some warning signs
-  0.4-0.6: Elevated risk — multiple indicators active
-  0.6-0.8: High risk — approaching potential tipping point
-  0.8-1.0: Critical risk — imminent or ongoing regime shift
+The historical API name is retained for compatibility. This module cannot infer
+irreversible transitions, spatial fragmentation, drought causation, calibrated
+probabilities or tipping dates from a one-dimensional health trajectory.
 """
 
 from __future__ import annotations
@@ -22,298 +11,179 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from forestmind.risk.critical_slowing import CSDResult, analyze_critical_slowing_down
+from forestmind.risk.critical_slowing import (
+    CSDResult, _health_array, _time_axis, analyze_critical_slowing_down,
+)
 
 
 @dataclass
 class TippingPointAssessment:
-    """Comprehensive tipping-point risk assessment."""
-    # Risk score
-    risk_score: float                    # Combined risk [0, 1]
-    risk_category: str                   # Human-readable category
-    
-    # Component scores
-    csd_score: float                     # Critical slowing down [0, 1]
-    resilience_score: float              # Vegetation resilience [0, 1] (1 = resilient)
-    fragmentation_score: float           # Spatial fragmentation [0, 1] (1 = fragmented)
-    momentum_score: float                # Degradation momentum [0, 1] (1 = accelerating)
-    drought_sensitivity_score: float     # Drought sensitivity [0, 1] (1 = sensitive)
-    
-    # Detailed indicators
+    """Uncalibrated screening index, not a probability of ecosystem collapse."""
+
+    risk_score: float | None
+    risk_category: str
+    csd_score: float | None
+    resilience_score: float | None
+    fragmentation_score: float | None
+    momentum_score: float | None
+    drought_sensitivity_score: float | None
     csd_result: CSDResult | None = None
-    time_to_tipping: float | None = None  # Estimated days until critical threshold
-    confidence: float = 0.0               # Confidence in the assessment [0, 1]
-    
-    # Contributing factors
+    time_to_tipping: float | None = None
+    confidence: float | None = None
     contributing_factors: list[str] = field(default_factory=list)
+    calibration_status: str = "uncalibrated_heuristic"
+    limitations: list[str] = field(default_factory=list)
+    data_quality: dict = field(default_factory=dict)
+    component_weights: dict[str, float] = field(default_factory=dict)
 
 
-def _compute_resilience(health_series: np.ndarray) -> float:
-    """Estimate vegetation resilience from health trajectory.
-    
-    Resilience is measured by how quickly the system recovers from
-    negative perturbations. Higher values = more resilient.
-    """
+def _compute_resilience(health_series: np.ndarray) -> float | None:
+    """Immediate rebound proxy after observed dips; not ecological resilience."""
     if len(health_series) < 4:
-        return 0.5
-
-    # Find recovery events: dips followed by partial recovery
+        return None
     diffs = np.diff(health_series)
-    recoveries = []
-
-    for i in range(len(diffs) - 1):
-        if diffs[i] < -0.02:  # significant dip
-            if diffs[i + 1] > 0:  # followed by recovery
-                recovery_ratio = min(1.0, abs(diffs[i + 1]) / abs(diffs[i]))
-                recoveries.append(recovery_ratio)
-
-    if not recoveries:
-        # No perturbation events observed — use stability as proxy
-        stability = 1.0 - np.std(health_series) * 5  # low variance = stable
-        return float(np.clip(stability, 0.0, 1.0))
-
-    return float(np.clip(np.mean(recoveries), 0.0, 1.0))
+    rebounds = []
+    for before, after in zip(diffs[:-1], diffs[1:]):
+        if np.isfinite(before) and np.isfinite(after) and before < -0.02:
+            rebounds.append(float(np.clip(after / abs(before), 0, 1)))
+    return float(np.mean(rebounds)) if rebounds else None
 
 
-def _compute_fragmentation(health_series: np.ndarray) -> float:
-    """Estimate spatial fragmentation from temporal health indicators.
-    
-    In a full system, this would use spatial data. Here we use temporal
-    variability as a proxy — high variability suggests patchy, fragmented
-    ecosystem state.
-    """
-    if len(health_series) < 3:
-        return 0.0
-
-    # Coefficient of variation as fragmentation proxy
-    mean_h = np.mean(health_series)
-    if mean_h < 0.01:
-        return 1.0  # fully degraded
-
-    cv = np.std(health_series) / mean_h
-    # High CV → patchy → fragmented
-    fragmentation = float(np.clip(cv * 3, 0.0, 1.0))
-    return fragmentation
-
-
-def _compute_momentum(health_series: np.ndarray) -> float:
-    """Compute degradation momentum — is degradation accelerating?
-    
-    Fits a quadratic to the health trajectory. Negative second derivative
-    means the decline is accelerating (concave down with negative slope).
-    """
-    n = len(health_series)
-    if n < 4:
-        return 0.0
-
-    x = np.arange(n, dtype=np.float64)
-    coeffs = np.polyfit(x, health_series, deg=2)
-    # coeffs[0] = quadratic term, coeffs[1] = linear term
-
-    # If quadratic is negative AND linear is negative → accelerating decline
-    if coeffs[0] < 0 and coeffs[1] < 0:
-        # Normalize acceleration to [0, 1]
-        acceleration = abs(coeffs[0]) * n * n  # scale by sequence length
-        return float(np.clip(acceleration * 10, 0.0, 1.0))
-    elif coeffs[1] < 0:
-        # Linear decline but not accelerating
-        decline_rate = abs(coeffs[1]) * n
-        return float(np.clip(decline_rate * 2, 0.0, 0.5))
-    else:
-        return 0.0  # improving or stable
+def _compute_momentum(health_series: np.ndarray, time_axis: np.ndarray | None = None) -> float | None:
+    """Magnitude of fitted decline across the observed span, with gaps retained."""
+    valid = np.isfinite(health_series)
+    if valid.sum() < 4:
+        return None
+    axis = np.arange(len(health_series), dtype=float) if time_axis is None else time_axis
+    x = axis[valid]
+    x = (x - x[0]) / (x[-1] - x[0])
+    slope = np.polyfit(x, health_series[valid], 1)[0]
+    return float(np.clip(-slope, 0, 1))
 
 
 def _compute_drought_sensitivity(
-    health_series: np.ndarray,
-    drought_indices: list[int] | None = None,
-) -> float:
-    """Estimate how sensitive the ecosystem is to drought events.
-    
-    If drought indices are provided, measures the health impact during
-    those periods. Otherwise estimates from general variability patterns.
-    """
-    if len(health_series) < 4:
-        return 0.0
-
-    if drought_indices and len(drought_indices) > 0:
-        # Measure health drop during drought events
-        sensitivities = []
-        for idx in drought_indices:
-            if 0 < idx < len(health_series):
-                pre_drought = health_series[max(0, idx - 2): idx].mean()
-                during_drought = health_series[idx]
-                if pre_drought > 0.01:
-                    sensitivity = max(0, (pre_drought - during_drought) / pre_drought)
-                    sensitivities.append(sensitivity)
-        if sensitivities:
-            return float(np.clip(np.mean(sensitivities) * 3, 0.0, 1.0))
-
-    # Proxy: sensitivity from negative excursions
-    diffs = np.diff(health_series)
-    negative_diffs = diffs[diffs < 0]
-    if len(negative_diffs) == 0:
-        return 0.0
-
-    avg_drop = abs(np.mean(negative_diffs))
-    max_drop = abs(np.min(negative_diffs))
-
-    sensitivity = avg_drop * 5 + max_drop * 2
-    return float(np.clip(sensitivity, 0.0, 1.0))
-
-
-def _estimate_time_to_tipping(
-    health_series: np.ndarray,
-    tipping_threshold: float = 0.3,
-    days_per_step: float = 30.0,
+    health_series: np.ndarray, drought_indices: list[int] | None = None,
 ) -> float | None:
-    """Estimate time (in days) until health drops below tipping threshold.
-    
-    Uses quadratic extrapolation from the observed trajectory.
-    Returns None if the ecosystem is above threshold and stable.
-    """
-    current_health = health_series[-1]
-    if current_health <= tipping_threshold:
-        return 0.0  # already below threshold
-
-    n = len(health_series)
-    if n < 3:
+    """Observed drop coinciding with supplied drought events, without attribution."""
+    if drought_indices is None:
         return None
-
-    x = np.arange(n, dtype=np.float64)
-    coeffs = np.polyfit(x, health_series, deg=2)
-
-    # Find when polynomial crosses the threshold
-    # coeffs[0]*t^2 + coeffs[1]*t + coeffs[2] = threshold
-    a, b, c = coeffs[0], coeffs[1], coeffs[2] - tipping_threshold
-    discriminant = b ** 2 - 4 * a * c
-
-    if discriminant < 0:
-        return None  # no crossing
-
-    if a == 0:
-        if b == 0:
-            return None
-        t_cross = -c / b
-    else:
-        sqrt_disc = np.sqrt(discriminant)
-        t1 = (-b + sqrt_disc) / (2 * a)
-        t2 = (-b - sqrt_disc) / (2 * a)
-        # Take the future crossing (> current position)
-        future_crossings = [t for t in [t1, t2] if t > n - 1]
-        if not future_crossings:
-            return None
-        t_cross = min(future_crossings)
-
-    steps_until = t_cross - (n - 1)
-    if steps_until <= 0:
-        return 0.0
-
-    return float(steps_until * days_per_step)
+    drops = []
+    for index in drought_indices:
+        if not isinstance(index, (int, np.integer)) or not 0 <= index < len(health_series):
+            raise ValueError("drought_indices must contain valid integer observation indices")
+        if index == 0:
+            continue
+        before = health_series[max(0, index - 2):index]
+        before = before[np.isfinite(before)]
+        during = health_series[index]
+        if len(before) and np.isfinite(during) and before.mean() > 0.01:
+            drops.append(float(np.clip((before.mean() - during) / before.mean(), 0, 1)))
+    return float(np.mean(drops)) if drops else None
 
 
 def assess_tipping_point(
     health_series: np.ndarray,
     config: dict | None = None,
+    *,
+    timestamps: np.ndarray | list | None = None,
+    season_period: int | None = None,
 ) -> TippingPointAssessment:
-    """Perform comprehensive tipping-point risk assessment.
-    
-    Args:
-        health_series: (T,) array of health scores [0, 1] over time.
-        config: Risk engine configuration.
-        
-    Returns:
-        TippingPointAssessment with risk score and detailed indicators.
+    """Screen health observations while leaving unsupported evidence unavailable.
+
+    Optional config ``fragmentation_score`` must come from an independently
+    computed spatial metric; ``drought_indices`` must identify observed events.
+    Neither is reconstructed from generic health variability. Legacy variance
+    and autocorrelation weights map to rebound and decline proxies respectively.
     """
     config = config or {}
-    risk_weights = config.get("risk_weights", {})
-
-    # ─── Component Analysis ────────────────────────────────
-    # 1. Critical Slowing Down
-    csd_cfg = config.get("csd", {})
-    csd_result = analyze_critical_slowing_down(
-        health_series,
-        window_size=csd_cfg.get("window_size", 6),
-        ar1_threshold=csd_cfg.get("ar1_threshold", 0.8),
+    values = _health_array(health_series)
+    axis, regular = _time_axis(timestamps, len(values))
+    valid = np.isfinite(values)
+    csd_config = config.get("csd", {})
+    period = season_period if season_period is not None else csd_config.get("season_period")
+    csd = analyze_critical_slowing_down(
+        values, window_size=csd_config.get("window_size", 6),
+        ar1_threshold=csd_config.get("ar1_threshold", 0.8),
+        timestamps=timestamps, season_period=period,
     )
-
-    # 2. Vegetation resilience
-    resilience = _compute_resilience(health_series)
-
-    # 3. Spatial fragmentation
-    fragmentation = _compute_fragmentation(health_series)
-
-    # 4. Degradation momentum
-    momentum = _compute_momentum(health_series)
-
-    # 5. Drought sensitivity
-    drought_sensitivity = _compute_drought_sensitivity(health_series)
-
-    # ─── Combined Risk Score ───────────────────────────────
-    w_csd = risk_weights.get("csd", 0.25)
-    w_var = risk_weights.get("variance", 0.20)
-    w_ac = risk_weights.get("autocorrelation", 0.20)
-    w_frag = risk_weights.get("fragmentation", 0.15)
-    w_drought = risk_weights.get("drought_sensitivity", 0.20)
-
-    risk_score = (
-        w_csd * csd_result.csd_score
-        + w_var * (1.0 - resilience)  # low resilience = high risk
-        + w_ac * momentum
-        + w_frag * fragmentation
-        + w_drought * drought_sensitivity
-    )
-    risk_score = float(np.clip(risk_score, 0.0, 1.0))
-
-    # ─── Risk Category ─────────────────────────────────────
-    if risk_score < 0.2:
-        category = "Low"
-    elif risk_score < 0.4:
-        category = "Moderate"
-    elif risk_score < 0.6:
-        category = "Elevated"
-    elif risk_score < 0.8:
-        category = "High"
+    limitations = [
+        "Risk categories are screening priorities, not calibrated probabilities or evidence of irreversible change.",
+        "No validated model is available for time to tipping or assessment confidence; both remain unavailable.",
+        "Health scores may themselves be model estimates rather than field measurements.",
+    ]
+    limitations.extend(csd.limitations)
+    resilience = _compute_resilience(values)
+    if resilience is not None:
+        limitations.append("resilience_score is an immediate rebound proxy, not validated ecological resilience.")
     else:
-        category = "Critical"
-
-    # ─── Contributing Factors ──────────────────────────────
+        limitations.append("No usable perturbation/recovery observations; resilience is unavailable.")
+    momentum = _compute_momentum(values, axis)
+    if period is not None:
+        limitations.append("Decline and rebound proxies use the original series and may retain seasonal effects.")
+    fragmentation = config.get("fragmentation_score")
+    if fragmentation is not None:
+        fragmentation = float(fragmentation)
+        if not np.isfinite(fragmentation) or not 0 <= fragmentation <= 1:
+            raise ValueError("fragmentation_score must be finite and lie in [0, 1]")
+        limitations.append("Fragmentation uses a caller-supplied spatial score whose validation is external.")
+    else:
+        limitations.append("Spatial fragmentation requires a spatial forest mask and is unavailable.")
+    drought = _compute_drought_sensitivity(values, config.get("drought_indices"))
+    if drought is None:
+        limitations.append("Drought response requires observed drought-event timing and is unavailable.")
+    else:
+        limitations.append("Drought-coincident decline does not establish drought causation.")
+    components = {
+        "condition": 1 - float(values[valid][-1]) if valid.any() else None,
+        "csd": csd.csd_score if csd.status == "available" else None,
+        "resilience": 1 - resilience if resilience is not None else None,
+        "momentum": momentum,
+        "fragmentation": fragmentation,
+        "drought_sensitivity": drought,
+    }
+    weights = {"condition": 0.35, "csd": 0.15, "resilience": 0.1,
+               "momentum": 0.3, "fragmentation": 0.05, "drought_sensitivity": 0.05}
+    aliases = {"variance": "resilience", "autocorrelation": "momentum"}
+    for name, weight in config.get("risk_weights", {}).items():
+        name = aliases.get(name, name)
+        if name not in weights:
+            raise ValueError(f"Unknown risk weight: {name}")
+        weight = float(weight)
+        if not np.isfinite(weight) or weight < 0:
+            raise ValueError("risk weights must be finite and non-negative")
+        weights[name] = weight
+    available = {name: weights[name] for name, value in components.items()
+                 if value is not None and weights[name] > 0}
+    weight_sum = sum(available.values())
+    normalized = {name: weight / weight_sum for name, weight in available.items()}
+    if valid.sum() < 4 or not weight_sum:
+        score, category = None, "Insufficient data"
+        limitations.append("At least four finite health observations and one nonzero component weight are required.")
+    else:
+        score = float(sum(components[name] * weight for name, weight in normalized.items()))
+        category = next((label for threshold, label in
+                         [(0.2, "Low"), (0.4, "Moderate"), (0.6, "Elevated"), (0.8, "High")]
+                         if score < threshold), "Critical")
     factors = []
-    if csd_result.csd_score > 0.5:
-        factors.append("Critical slowing down detected")
-    if csd_result.ar1_trend > 0.3:
-        factors.append("Rising autocorrelation (slowing recovery)")
-    if csd_result.variance_trend > 0.3:
-        factors.append("Increasing variance (weakening stability)")
-    if resilience < 0.3:
-        factors.append("Low vegetation resilience")
-    if fragmentation > 0.5:
-        factors.append("High ecosystem fragmentation")
-    if momentum > 0.5:
-        factors.append("Accelerating degradation")
-    if drought_sensitivity > 0.5:
-        factors.append("High drought sensitivity")
-
-    # ─── Time to Tipping ───────────────────────────────────
-    time_to_tipping = _estimate_time_to_tipping(health_series)
-
-    # ─── Confidence ────────────────────────────────────────
-    # Higher confidence with longer time series and more indicator agreement
-    series_length_factor = min(1.0, len(health_series) / 12)
-    indicator_agreement = 1.0 - np.std([
-        csd_result.csd_score, 1 - resilience, fragmentation, momentum, drought_sensitivity
-    ])
-    confidence = float(np.clip(0.5 * series_length_factor + 0.5 * indicator_agreement, 0.0, 1.0))
-
+    if csd.is_warning:
+        factors.append("Rising persistence and variance warrant investigation; no tipping transition is established")
+    if momentum is not None and momentum > 0.1:
+        factors.append("Health observations show a declining fitted trend")
+    if resilience is not None and resilience < 0.3:
+        factors.append("Limited immediate rebound following observed health dips")
+    if fragmentation is not None and fragmentation > 0.5:
+        factors.append("Caller-supplied spatial fragmentation indicator is elevated")
+    if drought is not None and drought > 0.3:
+        factors.append("Health declines coincide with supplied drought-event observations")
     return TippingPointAssessment(
-        risk_score=risk_score,
-        risk_category=category,
-        csd_score=csd_result.csd_score,
-        resilience_score=resilience,
-        fragmentation_score=fragmentation,
-        momentum_score=momentum,
-        drought_sensitivity_score=drought_sensitivity,
-        csd_result=csd_result,
-        time_to_tipping=time_to_tipping,
-        confidence=confidence,
-        contributing_factors=factors,
+        risk_score=score, risk_category=category,
+        csd_score=components["csd"], resilience_score=resilience,
+        fragmentation_score=fragmentation, momentum_score=momentum,
+        drought_sensitivity_score=drought, csd_result=csd,
+        contributing_factors=factors, limitations=limitations,
+        data_quality={"observations": len(values), "valid_observations": int(valid.sum()),
+                      "missing_observations": int((~valid).sum()),
+                      "regular_sampling": regular if timestamps is not None else None,
+                      "csd_status": csd.status},
+        component_weights=normalized,
     )
