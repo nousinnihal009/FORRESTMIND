@@ -114,7 +114,7 @@ class TerraMindAdapter(FoundationModelBase):
                 merge_method="mean",
             )
 
-            self._native_dim = self.backbone.embed_dim
+            self._native_dim = self.backbone.out_channels[-1]
             self._is_proxy = False
 
             # Projection head
