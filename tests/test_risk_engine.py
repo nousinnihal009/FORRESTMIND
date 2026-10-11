@@ -87,14 +87,12 @@ class TestTippingPoint:
         assert isinstance(result, TippingPointAssessment)
         assert result.momentum_score > 0.1, "Declining series should have momentum"
 
-    def test_time_to_tipping_estimation(self):
-        """Should estimate time to tipping for declining trajectory."""
+    def test_time_to_tipping_is_unavailable_without_validation(self):
+        """A declining health line cannot establish an ecological tipping date."""
         series = np.linspace(0.7, 0.4, 12).astype(np.float32)
         result = assess_tipping_point(series)
 
-        # Should estimate a future tipping time (not already past)
-        if result.time_to_tipping is not None:
-            assert result.time_to_tipping >= 0
+        assert result.time_to_tipping is None
 
     def test_contributing_factors_populated(self):
         """Declining series should generate contributing factors."""
@@ -103,15 +101,17 @@ class TestTippingPoint:
         # With severe decline, should have at least one factor
         assert isinstance(result.contributing_factors, list)
 
-    def test_confidence_increases_with_length(self):
-        """Longer series should give higher confidence."""
+    def test_confidence_is_not_fabricated_from_series_length(self):
+        """Longer histories alone do not produce a calibrated probability."""
         short = np.linspace(0.9, 0.5, 5).astype(np.float32)
         long_ = np.linspace(0.9, 0.5, 20).astype(np.float32)
 
         r_short = assess_tipping_point(short)
         r_long = assess_tipping_point(long_)
 
-        assert r_long.confidence >= r_short.confidence - 0.1  # allow small tolerance
+        assert r_short.confidence is None
+        assert r_long.confidence is None
+        assert r_long.calibration_status == "uncalibrated_heuristic"
 
 
 class TestIntervention:
