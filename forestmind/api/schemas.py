@@ -95,6 +95,7 @@ class ImportRegion(StrictModel):
     country: str = Field(default="Unspecified", min_length=2, max_length=100)
     source: str = Field(default="User-provided prepared observations", min_length=2, max_length=500)
     notes: str = Field(default="", max_length=2000)
+    synthetic: bool = Field(default=False, strict=True)
     geometry: Geometry
     observations: list[Observation] = Field(min_length=1, max_length=600)
 
