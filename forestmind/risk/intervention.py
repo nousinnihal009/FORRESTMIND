@@ -1,15 +1,7 @@
-"""
-Intervention Simulator for ForestMind.
+"""Conditional conservation scenarios with explicit, user-reviewable assumptions.
 
-Simulates counterfactual trajectories under hypothetical conservation
-interventions. This is the "digital twin" component that enables
-decision support:
-
-  "If we implement a conservation corridor, what happens to forest
-   health compared to no intervention?"
-
-Each intervention is modeled as a reduction in one or more degradation
-drivers, which modifies the predicted trajectory.
+This is a sensitivity calculator. Driver scores are not causal effect estimates,
+scenario reduction factors are assumptions, and rankings are not policy advice.
 """
 
 from __future__ import annotations
@@ -19,102 +11,114 @@ from dataclasses import dataclass, field
 import numpy as np
 
 
+DRIVER_NAMES = [
+    "agriculture", "cattle_pasture", "mining", "logging",
+    "road_construction", "wildfire", "drought", "urban_expansion",
+]
+DRIVER_ALIASES = {"cattle": "cattle_pasture", "road": "road_construction", "fire": "wildfire"}
+DEFAULT_HORIZONS = [30, 180, 365, 1095, 1825]
+
+
+def resolve_horizons(horizon_days: list[int] | None, length: int) -> list[int]:
+    days = DEFAULT_HORIZONS.copy() if horizon_days is None else list(horizon_days)
+    if len(days) != length or not days:
+        raise ValueError("horizon_days must have one entry per nonempty trajectory value")
+    if any(isinstance(day, (bool, np.bool_)) or not isinstance(day, (int, np.integer))
+           or day <= 0 for day in days) or any(b <= a for a, b in zip(days, days[1:])):
+        raise ValueError("horizon_days must be positive, strictly increasing integers")
+    return [int(day) for day in days]
+
+
+def horizon_label(day: int) -> str:
+    if day == 365:
+        return "1 year"
+    if day % 365 == 0:
+        return f"{day // 365} years"
+    return f"{day} days"
+
+
+def _unit_array(values: np.ndarray, name: str) -> np.ndarray:
+    result = np.asarray(values, dtype=float)
+    if result.ndim != 1 or not len(result) or not np.all(np.isfinite(result)):
+        raise ValueError(f"{name} must be a nonempty finite one-dimensional array")
+    if np.any((result < 0) | (result > 1)):
+        raise ValueError(f"{name} must lie in [0, 1]")
+    return result
+
+
 @dataclass
 class InterventionScenario:
-    """Definition of a hypothetical intervention."""
+    """Assumed driver attenuation and an arbitrary relative cost, not measured effects."""
+
     name: str
     description: str
-    driver_reduction: dict[str, float]  # driver_name → reduction factor [0, 1]
-    cost_relative: float = 1.0          # relative cost (1 = baseline)
-    implementation_delay_days: int = 0  # delay before intervention takes effect
+    driver_reduction: dict[str, float]
+    cost_relative: float = 1.0
+    implementation_delay_days: int = 0
+
+    def __post_init__(self):
+        normalized = {}
+        for driver, reduction in self.driver_reduction.items():
+            driver = DRIVER_ALIASES.get(driver, driver)
+            if driver not in DRIVER_NAMES:
+                raise ValueError(f"Unknown intervention driver: {driver}")
+            reduction = float(reduction)
+            if not np.isfinite(reduction) or not 0 <= reduction <= 1:
+                raise ValueError("driver_reduction values must be finite and lie in [0, 1]")
+            if driver in normalized:
+                raise ValueError(f"Duplicate intervention driver after alias resolution: {driver}")
+            normalized[driver] = reduction
+        self.driver_reduction = normalized
+        self.cost_relative = float(self.cost_relative)
+        if not np.isfinite(self.cost_relative) or self.cost_relative < 0:
+            raise ValueError("cost_relative must be finite and non-negative")
+        if any(normalized.values()) and self.cost_relative == 0:
+            raise ValueError("Active scenarios require a positive relative cost for ranking")
+        if (not isinstance(self.implementation_delay_days, (int, np.integer))
+                or self.implementation_delay_days < 0):
+            raise ValueError("implementation_delay_days must be a non-negative integer")
 
 
 @dataclass
 class InterventionResult:
-    """Result of simulating one intervention scenario."""
     scenario: InterventionScenario
-    projected_health: list[float]       # health scores at each horizon
-    projected_health_100: list[float]   # scaled to 0-100
-    improvement_vs_baseline: list[float]  # absolute improvement over no-intervention
-    relative_improvement: list[float]   # % improvement over no-intervention
-    cost_effectiveness: float           # improvement per unit cost
+    projected_health: list[float]
+    projected_health_100: list[float]
+    improvement_vs_baseline: list[float]
+    relative_improvement: list[float]
+    cost_effectiveness: float
     summary: str
+    assumptions: list[str] = field(default_factory=list)
+    evidence_status: str = "hypothetical_sensitivity_analysis"
 
 
 @dataclass
 class InterventionAnalysis:
-    """Complete intervention analysis with all scenarios."""
-    baseline: InterventionResult        # no-intervention trajectory
+    baseline: InterventionResult
     scenarios: list[InterventionResult]
-    recommended: InterventionResult | None  # best cost-effective scenario
+    recommended: InterventionResult | None  # Highest modeled benefit/cost, not a causal recommendation.
     horizons: list[str]
     current_health: float
+    limitations: list[str] = field(default_factory=list)
+    ranking_basis: str = "mean_assumed_health_difference_per_relative_cost"
 
-
-# ─── Default Intervention Scenarios ───────────────────────────────────────────
 
 DEFAULT_SCENARIOS = [
-    InterventionScenario(
-        name="No Intervention",
-        description="Continuation of current trends without any conservation action.",
-        driver_reduction={},
-        cost_relative=0.0,
-    ),
-    InterventionScenario(
-        name="Conservation Corridor",
-        description="Establish protected wildlife corridors connecting forest fragments. "
-                    "Reduces logging and road construction pressure.",
-        driver_reduction={"logging": 0.6, "road_construction": 0.4},
-        cost_relative=0.6,
-    ),
-    InterventionScenario(
-        name="Fire Management",
-        description="Implement fire prevention and controlled burn programs. "
-                    "Reduces wildfire risk and associated drought damage.",
-        driver_reduction={"wildfire": 0.7, "drought": 0.2},
-        cost_relative=0.4,
-    ),
-    InterventionScenario(
-        name="Agricultural Buffer Zone",
-        description="Create buffer zones between agricultural areas and forest. "
-                    "Reduces agricultural encroachment and cattle grazing.",
-        driver_reduction={"agriculture": 0.5, "cattle_pasture": 0.6},
-        cost_relative=0.5,
-    ),
-    InterventionScenario(
-        name="Mining Regulation",
-        description="Enforce strict mining regulations and restoration requirements. "
-                    "Reduces mining-related deforestation.",
-        driver_reduction={"mining": 0.8, "road_construction": 0.3},
-        cost_relative=0.7,
-    ),
-    InterventionScenario(
-        name="Full Protection",
-        description="Comprehensive protection program: enforce anti-deforestation laws, "
-                    "establish protected area status, active monitoring.",
-        driver_reduction={
-            "agriculture": 0.8, "cattle_pasture": 0.8, "mining": 0.9,
-            "logging": 0.9, "road_construction": 0.7, "urban_expansion": 0.5,
-        },
-        cost_relative=1.0,
-    ),
-    InterventionScenario(
-        name="Reforestation + Protection",
-        description="Full protection plus active reforestation in degraded areas. "
-                    "Maximum recovery potential.",
-        driver_reduction={
-            "agriculture": 0.8, "cattle_pasture": 0.8, "mining": 0.9,
-            "logging": 0.9, "road_construction": 0.7, "wildfire": 0.5,
-            "urban_expansion": 0.5,
-        },
-        cost_relative=1.5,
-        implementation_delay_days=90,
-    ),
-]
-
-DRIVER_NAMES = [
-    "agriculture", "cattle_pasture", "mining", "logging",
-    "road_construction", "wildfire", "drought", "urban_expansion",
+    InterventionScenario("No Intervention", "Provided baseline projection.", {}, 0),
+    InterventionScenario("Conservation Corridor", "Assume reduced logging and road pressure.",
+                         {"logging": 0.6, "road_construction": 0.4}, 0.6),
+    InterventionScenario("Fire Management", "Assume reduced wildfire pressure.", {"wildfire": 0.7}, 0.4),
+    InterventionScenario("Agricultural Buffer Zone", "Assume reduced agricultural and grazing pressure.",
+                         {"agriculture": 0.5, "cattle_pasture": 0.6}, 0.5),
+    InterventionScenario("Mining Regulation", "Assume reduced mining and road pressure.",
+                         {"mining": 0.8, "road_construction": 0.3}, 0.7),
+    InterventionScenario("Full Protection", "Illustrative combined reduction in human pressure.",
+                         {"agriculture": 0.8, "cattle_pasture": 0.8, "mining": 0.9,
+                          "logging": 0.9, "road_construction": 0.7, "urban_expansion": 0.5}, 1.0),
+    InterventionScenario("Reforestation + Protection", "Illustrative protection assumptions; no growth benefit is assumed.",
+                         {"agriculture": 0.8, "cattle_pasture": 0.8, "mining": 0.9,
+                          "logging": 0.9, "road_construction": 0.7, "wildfire": 0.5,
+                          "urban_expansion": 0.5}, 1.5, 90),
 ]
 
 
@@ -123,111 +127,52 @@ def simulate_intervention(
     driver_strengths: np.ndarray,
     scenario: InterventionScenario,
     horizon_days: list[int] | None = None,
+    *,
+    current_health: float | None = None,
 ) -> InterventionResult:
-    """Simulate a single intervention scenario.
-    
-    Models intervention as reducing the contribution of specific drivers
-    to the degradation trajectory. The modified trajectory is computed
-    by attenuating driver impacts.
-    
-    Args:
-        baseline_trajectory: (H,) no-intervention health scores at horizons.
-        driver_strengths: (8,) current driver strengths [0, 1].
-        scenario: Intervention definition.
-        horizon_days: List of horizon offsets in days.
-        
-    Returns:
-        InterventionResult with projected outcomes.
+    """Attenuate baseline decline under assumed driver reductions and a 180-day ramp.
+
+    Improvement is bounded by the baseline decline from current health. No
+    additional recovery is invented, and an improving baseline stays intact.
+    Legacy calls omitting current_health use the first forecast as a reference,
+    explicitly recorded in the result assumptions.
     """
-    horizon_days = horizon_days or [30, 180, 365, 1095, 1825]
-
-    if not scenario.driver_reduction:
-        # No intervention — return baseline
-        projected = baseline_trajectory.tolist()
-        return InterventionResult(
-            scenario=scenario,
-            projected_health=[float(h) for h in projected],
-            projected_health_100=[float(h * 100) for h in projected],
-            improvement_vs_baseline=[0.0] * len(projected),
-            relative_improvement=[0.0] * len(projected),
-            cost_effectiveness=0.0,
-            summary="Baseline trajectory without intervention.",
-        )
-
-    # Compute total driver pressure before and after intervention
-    total_pressure_before = 0.0
-    total_pressure_after = 0.0
-
-    for i, driver_name in enumerate(DRIVER_NAMES):
-        strength = float(driver_strengths[i]) if i < len(driver_strengths) else 0.0
-        total_pressure_before += strength
-        reduction = scenario.driver_reduction.get(driver_name, 0.0)
-        total_pressure_after += strength * (1.0 - reduction)
-
-    # Pressure reduction factor
-    if total_pressure_before > 0:
-        pressure_reduction = 1.0 - (total_pressure_after / total_pressure_before)
-    else:
-        pressure_reduction = 0.0
-
-    # Apply intervention effect to trajectory
-    current_health = float(baseline_trajectory[0]) if len(baseline_trajectory) > 0 else 0.5
-    projected = []
-
-    for i, (base_h, horizon_d) in enumerate(zip(baseline_trajectory, horizon_days)):
-        base_h = float(base_h)
-
-        # Intervention effect grows over time (cumulative benefit)
-        time_factor = min(1.0, horizon_d / 365.0)
-
-        # Account for implementation delay
-        if horizon_d < scenario.implementation_delay_days:
-            effective_reduction = 0.0
-        else:
-            delay_factor = min(1.0, (horizon_d - scenario.implementation_delay_days) / 180.0)
-            effective_reduction = pressure_reduction * delay_factor
-
-        # Degradation that would have occurred
-        degradation = max(0.0, current_health - base_h)
-
-        # Reduce degradation by intervention effect
-        mitigated_degradation = degradation * (1.0 - effective_reduction * time_factor)
-
-        # Also add slight recovery effect from reduced pressure
-        recovery_boost = effective_reduction * 0.05 * time_factor
-
-        projected_h = current_health - mitigated_degradation + recovery_boost
-        projected_h = float(np.clip(projected_h, 0.0, 1.0))
-        projected.append(projected_h)
-
-    # Compute improvements
-    improvement = [p - b for p, b in zip(projected, baseline_trajectory.tolist())]
-    relative = [
-        (imp / max(0.01, abs(current_health - b))) * 100 if abs(current_health - b) > 0.01 else 0.0
-        for imp, b in zip(improvement, baseline_trajectory.tolist())
+    baseline = _unit_array(baseline_trajectory, "baseline_trajectory")
+    drivers = _unit_array(driver_strengths, "driver_strengths")
+    if len(drivers) != len(DRIVER_NAMES):
+        raise ValueError(f"driver_strengths must contain {len(DRIVER_NAMES)} values")
+    days = resolve_horizons(horizon_days, len(baseline))
+    assumptions = [
+        "Driver scores and reduction factors are scenario assumptions, not identified causal effects.",
+        "Assumed driver reductions affect baseline decline proportionally, with a 180-day implementation ramp.",
+        "No additional recovery, displacement, ecological side effects or policy uncertainty are modeled.",
+        "Relative costs are illustrative units; ranking does not establish real-world cost effectiveness.",
     ]
-
-    # Cost effectiveness (average improvement per unit cost)
-    avg_improvement = np.mean(improvement)
-    cost_eff = float(avg_improvement / max(0.01, scenario.cost_relative))
-
-    # Summary
-    final_health = projected[-1] * 100
-    baseline_final = float(baseline_trajectory[-1]) * 100
+    if current_health is None:
+        current_health = float(baseline[0])
+        assumptions.append("Current health was omitted; the first forecast is used as the comparison reference.")
+    current = float(current_health)
+    if not np.isfinite(current) or not 0 <= current <= 1:
+        raise ValueError("current_health must be finite and lie in [0, 1]")
+    reductions = np.asarray([scenario.driver_reduction.get(name, 0) for name in DRIVER_NAMES])
+    pressure_reduction = float(np.dot(drivers, reductions) / drivers.sum()) if drivers.sum() else 0.0
+    # A zero-pressure scenario must reproduce every baseline value, including increases.
+    ramp = np.clip((np.asarray(days) - scenario.implementation_delay_days) / 180, 0, 1)
+    decline = np.maximum(0, current - baseline)
+    improvement = decline * pressure_reduction * ramp
+    projected = np.clip(baseline + improvement, 0, 1)
+    relative = np.divide(improvement * 100, decline, out=np.zeros_like(decline), where=decline > 0)
+    cost_effectiveness = float(improvement.mean() / scenario.cost_relative) if scenario.cost_relative else 0.0
     summary = (
-        f"{scenario.name}: projected health at 5yr = {final_health:.1f}% "
-        f"(vs {baseline_final:.1f}% without intervention). "
-        f"Improvement: +{(final_health - baseline_final):.1f}pp"
+        f"{scenario.name}: conditional health at {horizon_label(days[-1])} = {projected[-1] * 100:.1f}/100 "
+        f"(baseline {baseline[-1] * 100:.1f}/100); assumed difference +{improvement[-1] * 100:.1f} points. "
+        "Hypothetical scenario, not a validated intervention effect."
     )
-
     return InterventionResult(
-        scenario=scenario,
-        projected_health=projected,
-        projected_health_100=[h * 100 for h in projected],
-        improvement_vs_baseline=improvement,
-        relative_improvement=relative,
-        cost_effectiveness=cost_eff,
-        summary=summary,
+        scenario=scenario, projected_health=projected.tolist(),
+        projected_health_100=(projected * 100).tolist(),
+        improvement_vs_baseline=improvement.tolist(), relative_improvement=relative.tolist(),
+        cost_effectiveness=cost_effectiveness, summary=summary, assumptions=assumptions,
     )
 
 
@@ -239,59 +184,38 @@ def run_intervention_analysis(
     horizon_days: list[int] | None = None,
     config: dict | None = None,
 ) -> InterventionAnalysis:
-    """Run full intervention analysis across all scenarios.
-    
-    Args:
-        baseline_trajectory: (H,) no-intervention health scores.
-        driver_strengths: (8,) current driver strengths.
-        current_health: Current health score [0, 1].
-        scenarios: List of interventions (uses defaults if None).
-        horizon_days: Horizon offsets in days.
-        config: Configuration dict.
-        
-    Returns:
-        InterventionAnalysis with all scenario results and recommendation.
-    """
+    """Compare assumptions and rank positive modeled benefits per relative cost."""
+    config = config or {}
     if scenarios is None:
-        # Build from config or use defaults
-        if config and "scenarios" in config:
-            scenarios = []
-            for s_cfg in config["scenarios"]:
-                scenarios.append(InterventionScenario(
-                    name=s_cfg.get("name", "Unknown"),
-                    description="",
-                    driver_reduction=s_cfg.get("driver_reduction", {}),
-                ))
+        if "scenarios" in config:
+            scenarios = [InterventionScenario(
+                name=item.get("name", "Unnamed scenario"),
+                description=item.get("description", "User-defined hypothetical scenario."),
+                driver_reduction=item.get("driver_reduction", {}),
+                cost_relative=item.get("cost_relative", 1.0),
+                implementation_delay_days=item.get("implementation_delay_days", 0),
+            ) for item in config["scenarios"]]
         else:
-            scenarios = DEFAULT_SCENARIOS
-
-    horizon_days = horizon_days or [30, 180, 365, 1095, 1825]
-    horizon_names = ["30 days", "6 months", "1 year", "3 years", "5 years"]
-
-    results = []
-    baseline_result = None
-
-    for scenario in scenarios:
-        result = simulate_intervention(
-            baseline_trajectory, driver_strengths, scenario, horizon_days
-        )
-        results.append(result)
-        if scenario.name == "No Intervention" or not scenario.driver_reduction:
-            baseline_result = result
-
-    if baseline_result is None:
-        baseline_result = results[0]
-
-    # Find recommended intervention (best cost-effectiveness, excluding no-intervention)
-    intervention_results = [r for r in results if r.scenario.driver_reduction]
-    recommended = None
-    if intervention_results:
-        recommended = max(intervention_results, key=lambda r: r.cost_effectiveness)
-
+            scenarios = list(DEFAULT_SCENARIOS)
+    days = resolve_horizons(horizon_days, len(baseline_trajectory))
+    # Always construct a real no-intervention baseline, even for an empty scenario list.
+    baseline = simulate_intervention(
+        baseline_trajectory, driver_strengths,
+        InterventionScenario("No Intervention", "Provided baseline projection.", {}, 0),
+        days, current_health=current_health,
+    )
+    results = [simulate_intervention(baseline_trajectory, driver_strengths, scenario, days,
+                                    current_health=current_health) for scenario in scenarios]
+    if not any(not result.scenario.driver_reduction for result in results):
+        results.insert(0, baseline)
+    candidates = [result for result in results
+                  if result.scenario.driver_reduction and result.cost_effectiveness > 0]
+    ranked = max(candidates, key=lambda result: result.cost_effectiveness) if candidates else None
     return InterventionAnalysis(
-        baseline=baseline_result,
-        scenarios=results,
-        recommended=recommended,
-        horizons=horizon_names[:len(horizon_days)],
-        current_health=current_health,
+        baseline=baseline, scenarios=results, recommended=ranked,
+        horizons=[horizon_label(day) for day in days], current_health=float(current_health),
+        limitations=[
+            "Scenario differences are conditional on explicit assumptions; no causal intervention effects are established.",
+            "The recommended field is the highest assumed benefit/cost scenario, not an evidence-based policy recommendation.",
+        ],
     )
