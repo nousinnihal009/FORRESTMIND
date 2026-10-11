@@ -91,7 +91,9 @@ class PrithviAdapter(FoundationModelBase):
         self._target_dim = target_dim
         self._model_name = model_name
         self._in_channels = in_channels
-        self._is_proxy = use_proxy or not _check_transformers_available()
+        # A randomly initialized CNN is a development baseline, never a
+        # substitute for a requested pretrained model.
+        self._is_proxy = use_proxy
 
         if self._is_proxy:
             self._init_proxy(target_dim)
@@ -119,12 +121,7 @@ class PrithviAdapter(FoundationModelBase):
             elif hasattr(config, "embed_dim"):
                 self._native_dim = config.embed_dim
             else:
-                # Fallback: probe with a dummy input
-                self._native_dim = 768
-                logger.warning(
-                    f"Could not determine Prithvi embedding dim from config, "
-                    f"assuming {self._native_dim}"
-                )
+                raise ValueError("Checkpoint config must declare hidden_size or embed_dim")
 
             self._is_proxy = False
             logger.info(
@@ -133,12 +130,11 @@ class PrithviAdapter(FoundationModelBase):
             )
 
         except Exception as e:
-            logger.warning(
-                f"Failed to load Prithvi model '{model_name}': {e}. "
-                f"Falling back to proxy mode."
-            )
-            self._init_proxy(target_dim)
-            return
+            raise RuntimeError(
+                f"Could not load pretrained Prithvi '{model_name}'. No proxy was substituted. "
+                "Install a compatible checkpoint runtime, or explicitly set use_proxy=true "
+                "for an untrained development baseline."
+            ) from e
 
         # Channel selector: pick the 6 HLS bands from our 14-channel input
         self.channel_indices = OUR_TO_PRITHVI_INDICES
@@ -220,6 +216,8 @@ class PrithviAdapter(FoundationModelBase):
             (B, D) embedding vector.
         """
         # Select HLS bands from our 14-channel input
+        if x.ndim != 4 or x.shape[1] not in (6, 12, 14):
+            raise ValueError("Prithvi expects 6 HLS bands or 12 optical (+ 2 SAR) channels")
         if x.shape[1] > PRITHVI_NUM_BANDS:
             x = x[:, self.channel_indices]  # (B, 6, H, W)
 
