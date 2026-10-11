@@ -73,6 +73,8 @@ class ForestMindMetrics:
             outputs: Model outputs.
             targets: Ground-truth targets.
         """
+        if "label_valid" in targets and not torch.as_tensor(targets["label_valid"]).all():
+            raise ValueError("Metrics require observed labels, not unlabeled acquisitions")
         # Health
         health_state_pred = outputs["health"]["state"].cpu().numpy()
         health_state_gt = targets["health_state"].cpu().numpy()
@@ -104,6 +106,8 @@ class ForestMindMetrics:
     def compute(self) -> MetricsResult:
         """Compute all metrics from accumulated predictions."""
         result = MetricsResult()
+        if self._health_total == 0:
+            return result
 
         # ─── Health Metrics ────────────────────────────────
         if self._health_total > 0:
