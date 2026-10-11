@@ -226,8 +226,8 @@ class SatelliteAdapterBase(ABC):
 
         logger.info(
             f"[{self.sensor_name}] Loaded {len(patches)} patches "
-            f"({patches[0].date_str if patches else '?'} → "
-            f"{patches[-1].date_str if patches else '?'})"
+            f"({patches[0].datetime.date().isoformat() if patches else '?'} → "
+            f"{patches[-1].datetime.date().isoformat() if patches else '?'})"
         )
         return patches
 
@@ -273,7 +273,7 @@ class SatelliteAdapterBase(ABC):
 
     def load_patch_from_cache(self, path: Path) -> PatchData:
         """Load a PatchData from a cached .npz file."""
-        data = np.load(path, allow_pickle=True)
+        data = np.load(path, allow_pickle=False)
         cloud_cover = float(data["cloud_cover"])
         if cloud_cover < 0:
             cloud_cover = None
