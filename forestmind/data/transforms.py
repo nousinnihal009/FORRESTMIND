@@ -58,6 +58,8 @@ class SpectralJitter:
         optical += shift
 
         sample["optical"] = np.clip(optical, 0.0, 1.0)
+        if "optical_mask" in sample:
+            sample["optical"][~sample["optical_mask"]] = 0
         return sample
 
 
@@ -69,17 +71,23 @@ class SpatialFlipRotate:
         if np.random.random() > 0.5:
             sample["optical"] = np.flip(sample["optical"], axis=-1).copy()
             sample["sar"] = np.flip(sample["sar"], axis=-1).copy()
+            if "quality_mask" in sample:
+                sample["quality_mask"] = np.flip(sample["quality_mask"], axis=-1).copy()
 
         # Random vertical flip
         if np.random.random() > 0.5:
             sample["optical"] = np.flip(sample["optical"], axis=-2).copy()
             sample["sar"] = np.flip(sample["sar"], axis=-2).copy()
+            if "quality_mask" in sample:
+                sample["quality_mask"] = np.flip(sample["quality_mask"], axis=-2).copy()
 
         # Random 90° rotation (0, 90, 180, 270)
         k = np.random.randint(0, 4)
         if k > 0:
             sample["optical"] = np.rot90(sample["optical"], k=k, axes=(-2, -1)).copy()
             sample["sar"] = np.rot90(sample["sar"], k=k, axes=(-2, -1)).copy()
+            if "quality_mask" in sample:
+                sample["quality_mask"] = np.rot90(sample["quality_mask"], k=k, axes=(-2, -1)).copy()
 
         return sample
 
@@ -95,11 +103,13 @@ class RandomCrop:
         if H <= self.crop_size or W <= self.crop_size:
             return sample
 
-        y = np.random.randint(0, H - self.crop_size)
-        x = np.random.randint(0, W - self.crop_size)
+        y = np.random.randint(0, H - self.crop_size + 1)
+        x = np.random.randint(0, W - self.crop_size + 1)
 
         sample["optical"] = sample["optical"][:, :, y:y+self.crop_size, x:x+self.crop_size]
         sample["sar"] = sample["sar"][:, :, y:y+self.crop_size, x:x+self.crop_size]
+        if "quality_mask" in sample:
+            sample["quality_mask"] = sample["quality_mask"][:, y:y+self.crop_size, x:x+self.crop_size]
         return sample
 
 
@@ -142,6 +152,11 @@ class Normalize:
             (sample["sar"] - self.sar_mean[None, :, None, None])
             / (self.sar_std[None, :, None, None] + 1e-8)
         )
+        for modality in ("optical", "sar"):
+            if f"{modality}_mask" in sample:
+                sample[modality][~sample[f"{modality}_mask"]] = 0
+        if "quality_mask" in sample:
+            sample["optical"] = np.where(sample["quality_mask"][:, None], sample["optical"], 0)
         return sample
 
 
@@ -149,17 +164,21 @@ class ToTensor:
     """Convert numpy arrays to PyTorch tensors."""
 
     def __call__(self, sample: dict) -> dict:
-        return {
-            "optical": torch.from_numpy(sample["optical"].copy()),
-            "sar": torch.from_numpy(sample["sar"].copy()),
-            "timestamps": torch.from_numpy(sample["timestamps"].copy()),
-            "health_state": torch.tensor(sample["health_state"], dtype=torch.long),
-            "health_score": torch.tensor(sample["health_score"], dtype=torch.float32),
-            "drivers": torch.from_numpy(sample["drivers"].copy()),
-            "driver_strengths": torch.from_numpy(sample["driver_strengths"].copy()),
-            "trajectory": torch.from_numpy(sample["trajectory"].copy()),
-            "health_history": torch.from_numpy(sample["health_history"].copy()),
-        }
+        result = {}
+        for key, value in sample.items():
+            if isinstance(value, np.ndarray):
+                if value.dtype.kind in "bifu":
+                    tensor = torch.from_numpy(np.ascontiguousarray(value).copy())
+                    result[key] = tensor.float() if tensor.is_floating_point() else tensor
+                else:
+                    result[key] = value.tolist()
+            elif key == "health_state":
+                result[key] = torch.tensor(value, dtype=torch.long)
+            elif isinstance(value, (float, np.floating)):
+                result[key] = torch.tensor(value, dtype=torch.float32)
+            else:
+                result[key] = value
+        return result
 
 
 class Compose:
