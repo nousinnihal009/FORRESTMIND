@@ -46,8 +46,8 @@ PRITHVI_NUM_BANDS = 6
 # Mapping from our 14-channel input (12 optical + 2 SAR) to Prithvi's 6 bands
 # Our band order: B01,B02,B03,B04,B05,B06,B07,B08,B8A,B09,B11,B12,VV,VH
 # Prithvi wants: Blue(B02=idx1), Green(B03=idx2), Red(B04=idx3),
-#                NIR(B08=idx7), SWIR1(B11=idx10), SWIR2(B12=idx11)
-OUR_TO_PRITHVI_INDICES = [1, 2, 3, 7, 10, 11]
+#                NIR(B8A=idx8), SWIR1(B11=idx10), SWIR2(B12=idx11)
+OUR_TO_PRITHVI_INDICES = [1, 2, 3, 8, 10, 11]
 
 
 def _check_transformers_available() -> bool:
@@ -81,7 +81,7 @@ class PrithviAdapter(FoundationModelBase):
 
     def __init__(
         self,
-        model_name: str = "ibm-nasa-geospatial/Prithvi-EO-2.0-300M",
+        model_name: str = "prithvi_eo_v2_300",
         target_dim: int = 256,
         freeze_backbone: bool = True,
         in_channels: int = 14,
@@ -103,25 +103,12 @@ class PrithviAdapter(FoundationModelBase):
     def _init_full(self, model_name: str, target_dim: int, freeze_backbone: bool) -> None:
         """Initialize with actual Prithvi pretrained weights."""
         try:
-            from transformers import AutoModel, AutoConfig
-
-            logger.info(f"Loading Prithvi model: {model_name}")
-
-            # Load the model
-            config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-            self.backbone = AutoModel.from_pretrained(
-                model_name,
-                trust_remote_code=True,
-                config=config,
+            from terratorch.registry import BACKBONE_REGISTRY
+            self.backbone = BACKBONE_REGISTRY.build(
+                model_name, pretrained=True, num_frames=1,
+                bands=["BLUE", "GREEN", "RED", "NIR_NARROW", "SWIR_1", "SWIR_2"],
             )
-
-            # Determine native embedding dimension
-            if hasattr(config, "hidden_size"):
-                self._native_dim = config.hidden_size
-            elif hasattr(config, "embed_dim"):
-                self._native_dim = config.embed_dim
-            else:
-                raise ValueError("Checkpoint config must declare hidden_size or embed_dim")
+            self._native_dim = self.backbone.out_channels[-1]
 
             self._is_proxy = False
             logger.info(
@@ -132,7 +119,7 @@ class PrithviAdapter(FoundationModelBase):
         except Exception as e:
             raise RuntimeError(
                 f"Could not load pretrained Prithvi '{model_name}'. No proxy was substituted. "
-                "Install a compatible checkpoint runtime, or explicitly set use_proxy=true "
+                "Install terratorch with a compatible checkpoint, or explicitly set use_proxy=true "
                 "for an untrained development baseline."
             ) from e
 
@@ -159,7 +146,7 @@ class PrithviAdapter(FoundationModelBase):
 
         logger.info(
             "Prithvi adapter: PROXY MODE "
-            "(install 'transformers' and download weights for full mode)"
+            "(untrained CNN baseline; not Prithvi pretrained weights)"
         )
 
         # Proxy encoder that mimics Prithvi's encoding pipeline
@@ -224,29 +211,12 @@ class PrithviAdapter(FoundationModelBase):
         if self._is_proxy:
             embedding = self.proxy_encoder(x)  # (B, native_dim)
         else:
-            # Forward through actual Prithvi backbone
-            outputs = self.backbone(x)
-
-            # Extract embedding — handle different output formats
-            if hasattr(outputs, "last_hidden_state"):
-                # Transformer output: use [CLS] token or mean pool
-                hidden = outputs.last_hidden_state
-                if hidden.shape[1] > 1:
-                    embedding = hidden[:, 0]  # [CLS] token
-                else:
-                    embedding = hidden.squeeze(1)
-            elif hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
-                embedding = outputs.pooler_output
-            elif isinstance(outputs, Tensor):
-                if outputs.dim() == 3:
-                    embedding = outputs.mean(dim=1)  # mean pool over sequence
-                elif outputs.dim() == 2:
-                    embedding = outputs
-                else:
-                    embedding = outputs.flatten(1).mean(dim=1)
-            else:
-                # Fallback: try to get a tensor from the output
-                embedding = outputs[0].mean(dim=1) if isinstance(outputs, tuple) else outputs
+            # TerraTorch expects (B, C, T, H, W), and returns layer token
+            # sequences including CLS. Inputs use checkpoint normalization.
+            outputs = self.backbone(x.unsqueeze(2))
+            if not isinstance(outputs, (list, tuple)) or outputs[-1].ndim != 3:
+                raise RuntimeError("Unexpected TerraTorch Prithvi output: expected layer token tensors")
+            embedding = outputs[-1][:, 0]
 
         # Project to target dimension
         return self.projection(embedding)
