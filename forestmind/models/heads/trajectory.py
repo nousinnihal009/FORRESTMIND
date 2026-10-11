@@ -88,7 +88,7 @@ class TrajectoryHead(nn.Module):
                 nn.Linear(64, 1),
             )
 
-    def _temporal_pool(self, sequence: Tensor) -> Tensor:
+    def _temporal_pool(self, sequence: Tensor, observation_mask: Tensor | None = None) -> Tensor:
         """Attention-weighted temporal pooling.
         
         Args:
@@ -99,13 +99,16 @@ class TrajectoryHead(nn.Module):
         """
         # Compute attention weights
         weights = self.temporal_attention(sequence)  # (B, T, 1)
+        if observation_mask is not None:
+            weights = weights.masked_fill(~observation_mask[..., None], float("-inf"))
         weights = torch.softmax(weights, dim=1)
 
         # Weighted sum
         pooled = (sequence * weights).sum(dim=1)  # (B, D)
         return pooled
 
-    def forward(self, sequence: Tensor, summary: Tensor) -> dict[str, Tensor]:
+    def forward(self, sequence: Tensor, summary: Tensor,
+                observation_mask: Tensor | None = None) -> dict[str, Tensor]:
         """Predict future health trajectory.
         
         Args:
@@ -119,7 +122,7 @@ class TrajectoryHead(nn.Module):
               uncertainty: (B, 5) prediction std dev (if predict_uncertainty)
         """
         # Attention-weighted temporal summary
-        temporal_summary = self._temporal_pool(sequence)
+        temporal_summary = self._temporal_pool(sequence, observation_mask)
 
         # Use both attention summary and last-step summary
         combined_summary = temporal_summary + summary  # residual combination
@@ -154,7 +157,7 @@ class TrajectoryHead(nn.Module):
         }
 
         if self.predict_uncertainty:
-            logvars = torch.stack(logvars, dim=-1)
+            logvars = torch.stack(logvars, dim=-1).clamp(-10.0, 2.0)
             result["logvar"] = logvars
             result["uncertainty"] = torch.exp(0.5 * logvars)  # std dev
 
