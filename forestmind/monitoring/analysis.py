@@ -125,9 +125,12 @@ def forecast_summary(observations: list[dict]) -> dict:
         "caveat": "Illustrative indicator extrapolation. Bounds are heuristic residual envelopes, "
         "not calibrated confidence intervals. Disturbances and interventions are not predicted.",
     }
-    if len(usable) < 12 or observations[-1]["health_score"] is None:
-        result["caveat"] = "A usable latest observation and at least 12 usable observations are "
-        "required. No forecast has been produced."
+    if (len(usable) < 12 or observations[-1]["health_score"] is None
+            or not _monthly_regular(usable[-12:])):
+        result["caveat"] = (
+            "A usable latest observation and at least 12 consecutive usable monthly observations "
+            "are required. No forecast has been produced."
+        )
         return result
     recent = usable[-12:]
     slope = _series_trend(recent)
