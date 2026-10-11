@@ -1,0 +1,27 @@
+"""Run the local ForestMind workspace: python scripts/serve.py."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Serve the ForestMind local monitoring workspace")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: localhost; no authentication)")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--reload", action="store_true", help="Reload on source changes during development")
+    args = parser.parse_args()
+    try:
+        import uvicorn
+    except ImportError:
+        raise SystemExit('Install web dependencies: python -m pip install -e ".[web]"') from None
+    uvicorn.run("forestmind.api.app:create_app", factory=True, host=args.host, port=args.port,
+                reload=args.reload, app_dir=str(Path(__file__).resolve().parents[1]))
+
+
+if __name__ == "__main__":
+    main()
