@@ -49,7 +49,7 @@ def _build_foundation_model(config: dict) -> FoundationModelBase:
         from forestmind.models.foundation.prithvi import PrithviAdapter
         prithvi_cfg = config.get("prithvi", {})
         return PrithviAdapter(
-            model_name=prithvi_cfg.get("model_name", "ibm-nasa-geospatial/Prithvi-EO-2.0-300M"),
+            model_name=prithvi_cfg.get("model_name", "prithvi_eo_v2_300"),
             target_dim=config.get("embedding_dim", 256),
             freeze_backbone=prithvi_cfg.get("freeze", True),
             use_proxy=prithvi_cfg.get("use_proxy", False),
