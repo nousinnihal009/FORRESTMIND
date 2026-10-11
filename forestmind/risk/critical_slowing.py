@@ -1,196 +1,192 @@
-"""
-Critical Slowing Down (CSD) detector for ecological tipping points.
+"""Exploratory early-warning statistics, not proof of an ecological tipping point.
 
-Implements early-warning indicators from dynamical systems theory:
-
-1. **Rising AR(1) coefficient**: As a system approaches a bifurcation point,
-   its recovery rate from perturbations slows down. This manifests as
-   increasing lag-1 autocorrelation in the time series.
-
-2. **Rising variance**: Near a tipping point, the system's "restoring force"
-   weakens, causing fluctuations to amplify.
-
-3. **Rising temporal autocorrelation**: Similar to AR(1) but measured
-   differently — the system becomes more "memory-full" as it approaches
-   the critical transition.
-
-References:
-  - Scheffer et al. (2009) "Early-warning signals for critical transitions" Nature
-  - Dakos et al. (2012) "Methods for Detecting Early Warnings" PLoS ONE
-  - Verbesselt et al. (2016) "Remotely sensed resilience of tropical forests" Nature Climate Change
+Rolling statistics follow the general workflow in Dakos et al. (2012),
+https://doi.org/10.1371/journal.pone.0041010. The combined score and thresholds
+are uncalibrated heuristics. Sampling, seasonality and detrending affect results.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 
 @dataclass
 class CSDResult:
-    """Results from Critical Slowing Down analysis."""
-    ar1_coefficient: float          # AR(1) autoregressive coefficient
-    ar1_trend: float                # Kendall tau trend of AR(1) over time
-    variance: float                 # Current variance
-    variance_trend: float           # Kendall tau trend of variance over time
-    autocorrelation: float          # Lag-1 autocorrelation
-    autocorrelation_trend: float    # Trend of autocorrelation
-    recovery_rate: float            # Estimated recovery rate (1 - AR1)
-    csd_score: float                # Combined CSD indicator [0, 1]
-    is_warning: bool                # Whether CSD indicators suggest approaching tipping point
+    """Diagnostic statistics; inspect ``status`` before interpreting values."""
+
+    ar1_coefficient: float = 0.0
+    ar1_trend: float = 0.0
+    variance: float = 0.0
+    variance_trend: float = 0.0
+    autocorrelation: float = 0.0
+    autocorrelation_trend: float = 0.0
+    recovery_rate: float = 0.0  # Legacy dimensionless persistence proxy, not a measured rate.
+    csd_score: float = 0.0
+    is_warning: bool = False
+    status: str = "insufficient_data"
+    n_observations: int = 0
+    n_valid: int = 0
+    window_size: int = 6
+    seasonal_adjustment: bool = False
+    limitations: list[str] = field(default_factory=list)
+
+
+def _health_array(series: np.ndarray) -> np.ndarray:
+    values = np.asarray(series, dtype=np.float64)
+    if values.ndim != 1:
+        raise ValueError("health_series must be a one-dimensional array")
+    valid = values[np.isfinite(values)]
+    if np.any((valid < 0) | (valid > 1)):
+        raise ValueError("finite health values must lie in [0, 1]")
+    return values
+
+
+def _time_axis(timestamps: np.ndarray | list | None, n: int) -> tuple[np.ndarray, bool]:
+    if timestamps is None:
+        return np.arange(n, dtype=float), True
+    raw = np.asarray(timestamps)
+    if raw.ndim != 1 or len(raw) != n:
+        raise ValueError("timestamps must have the same length as health_series")
+    if np.issubdtype(raw.dtype, np.number):
+        axis = raw.astype(float)
+    else:
+        try:
+            dates = raw.astype("datetime64[ns]")
+        except (ValueError, TypeError) as exc:
+            raise ValueError("timestamps must be numeric or valid dates") from exc
+        if np.any(np.isnat(dates)):
+            raise ValueError("timestamps must not contain missing dates")
+        axis = dates.astype(np.int64).astype(float) / 86_400_000_000_000
+    if not np.all(np.isfinite(axis)) or np.any(np.diff(axis) <= 0):
+        raise ValueError("timestamps must be finite, unique and increasing")
+    axis = axis - axis[0] if n else axis
+    gaps = np.diff(axis)
+    regular = len(gaps) < 2 or bool(np.allclose(gaps, gaps[0], rtol=0.01, atol=1e-8))
+    return axis, regular
 
 
 def _kendall_tau_trend(series: np.ndarray) -> float:
-    """Compute Kendall tau trend statistic for a time series.
-    
-    Returns a value in [-1, 1] where positive values indicate
-    an increasing trend (which for CSD indicators = approaching tipping point).
-    """
+    """Kendall tau-a trend; a descriptive statistic, without a significance test."""
+    series = np.asarray(series, dtype=float)
     n = len(series)
-    if n < 3:
+    if n < 3 or np.ptp(series) < 1e-12:
         return 0.0
+    signs = sum(float(np.sign(series[i + 1:] - series[i]).sum()) for i in range(n - 1))
+    return signs / (n * (n - 1) / 2)
 
-    concordant = 0
-    discordant = 0
-    for i in range(n - 1):
-        for j in range(i + 1, n):
-            diff = series[j] - series[i]
-            if diff > 0:
-                concordant += 1
-            elif diff < 0:
-                discordant += 1
 
-    denom = n * (n - 1) / 2
-    if denom == 0:
+def _ar1(series: np.ndarray) -> float:
+    """OLS lag-one coefficient with intercept (distinct from correlation)."""
+    x, y = series[:-1], series[1:]
+    if len(x) < 2 or np.std(x) < 1e-10 or np.std(y) < 1e-10:
         return 0.0
-    return (concordant - discordant) / denom
+    centered = x - x.mean()
+    return float(np.dot(centered, y - y.mean()) / np.dot(centered, centered))
+
+
+def _correlation(series: np.ndarray) -> float:
+    if len(series) < 3 or min(np.std(series[:-1]), np.std(series[1:])) < 1e-10:
+        return 0.0
+    return float(np.clip(np.corrcoef(series[:-1], series[1:])[0, 1], -1, 1))
 
 
 def _rolling_ar1(series: np.ndarray, window: int) -> np.ndarray:
-    """Compute rolling AR(1) coefficient over a time series.
-    
-    AR(1) coefficient is the correlation between x(t) and x(t-1).
-    """
-    n = len(series)
-    if n < window + 1:
-        return np.array([0.0])
-
-    ar1_values = []
-    for i in range(window, n):
-        window_data = series[i - window: i]
-        if len(window_data) < 3:
-            ar1_values.append(0.0)
-            continue
-        x = window_data[:-1]
-        y = window_data[1:]
-        if np.std(x) < 1e-8 or np.std(y) < 1e-8:
-            ar1_values.append(0.0)
-        else:
-            corr = np.corrcoef(x, y)[0, 1]
-            ar1_values.append(float(corr) if not np.isnan(corr) else 0.0)
-
-    return np.array(ar1_values)
+    return np.asarray([_ar1(series[i - window:i]) for i in range(window, len(series) + 1)])
 
 
 def _rolling_variance(series: np.ndarray, window: int) -> np.ndarray:
-    """Compute rolling variance over a time series."""
-    n = len(series)
-    if n < window:
-        return np.array([np.var(series)])
-
-    variances = []
-    for i in range(window, n + 1):
-        variances.append(np.var(series[i - window: i]))
-
-    return np.array(variances)
+    return np.asarray([np.var(series[i - window:i]) for i in range(window, len(series) + 1)])
 
 
-def _detrend(series: np.ndarray) -> np.ndarray:
-    """Remove linear trend from time series (for CSD analysis).
-    
-    CSD indicators must be computed on detrended residuals,
-    otherwise the trend itself would inflate variance/autocorrelation.
-    """
-    n = len(series)
-    if n < 2:
+def _detrend(series: np.ndarray, season_period: int | None = None) -> np.ndarray:
+    """Fit trend and optional seasonal fixed effects jointly to avoid trend leakage."""
+    if len(series) < 2:
         return series.copy()
-
-    x = np.arange(n, dtype=np.float64)
-    coeffs = np.polyfit(x, series, deg=1)
-    trend = np.polyval(coeffs, x)
-    return (series - trend).astype(np.float32)
+    x = np.linspace(-1, 1, len(series))
+    columns = [np.ones(len(series)), x]
+    if season_period:
+        phases = np.arange(len(series)) % season_period
+        columns.extend((phases == phase).astype(float) for phase in range(1, season_period))
+    design = np.column_stack(columns)
+    residuals = series - design @ np.linalg.lstsq(design, series, rcond=None)[0]
+    residuals[np.abs(residuals) < 1e-10] = 0
+    return residuals
 
 
 def analyze_critical_slowing_down(
     health_series: np.ndarray,
     window_size: int = 6,
     ar1_threshold: float = 0.8,
+    *,
+    timestamps: np.ndarray | list | None = None,
+    season_period: int | None = None,
 ) -> CSDResult:
-    """Analyze a health time series for Critical Slowing Down indicators.
-    
-    Args:
-        health_series: (T,) array of health scores over time.
-        window_size: Rolling window size for indicator computation.
-        ar1_threshold: AR(1) threshold for tipping-point warning.
-        
-    Returns:
-        CSDResult with all indicators and combined score.
+    """Compute exploratory statistics only for complete, evenly sampled histories.
+
+    Missing observations are never removed or interpolated into apparent temporal
+    adjacency. Withhold diagnostics if gaps, irregular sampling or short seasonal
+    baselines make this method inapplicable. ``season_period`` is observations per
+    seasonal cycle; at least three cycles are required for seasonal adjustment.
     """
-    # Detrend the series
-    residuals = _detrend(health_series)
-
-    # Rolling AR(1)
-    ar1_series = _rolling_ar1(residuals, window=window_size)
-    ar1_current = float(ar1_series[-1]) if len(ar1_series) > 0 else 0.0
-    ar1_trend = _kendall_tau_trend(ar1_series) if len(ar1_series) >= 3 else 0.0
-
-    # Rolling variance
-    var_series = _rolling_variance(residuals, window=window_size)
-    var_current = float(var_series[-1]) if len(var_series) > 0 else 0.0
-    var_trend = _kendall_tau_trend(var_series) if len(var_series) >= 3 else 0.0
-
-    # Lag-1 autocorrelation (full series)
-    if len(residuals) >= 3:
-        x, y = residuals[:-1], residuals[1:]
-        if np.std(x) > 1e-8 and np.std(y) > 1e-8:
-            ac = float(np.corrcoef(x, y)[0, 1])
-            ac = ac if not np.isnan(ac) else 0.0
-        else:
-            ac = 0.0
-    else:
-        ac = 0.0
-
-    # Rolling autocorrelation for trend
-    ac_series = _rolling_ar1(residuals, window=window_size)  # same as AR(1) for lag-1
-    ac_trend = _kendall_tau_trend(ac_series) if len(ac_series) >= 3 else 0.0
-
-    # Recovery rate: how quickly the system bounces back from perturbations
-    # Estimated as 1 - AR(1): lower = slower recovery = closer to tipping
-    recovery_rate = max(0.0, 1.0 - abs(ar1_current))
-
-    # Combined CSD score [0, 1]
-    # Higher = more warning signs of approaching tipping point
-    csd_components = [
-        np.clip(ar1_current, 0, 1),           # High AR(1) → tipping
-        np.clip((ar1_trend + 1) / 2, 0, 1),   # Rising AR(1) trend → tipping
-        np.clip((var_trend + 1) / 2, 0, 1),   # Rising variance → tipping
-        np.clip((ac_trend + 1) / 2, 0, 1),    # Rising autocorrelation → tipping
-        np.clip(1 - recovery_rate, 0, 1),      # Low recovery → tipping
-    ]
-    csd_score = float(np.mean(csd_components))
-
-    # Warning threshold
-    is_warning = ar1_current > ar1_threshold or csd_score > 0.65
-
-    return CSDResult(
-        ar1_coefficient=ar1_current,
-        ar1_trend=ar1_trend,
-        variance=var_current,
-        variance_trend=var_trend,
-        autocorrelation=ac,
-        autocorrelation_trend=ac_trend,
-        recovery_rate=recovery_rate,
-        csd_score=csd_score,
-        is_warning=is_warning,
+    values = _health_array(health_series)
+    if not isinstance(window_size, (int, np.integer)) or window_size < 2:
+        raise ValueError("window_size must be an integer of at least 2")
+    if not np.isfinite(ar1_threshold) or not 0 < ar1_threshold <= 1:
+        raise ValueError("ar1_threshold must lie in (0, 1]")
+    if season_period is not None and (
+        not isinstance(season_period, (int, np.integer)) or season_period < 2
+    ):
+        raise ValueError("season_period must be an integer of at least 2")
+    _, regular = _time_axis(timestamps, len(values))
+    result = CSDResult(
+        n_observations=len(values), n_valid=int(np.isfinite(values).sum()),
+        window_size=window_size,
+        limitations=[
+            "Exploratory, uncalibrated indicators; neither a tipping probability nor a tipping date.",
+            "Overlapping windows are dependent; trends have not been significance-tested.",
+        ],
     )
+    if timestamps is None:
+        result.limitations.append("Equal observation spacing is assumed; no timestamps supplied.")
+    if not regular:
+        result.status = "irregular_sampling"
+        result.limitations.append("Aggregate observations onto a regular time grid before CSD analysis.")
+        return result
+    if result.n_valid != len(values):
+        result.status = "missing_data"
+        result.limitations.append("CSD withheld because the time series contains non-finite observations.")
+        return result
+    minimum = max(8, window_size + 2, 3 * season_period if season_period else 0)
+    if window_size < 3 or len(values) < minimum:
+        result.limitations.append(f"At least {minimum} observations and window_size >= 3 are required.")
+        return result
+    if season_period is None:
+        result.limitations.append("Seasonality was not removed; seasonal cycles can confound these indicators.")
+    result.seasonal_adjustment = season_period is not None
+    residuals = _detrend(values, season_period)
+    ar1_series = _rolling_ar1(residuals, window_size)
+    variance_series = _rolling_variance(residuals, window_size)
+    correlation_series = np.asarray([
+        _correlation(residuals[i - window_size:i]) for i in range(window_size, len(values) + 1)
+    ])
+    result.status = "available"
+    result.ar1_coefficient = float(ar1_series[-1])
+    result.ar1_trend = _kendall_tau_trend(ar1_series)
+    result.variance = float(variance_series[-1])
+    result.variance_trend = _kendall_tau_trend(variance_series)
+    result.autocorrelation = _correlation(residuals)
+    result.autocorrelation_trend = _kendall_tau_trend(correlation_series)
+    result.recovery_rate = float(1 - np.clip(result.ar1_coefficient, 0, 1))
+    # Positive trends only: a flat series gets zero, not a spurious 0.3 score.
+    # AR1 and lag-one correlation describe similar evidence and are not double-counted.
+    result.csd_score = float(
+        (max(0, result.ar1_trend) + max(0, result.variance_trend)) / 2
+    )
+    result.is_warning = bool(
+        result.ar1_coefficient > ar1_threshold
+        and result.ar1_trend > 0.3 and result.variance_trend > 0.3
+    )
+    result.limitations.append("recovery_rate is a dimensionless persistence proxy, not measured recovery.")
+    return result
