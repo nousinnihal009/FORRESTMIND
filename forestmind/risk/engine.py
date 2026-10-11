@@ -1,31 +1,19 @@
-"""
-Ecological Risk Engine — the core intelligence layer of ForestMind.
+"""Orchestrate condition screening and explicitly hypothetical scenarios.
 
-Orchestrates all risk analysis components:
-  1. Model predictions (health, attribution, trajectory)
-  2. Critical Slowing Down analysis
-  3. Tipping-point risk assessment
-  4. Intervention simulation
-
-Produces a comprehensive ForestMindReport that answers:
-  - What is the current state of this forest?
-  - Why is it changing?
-  - What will happen next?
-  - How close is it to irreversible degradation?
-  - What can we do about it?
+Predictions, diagnostic statistics and scenario assumptions remain separate;
+none of these outputs establishes ecological irreversibility or policy effects.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 
-from forestmind.risk.critical_slowing import CSDResult, analyze_critical_slowing_down
+from forestmind.risk.critical_slowing import _health_array
 from forestmind.risk.intervention import (
-    InterventionAnalysis,
-    run_intervention_analysis,
+    InterventionAnalysis, horizon_label, resolve_horizons, run_intervention_analysis,
 )
 from forestmind.risk.tipping_point import TippingPointAssessment, assess_tipping_point
 
@@ -39,131 +27,70 @@ DRIVER_NAMES = [
 
 @dataclass
 class ForestMindReport:
-    """Comprehensive forest intelligence report."""
-    # Metadata
     timestamp: str
     location: str | None = None
-    
-    # Current State
     health_state: str = ""
     health_score: float = 0.0
-    health_confidence: float = 0.0
-    
-    # Cause Attribution
+    health_confidence: float | None = None
     active_drivers: list[dict] = field(default_factory=list)
     primary_driver: str | None = None
-    
-    # Future Trajectory
     trajectory_horizons: list[str] = field(default_factory=list)
     trajectory_scores: list[float] = field(default_factory=list)
     trajectory_uncertainty: list[float] = field(default_factory=list)
-    
-    # Tipping Point Risk
     tipping_point: TippingPointAssessment | None = None
-    
-    # Intervention Analysis
     interventions: InterventionAnalysis | None = None
-    
-    # Early Warning
     early_warnings: list[str] = field(default_factory=list)
-    alert_level: str = "NONE"  # NONE, WATCH, WARNING, CRITICAL
-    
+    alert_level: str = "NONE"
+    limitations: list[str] = field(default_factory=list)
+    calibration_status: str = "uncalibrated"
+
     def summary(self) -> str:
-        """Generate human-readable summary."""
-        lines = [
-            "=" * 60,
-            "        FORESTMIND INTELLIGENCE REPORT",
-            "=" * 60,
-            f"  Generated: {self.timestamp}",
-        ]
+        """Render results without converting diagnostic scores into scientific claims."""
+        lines = ["=" * 60, "        FORESTMIND INTELLIGENCE REPORT", "=" * 60,
+                 f"  Generated: {self.timestamp}"]
         if self.location:
-            lines.append(f"  Location:  {self.location}")
-        lines.append("")
-        
-        # Alert banner
-        if self.alert_level != "NONE":
-            alert_symbols = {"WATCH": "[!]", "WARNING": "[!!]", "CRITICAL": "[!!!]"}
-            symbol = alert_symbols.get(self.alert_level, "[?]")
-            lines.append(f"  {symbol} ALERT LEVEL: {self.alert_level}")
-            for warning in self.early_warnings:
-                lines.append(f"    -> {warning}")
-            lines.append("")
-        
-        # Current state
-        lines.extend([
-            "--- CURRENT STATE -------------------------------------------",
-            f"  Forest Health: {self.health_state} ({self.health_score:.1f}/100)",
-            f"  Confidence:    {self.health_confidence:.1f}%",
-            "",
-        ])
-        
-        # Drivers
+            lines.append(f"  Location: {self.location}")
+        lines.extend(["", f"  Screening alert: {self.alert_level}"])
+        lines.extend(f"    -> {warning}" for warning in self.early_warnings)
+        lines.extend(["", "--- CURRENT STATE ---",
+                      f"  Forest Health: {self.health_state} ({self.health_score:.1f}/100)"])
+        if self.health_confidence is not None:
+            lines.append(f"  Model classification score: {self.health_confidence:.1f}% (uncalibrated)")
         if self.active_drivers:
-            lines.append("--- DEGRADATION DRIVERS ---------------------")
-            for d in self.active_drivers:
-                filled = int(d["strength"] / 10)
-                bar = "#" * filled + "." * (10 - filled)
-                lines.append(f"  {d['name']:20s} [{bar}] {d['strength']:.0f}%")
-            lines.append("")
-        
-        # Trajectory
+            lines.append("\n--- CANDIDATE PRESSURES (NOT CAUSAL ATTRIBUTION) ---")
+            for driver in self.active_drivers:
+                lines.append(f"  {driver.get('name', 'Unknown')}: {driver.get('strength', 0):.1f}/100")
         if self.trajectory_scores:
-            lines.append("--- PREDICTED TRAJECTORY --------------------")
-            lines.append(f"  Current health: {self.health_score:.1f}")
-            for horizon, score, unc in zip(
-                self.trajectory_horizons, self.trajectory_scores, self.trajectory_uncertainty or [0]*5
-            ):
-                arrow = "v" if score < self.health_score else "^" if score > self.health_score else "="
-                unc_str = f" +/-{unc:.1f}" if unc > 0 else ""
-                lines.append(f"  {horizon:>10s}  {arrow} {score:.1f}{unc_str}")
-            lines.append("")
-        
-        # Tipping point
+            lines.append("\n--- MODEL TRAJECTORY ---")
+            uncertainty = self.trajectory_uncertainty or [0] * len(self.trajectory_scores)
+            for label, score, spread in zip(self.trajectory_horizons, self.trajectory_scores, uncertainty):
+                spread_text = f" (model spread {spread:.1f}; uncalibrated)" if spread else ""
+                lines.append(f"  {label}: {score:.1f}/100{spread_text}")
         if self.tipping_point:
-            tp = self.tipping_point
-            lines.extend([
-                "--- TIPPING-POINT RISK -------------------------",
-                f"  Risk Score:    {tp.risk_score:.2f} ({tp.risk_category})",
-                f"  Confidence:    {tp.confidence:.0%}",
-            ])
-            if tp.time_to_tipping is not None:
-                if tp.time_to_tipping == 0:
-                    lines.append("  Time to tipping: !! ALREADY PAST THRESHOLD")
-                else:
-                    years = tp.time_to_tipping / 365
-                    lines.append(f"  Time to tipping: ~{years:.1f} years ({tp.time_to_tipping:.0f} days)")
-            if tp.contributing_factors:
-                lines.append("  Contributing factors:")
-                for f in tp.contributing_factors:
-                    lines.append(f"    - {f}")
-            lines.append("")
-        
-        # Interventions
+            assessment = self.tipping_point
+            score = f"{assessment.risk_score:.2f}" if assessment.risk_score is not None else "unavailable"
+            lines.extend(["\n--- EXPLORATORY ECOLOGICAL SCREENING ---",
+                          f"  Heuristic index: {score} ({assessment.risk_category})",
+                          "  Tipping probability, tipping date and calibrated confidence: unavailable"])
+            lines.extend(f"    - {factor}" for factor in assessment.contributing_factors)
         if self.interventions and self.interventions.recommended:
-            rec = self.interventions.recommended
-            lines.extend([
-                "--- RECOMMENDED INTERVENTION -------------------",
-                f"  {rec.scenario.name}",
-                f"  {rec.scenario.description}",
-                f"  Projected 5yr health: {rec.projected_health_100[-1]:.1f}%",
-                f"  Improvement:          +{rec.improvement_vs_baseline[-1]*100:.1f}pp",
-                f"  Cost effectiveness:   {rec.cost_effectiveness:.3f}",
-                "",
-            ])
-        
+            result = self.interventions.recommended
+            label = self.interventions.horizons[-1]
+            lines.extend(["\n--- HIGHEST RANKED HYPOTHETICAL SCENARIO ---",
+                          f"  {result.scenario.name}", f"  {result.scenario.description}",
+                          f"  Conditional {label} health: {result.projected_health_100[-1]:.1f}/100",
+                          f"  Assumed difference: +{result.improvement_vs_baseline[-1] * 100:.1f} points",
+                          "  Scenario ranking is not a validated intervention recommendation."])
+        lines.append("\n--- LIMITATIONS ---")
+        lines.extend(f"  - {limitation}" for limitation in self.limitations)
+        if self.tipping_point:
+            lines.extend(f"  - {limitation}" for limitation in self.tipping_point.limitations)
         lines.append("=" * 60)
         return "\n".join(lines)
 
 
 class EcologicalRiskEngine:
-    """Orchestrates full ecological risk analysis.
-    
-    Takes model predictions and performs post-hoc risk analysis
-    including tipping-point assessment and intervention simulation.
-    
-    Args:
-        config: Risk engine configuration.
-    """
+    """Combine model outputs with descriptive diagnostics and scenario sensitivity."""
 
     def __init__(self, config: dict | None = None):
         self.config = config or {}
@@ -173,133 +100,102 @@ class EcologicalRiskEngine:
         health_history: np.ndarray,
         health_state: int,
         health_score: float,
-        health_confidence: float,
+        health_confidence: float | None,
         active_drivers: list[dict],
         driver_strengths: np.ndarray,
         trajectory_scores: np.ndarray,
         trajectory_uncertainty: np.ndarray | None = None,
         location: str | None = None,
+        *,
+        horizon_days: list[int] | None = None,
+        timestamps: np.ndarray | list | None = None,
+        season_period: int | None = None,
     ) -> ForestMindReport:
-        """Run full ecological risk analysis.
-        
-        Args:
-            health_history: (T,) historical health scores.
-            health_state: Predicted health state (0-4).
-            health_score: Predicted health score (0-100).
-            health_confidence: Confidence in prediction (0-100).
-            active_drivers: List of active driver dicts.
-            driver_strengths: (8,) driver strength array.
-            trajectory_scores: (H,) predicted future health scores (0-100).
-            trajectory_uncertainty: (H,) prediction uncertainty.
-            location: Optional location identifier.
-            
-        Returns:
-            ForestMindReport with comprehensive analysis.
+        """Analyze historical observations, without appending model forecasts to CSD.
+
+        Explicit horizon_days override configuration. If none are supplied, the
+        configured horizon_days/horizons or the legacy five horizons are used.
+        Histories may contain gaps; diagnostics disclose rather than fill them.
         """
-        # ─── Tipping-Point Assessment ─────────────────────
-        # Use the full health series (history + predicted future)
-        extended_series = np.concatenate([
-            health_history,
-            trajectory_scores / 100.0,  # normalize to [0, 1]
-        ])
-        
-        tp_config = self.config.get("tipping_point", {})
-        tp_assessment = assess_tipping_point(health_history, tp_config)
-
-        # ─── Intervention Simulation ──────────────────────
-        int_config = self.config.get("intervention", {})
-        trajectory_normalized = trajectory_scores / 100.0
-
+        history = _health_array(health_history)
+        trajectory = np.asarray(trajectory_scores, dtype=float)
+        if (trajectory.ndim != 1 or not len(trajectory) or not np.all(np.isfinite(trajectory))
+                or np.any((trajectory < 0) | (trajectory > 100))):
+            raise ValueError("trajectory_scores must be a finite nonempty one-dimensional array in [0, 100]")
+        if not np.isfinite(health_score) or not 0 <= health_score <= 100:
+            raise ValueError("health_score must be finite and lie in [0, 100]")
+        if health_confidence is not None and (
+            not np.isfinite(health_confidence) or not 0 <= health_confidence <= 100
+        ):
+            raise ValueError("health_confidence must be unavailable or finite and lie in [0, 100]")
+        uncertainty = np.asarray(trajectory_uncertainty, dtype=float) if trajectory_uncertainty is not None else None
+        if uncertainty is not None and (
+            uncertainty.shape != trajectory.shape or not np.all(np.isfinite(uncertainty))
+            or np.any(uncertainty < 0)
+        ):
+            raise ValueError("trajectory_uncertainty must be finite, non-negative and match trajectory_scores")
+        configured = self.config.get("horizon_days", self.config.get("horizons"))
+        if configured is None:
+            configured = self.config.get("heads", {}).get("trajectory", {}).get("horizons")
+        days = resolve_horizons(horizon_days if horizon_days is not None else configured, len(trajectory))
+        labels = [horizon_label(day) for day in days]
+        risk_config = self.config.get("risk_engine", self.config)
+        assessment_config = dict(risk_config.get("tipping_point", {}))
+        assessment_config["csd"] = {
+            **risk_config.get("csd", {}), **assessment_config.get("csd", {}),
+        }
+        assessment = assess_tipping_point(history, assessment_config,
+                                         timestamps=timestamps, season_period=season_period)
         interventions = run_intervention_analysis(
-            baseline_trajectory=trajectory_normalized,
-            driver_strengths=driver_strengths,
-            current_health=health_score / 100.0,
-            config=int_config,
+            baseline_trajectory=trajectory / 100, driver_strengths=driver_strengths,
+            current_health=health_score / 100, horizon_days=days,
+            config=risk_config.get("intervention", {}),
         )
-
-        # ─── Early Warnings ──────────────────────────────
-        early_warnings = []
+        warnings = []
         alert_level = "NONE"
-
-        # Check tipping-point risk
-        if tp_assessment.risk_category == "Critical":
-            early_warnings.append(
-                "CRITICAL: Ecosystem shows strong signs of approaching irreversible degradation"
-            )
-            alert_level = "CRITICAL"
-        elif tp_assessment.risk_category == "High":
-            early_warnings.append(
-                "WARNING: Multiple tipping-point indicators are elevated"
-            )
-            alert_level = "WARNING"
-        elif tp_assessment.risk_category == "Elevated":
-            early_warnings.append(
-                "WATCH: Some early-warning indicators are active"
-            )
+        if assessment.risk_category in {"High", "Critical"}:
+            warnings.append("Several screening indicators warrant prompt field investigation; irreversibility is not established")
+            alert_level = "WARNING" if assessment.risk_category == "High" else "CRITICAL"
+        elif assessment.risk_category == "Elevated":
+            warnings.append("Exploratory condition indicators are elevated")
             alert_level = "WATCH"
-
-        # Check trajectory
-        if len(trajectory_scores) > 0:
-            predicted_5yr = trajectory_scores[-1]
-            if predicted_5yr < 30:
-                early_warnings.append(
-                    f"5-year projection shows severe degradation ({predicted_5yr:.0f}/100)"
-                )
-                if alert_level == "NONE":
-                    alert_level = "WARNING"
-            elif predicted_5yr < 50:
-                early_warnings.append(
-                    f"5-year projection shows significant decline ({predicted_5yr:.0f}/100)"
-                )
-                if alert_level == "NONE":
-                    alert_level = "WATCH"
-
-        # Check CSD-specific warnings
-        if tp_assessment.csd_result and tp_assessment.csd_result.is_warning:
-            early_warnings.append(
-                f"Critical slowing down detected (AR1={tp_assessment.csd_result.ar1_coefficient:.2f})"
-            )
-
-        # Check rapid decline
-        if len(health_history) >= 3:
-            recent_change = health_history[-1] - health_history[-3]
+        if trajectory[-1] < 30:
+            warnings.append(f"Model projection at {labels[-1]} indicates low health ({trajectory[-1]:.0f}/100); validation required")
+            if alert_level in {"NONE", "WATCH"}:
+                alert_level = "WARNING"
+        elif trajectory[-1] < 50:
+            warnings.append(f"Model projection at {labels[-1]} indicates reduced health ({trajectory[-1]:.0f}/100); validation required")
+            if alert_level == "NONE":
+                alert_level = "WATCH"
+        if assessment.csd_result and assessment.csd_result.is_warning:
+            warnings.append("Increasing residual persistence and variance warrant investigation; CSD alone does not establish a tipping point")
+            if alert_level == "NONE":
+                alert_level = "WATCH"
+        if len(history) >= 3 and np.all(np.isfinite(history[-3:])):
+            recent_change = history[-1] - history[-3]
             if recent_change < -0.15:
-                early_warnings.append(
-                    f"Rapid recent decline: {recent_change*100:.1f}pp over last observations"
-                )
-                if alert_level in ("NONE", "WATCH"):
+                warnings.append(f"Recent health decrease: {recent_change * 100:.1f} points over the last three observations")
+                if alert_level in {"NONE", "WATCH"}:
                     alert_level = "WARNING"
-
-        # Primary driver
-        primary_driver = None
-        if active_drivers:
-            primary_driver = max(active_drivers, key=lambda d: d.get("strength", 0))["name"]
-
-        # ─── Build Report ─────────────────────────────────
-        horizon_names = ["30 days", "6 months", "1 year", "3 years", "5 years"]
-
         if isinstance(health_state, str):
             state_label = health_state
         elif isinstance(health_state, (int, np.integer)) and 0 <= int(health_state) < len(HEALTH_STATE_NAMES):
             state_label = HEALTH_STATE_NAMES[int(health_state)]
         else:
             state_label = "Unknown"
-
-        report = ForestMindReport(
-            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            location=location,
-            health_state=state_label,
-            health_score=health_score,
-            health_confidence=health_confidence,
-            active_drivers=active_drivers,
-            primary_driver=primary_driver,
-            trajectory_horizons=horizon_names[:len(trajectory_scores)],
-            trajectory_scores=trajectory_scores.tolist(),
-            trajectory_uncertainty=trajectory_uncertainty.tolist() if trajectory_uncertainty is not None else [],
-            tipping_point=tp_assessment,
-            interventions=interventions,
-            early_warnings=early_warnings,
-            alert_level=alert_level,
+        primary = max(active_drivers, key=lambda driver: driver.get("strength", 0)).get("name") if active_drivers else None
+        return ForestMindReport(
+            timestamp=datetime.now(timezone.utc).isoformat(), location=location,
+            health_state=state_label, health_score=float(health_score),
+            health_confidence=float(health_confidence) if health_confidence is not None else None,
+            active_drivers=active_drivers, primary_driver=primary,
+            trajectory_horizons=labels, trajectory_scores=trajectory.tolist(),
+            trajectory_uncertainty=uncertainty.tolist() if uncertainty is not None else [],
+            tipping_point=assessment, interventions=interventions,
+            early_warnings=warnings, alert_level=alert_level,
+            limitations=[
+                "Model scores and uncertainty have not been calibrated by this risk engine.",
+                "Candidate pressures do not establish the causes of forest change.",
+                "Intervention outputs are hypothetical scenario calculations, not causal forecasts.",
+            ],
         )
-
-        return report
