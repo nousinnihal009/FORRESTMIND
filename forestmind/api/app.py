@@ -6,11 +6,12 @@ import csv
 from datetime import datetime, timezone
 import io
 import json
+import logging
 import os
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -34,6 +35,7 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
     """Create an isolated app; db_path supports temporary databases in tests."""
     database = db_path or os.environ.get("FORESTMIND_DB", "data/forestmind.db")
     store = Store(database)
+    store.recover_jobs(now())
     if seed_demo:
         for region, observations in demo_regions():
             if store.region(region["id"]) is None:
@@ -92,7 +94,8 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
             "id": region_id, "name": payload.name, "country": payload.country,
             "center": center, "area_km2": area, "geometry": payload.geometry.model_dump(),
             "provenance": {
-                "mode": "imported_observations", "synthetic": False, "source": payload.source,
+                "mode": "synthetic_import" if payload.synthetic else "imported_observations",
+                "synthetic": payload.synthetic, "source": payload.source,
                 "notes": payload.notes, "method": METHOD, "model": "No trained model used",
                 "verified": False, "imported_at": now(),
                 "geometry_note": "User-supplied polygon; area is a local planar approximation.",
@@ -108,6 +111,7 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
     def import_example():
         region, observations = demo_regions()[0]
         return {"name": "Example imported AOI", "country": "Brazil",
+                "synthetic": True,
                 "source": "SCHEMA EXAMPLE ONLY: these example observations are synthetic.",
                 "notes": "Replace every observation and geometry with your prepared measurements before importing.",
                 "geometry": region["geometry"], "observations": observations}
@@ -139,17 +143,30 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
     def get_alerts():
         return {"alerts": store.list_alerts()}
 
-    @app.post("/api/v1/analysis", status_code=201)
-    def run_analysis(payload: AnalysisRequest):
+    def execute_analysis(job: dict, saved: tuple[dict, list[dict]]):
+        job.update({"status": "running", "started_at": now()})
+        store.save_job(job)
+        try:
+            result = analyze_region(*saved)
+            job.update({"status": "completed", "completed_at": now(), "result": result})
+            store.save_analysis(result, job)
+        except Exception:
+            logging.getLogger(__name__).exception("Analysis job %s failed", job["id"])
+            job.update({"status": "failed", "completed_at": now(),
+                        "error": "Analysis failed. See local server logs for details."})
+            store.save_job(job)
+
+    @app.post("/api/v1/analysis", status_code=202)
+    def run_analysis(payload: AnalysisRequest, tasks: BackgroundTasks):
         saved = store.region(payload.region_id)
         if saved is None:
             raise HTTPException(404, "Region not found")
         created = now()
-        result = analyze_region(*saved)
-        job = {"id": "job-" + uuid4().hex[:12], "status": "completed", "region_id": payload.region_id,
-               "created_at": created, "completed_at": now(), "result": result,
-               "execution": "Synchronous deterministic baseline analysis"}
-        store.save_analysis(result, job)
+        job = {"id": "job-" + uuid4().hex[:12], "status": "pending", "region_id": payload.region_id,
+               "created_at": created, "started_at": None, "completed_at": None, "result": None,
+               "error": None, "execution": "Local background deterministic baseline analysis"}
+        store.save_job(job)
+        tasks.add_task(execute_analysis, job.copy(), saved)
         return job
 
     @app.get("/api/v1/analysis/{job_id}")
@@ -193,6 +210,7 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
 
     web = Path(__file__).resolve().parents[1] / "web"
     if web.exists():
+        app.mount("/static", StaticFiles(directory=web), name="static")
         app.mount("/assets", StaticFiles(directory=web), name="assets")
 
         @app.get("/", include_in_schema=False)
