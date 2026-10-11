@@ -52,14 +52,16 @@ def _build_foundation_model(config: dict) -> FoundationModelBase:
             model_name=prithvi_cfg.get("model_name", "ibm-nasa-geospatial/Prithvi-EO-2.0-300M"),
             target_dim=config.get("embedding_dim", 256),
             freeze_backbone=prithvi_cfg.get("freeze", True),
+            use_proxy=prithvi_cfg.get("use_proxy", False),
         )
     elif name == "terramind":
         from forestmind.models.foundation.terramind import TerraMindAdapter
         terra_cfg = config.get("terramind", {})
         return TerraMindAdapter(
-            model_name=terra_cfg.get("model_name", "terramind-base"),
+            model_name=terra_cfg.get("model_name", "terramind_v1_base"),
             target_dim=config.get("embedding_dim", 256),
             freeze_backbone=terra_cfg.get("freeze", True),
+            use_proxy=terra_cfg.get("use_proxy", False),
         )
     else:
         raise ValueError(f"Unknown foundation model: {name}")
@@ -127,6 +129,7 @@ class ForestMindModel(nn.Module):
             dropout=temporal_cfg.get("dropout", 0.1),
             max_seq_len=temporal_cfg.get("max_seq_len", 48),
             use_continuous_pe=temporal_cfg.get("use_continuous_pe", True),
+            causal=temporal_cfg.get("causal", False),
         )
 
         # ─── Prediction Heads ─────────────────────────────
@@ -162,6 +165,12 @@ class ForestMindModel(nn.Module):
         optical: Tensor,
         sar: Tensor,
         timestamps: Tensor,
+        observation_mask: Tensor | None = None,
+        optical_mask: Tensor | None = None,
+        sar_mask: Tensor | None = None,
+        quality_mask: Tensor | None = None,
+        climate_context: Tensor | None = None,
+        activity_context: Tensor | None = None,
     ) -> dict[str, dict[str, Tensor]]:
         """Full forward pass through the ForestMind pipeline.
         
@@ -178,7 +187,46 @@ class ForestMindModel(nn.Module):
                 "trajectory": {mean, score_100, uncertainty},
             }
         """
-        B, T, C_opt, H, W = optical.shape
+        if optical is None and sar is None:
+            raise ValueError("At least one satellite modality is required")
+        reference = optical if optical is not None else sar
+        if reference.ndim != 5:
+            raise ValueError("Satellite input must have shape (B, T, C, H, W)")
+        B, T, _, H, W = reference.shape
+        if optical is None:
+            optical = reference.new_zeros(B, T, 12, H, W)
+            optical_mask = torch.zeros(B, T, dtype=torch.bool, device=reference.device)
+        if sar is None:
+            sar = reference.new_zeros(B, T, 2, H, W)
+            sar_mask = torch.zeros(B, T, dtype=torch.bool, device=reference.device)
+        if optical.shape != (B, T, 12, H, W) or sar.shape != (B, T, 2, H, W):
+            raise ValueError("Expected matching optical (12 channels) and SAR (2 channels) grids")
+        masks = []
+        for name, mask in (("optical_mask", optical_mask), ("sar_mask", sar_mask)):
+            if mask is None:
+                mask = torch.ones(B, T, dtype=torch.bool, device=reference.device)
+            if mask.shape != (B, T):
+                raise ValueError(f"{name} must have shape (B, T)")
+            masks.append(mask.to(device=reference.device, dtype=torch.bool))
+        optical_mask, sar_mask = masks
+        valid = optical_mask | sar_mask
+        if observation_mask is not None:
+            if observation_mask.shape != (B, T):
+                raise ValueError("observation_mask must have shape (B, T)")
+            valid = valid & observation_mask.to(device=reference.device, dtype=torch.bool)
+        if self.foundation.supports_modalities == ["optical"]:
+            valid = valid & optical_mask
+        if not valid.any(dim=1).all():
+            raise ValueError("Every sample needs at least one observed timestep supported by the encoder")
+        optical = optical.masked_fill(~(optical_mask & valid)[..., None, None, None], 0)
+        sar = sar.masked_fill(~(sar_mask & valid)[..., None, None, None], 0)
+        if quality_mask is not None:
+            if quality_mask.shape != (B, T, H, W):
+                raise ValueError("quality_mask must have shape (B, T, H, W)")
+            optical = optical.masked_fill(~quality_mask[:, :, None].bool(), 0)
+        if not torch.isfinite(optical).all() or not torch.isfinite(sar).all():
+            raise ValueError("Observed satellite pixels must be finite; mask missing data explicitly")
+        C_opt = optical.shape[2]
         C_sar = sar.shape[2]
 
         # ─── Per-Timestep Encoding ─────────────────────────
@@ -188,23 +236,32 @@ class ForestMindModel(nn.Module):
         combined_flat = combined.view(B * T, C_opt + C_sar, H, W)
 
         # Foundation model encoding
-        embeddings_flat = self.foundation(combined_flat)  # (B*T, D)
+        # Exclude padded observations from the encoder as well as attention;
+        # otherwise padding can contaminate BatchNorm statistics in proxy CNNs.
+        flat_valid = valid.reshape(-1)
+        encoded = self.foundation(combined_flat[flat_valid])
+        embeddings_flat = encoded.new_zeros(B * T, self.foundation.embedding_dim)
+        embeddings_flat[flat_valid] = encoded
         embeddings = embeddings_flat.view(B, T, -1)  # (B, T, D)
 
         # ─── Multimodal Fusion (per-timestep) ──────────────
         fused_embeddings = []
         for t in range(T):
-            fused_t = self.fusion(embeddings[:, t])  # (B, D)
+            fused_t = self.fusion(
+                embeddings[:, t],
+                climate_context[:, t] if climate_context is not None else None,
+                activity_context[:, t] if activity_context is not None else None,
+            )
             fused_embeddings.append(fused_t)
         fused_embeddings = torch.stack(fused_embeddings, dim=1)  # (B, T, D)
 
         # ─── Temporal Modeling ─────────────────────────────
-        sequence, summary = self.temporal(fused_embeddings, timestamps)
+        sequence, summary = self.temporal(fused_embeddings, timestamps, valid)
 
         # ─── Prediction Heads ─────────────────────────────
         health_out = self.health_head(summary)
         attribution_out = self.attribution_head(summary)
-        trajectory_out = self.trajectory_head(sequence, summary)
+        trajectory_out = self.trajectory_head(sequence, summary, valid)
 
         return {
             "health": health_out,
@@ -218,13 +275,14 @@ class ForestMindModel(nn.Module):
         optical: Tensor,
         sar: Tensor,
         timestamps: Tensor,
+        **kwargs,
     ) -> dict:
         """Inference-mode prediction with human-readable outputs.
         
         Same as forward() but with evaluation mode and no gradients.
         """
         self.eval()
-        outputs = self.forward(optical, sar, timestamps)
+        outputs = self.forward(optical, sar, timestamps, **kwargs)
 
         health_states = ["Healthy", "Stressed", "Degraded", "Severely Degraded", "Cleared"]
         driver_names = [
@@ -251,7 +309,7 @@ class ForestMindModel(nn.Module):
                 if attr["active"][0, i].item() > 0
             ],
             "trajectory": {
-                "horizons": ["30 days", "6 months", "1 year", "3 years", "5 years"],
+                "horizons": [f"{days} days" for days in self.trajectory_head.horizon_days],
                 "health_scores": [round(v, 1) for v in (traj["score_100"][0]).tolist()],
             },
         }
