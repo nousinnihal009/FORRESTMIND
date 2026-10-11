@@ -1,18 +1,9 @@
-"""
-Cross-sensor band harmonization for ForestMind.
+"""Band alignment for Landsat and Sentinel-2 observations.
 
-Aligns spectral bands from different sensors (Landsat-8/9, Sentinel-2)
-to a common 12-band Sentinel-2-equivalent representation. This enables
-seamless model inference across multi-source time series.
-
-Harmonization approach:
-  - Landsat → S2: Linear regression coefficients from HLS (Harmonized
-    Landsat Sentinel-2) project. Landsat bands are mapped to their closest
-    Sentinel-2 equivalents, with missing bands interpolated.
-
-Reference:
-  Claverie et al. (2018) "The Harmonized Landsat and Sentinel-2 surface
-  reflectance data set" Remote Sensing of Environment, 219, 145-161.
+This aligns broadly corresponding bands; it is NOT the NASA HLS processing
+chain and does not perform atmospheric, BRDF, or spectral-response corrections.
+Missing red-edge/water-vapour measurements are zero-filled by default. Optional
+interpolation is an explicitly synthetic approximation, not an observation.
 """
 
 from __future__ import annotations
@@ -25,33 +16,11 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-# ─── HLS Harmonization Coefficients ──────────────────────────────────────────
-# Source: HLS V2.0 Algorithm Theoretical Basis Document
-# Coefficients transform Landsat OLI reflectance → S2 MSI equivalent
-# Format: S2_band = slope * Landsat_band + offset
-
-# Mapping: Landsat OLI band index (in our 7-band order) → coefficient
-# Landsat bands: B1(CA), B2(Blue), B3(Green), B4(Red), B5(NIR), B6(SWIR1), B7(SWIR2)
-# Target: 12 S2 bands
-
-HLS_COEFFICIENTS = {
-    # S2 Band: (Landsat source band index, slope, offset)
-    # Direct spectral matches
-    "B01": (0, 0.9959, -0.0002),   # CA ← L-B1
-    "B02": (1, 0.9778, -0.004),    # Blue ← L-B2
-    "B03": (2, 1.0053, -0.0009),   # Green ← L-B3
-    "B04": (3, 0.8462,  0.0333),   # Red ← L-B4
-    "B08": (4, 0.8225,  0.0215),   # NIR ← L-B5
-    "B11": (5, 0.9628, -0.0046),   # SWIR1 ← L-B6
-    "B12": (6, 0.9010, -0.0032),   # SWIR2 ← L-B7
-
-    # Interpolated / estimated for bands without direct Landsat equivalent
-    "B05": (3, 0.86, 0.03),        # RedEdge1 ≈ interpolate(Red, NIR)
-    "B06": (4, 0.85, 0.02),        # RedEdge2 ≈ scaled NIR
-    "B07": (4, 0.84, 0.02),        # RedEdge3 ≈ scaled NIR
-    "B8A": (4, 0.83, 0.02),        # NarrowNIR ≈ scaled NIR
-    "B09": (4, 0.75, 0.04),        # WaterVapour ≈ estimated from NIR
-}
+# Direct band placement only. No unverified HLS correction coefficients.
+BAND_MAPPING = {"B01": 0, "B02": 1, "B03": 2, "B04": 3,
+                "B08": 4, "B11": 5, "B12": 6}
+# Compatibility alias: identity mappings, not published HLS coefficients.
+HLS_COEFFICIENTS = {band: (index, 1.0, 0.0) for band, index in BAND_MAPPING.items()}
 
 # Target S2 band order (matches our 12-band convention)
 S2_BAND_ORDER = [
@@ -80,9 +49,11 @@ class BandHarmonizer:
     def __init__(
         self,
         target_bands: Optional[list[str]] = None,
-        interpolate_red_edge: bool = True,
+        interpolate_red_edge: bool = False,
     ):
         self.target_bands = target_bands or S2_BAND_ORDER
+        if any(band not in S2_BAND_ORDER for band in self.target_bands):
+            raise ValueError("Unknown Sentinel-2 target band")
         self.interpolate_red_edge = interpolate_red_edge
         self._build_transform_matrix()
 
@@ -102,8 +73,7 @@ class BandHarmonizer:
     def harmonize_landsat(self, patch: np.ndarray) -> np.ndarray:
         """Transform a Landsat 7-band patch to 12-band S2 equivalent.
 
-        Uses HLS linear regression coefficients for direct band matches
-        and interpolation for red-edge bands (B05, B06, B07, B8A).
+        Uses direct band placement, with optional synthetic red-edge interpolation.
 
         Args:
             patch: (7, H, W) Landsat surface reflectance in [0, 1].
@@ -115,7 +85,7 @@ class BandHarmonizer:
             raise ValueError(f"Expected 7-band Landsat input, got {patch.shape[0]} bands")
 
         _, H, W = patch.shape
-        output = np.zeros((12, H, W), dtype=np.float32)
+        output = np.zeros((len(self.target_bands), H, W), dtype=np.float32)
 
         for i, band in enumerate(self.target_bands):
             if band in HLS_COEFFICIENTS:
@@ -125,6 +95,11 @@ class BandHarmonizer:
                 # Should not happen with current config, but handle gracefully
                 output[i] = 0.0
 
+        if self.interpolate_red_edge:
+            # Explicitly synthetic red-edge approximation between red and NIR.
+            for band, weight in (("B05", 0.25), ("B06", 0.5), ("B07", 0.75), ("B8A", 1.0)):
+                if band in self.target_bands:
+                    output[self.target_bands.index(band)] = (1 - weight) * patch[3] + weight * patch[4]
         # If not interpolating red-edge, zero those bands
         if not self.interpolate_red_edge:
             for i, band in enumerate(self.target_bands):
@@ -153,7 +128,7 @@ class BandHarmonizer:
         if source_sensor == "sentinel2":
             # Already in target format
             if patch.shape[0] == 12:
-                return patch
+                return patch[[S2_BAND_ORDER.index(band) for band in self.target_bands]]
             else:
                 raise ValueError(
                     f"Sentinel-2 data should have 12 bands, got {patch.shape[0]}"
