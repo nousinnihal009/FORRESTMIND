@@ -35,6 +35,7 @@ real-data = [
     "shapely>=2.0",
 ]
 foundation = [
+    "terratorch>=1.1",
     "transformers>=4.35",
     "safetensors>=0.4",
     "huggingface-hub>=0.20",
