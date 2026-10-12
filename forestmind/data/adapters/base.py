@@ -273,6 +273,7 @@ class SatelliteAdapterBase(ABC):
             "preprocessing_version": preprocessing_version or "unverified",
             "provider": "microsoft-planetary-computer" if preprocessing_version else "unknown",
             "data_units": data_units,
+            "collection": (scene.stac_item or {}).get("collection", "unrecorded"),
         }
         if preprocessing_version == PREPROCESSING_VERSION:
             dx = (bbox.east - bbox.west) / data.shape[-1]
