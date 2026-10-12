@@ -57,17 +57,15 @@ class ForestMindDataset(Dataset):
         self.source = source
         self.transform = transform
         self.config = config or {}
+        self.seed = seed
+        self.num_samples = num_samples
 
         if source == "synthetic":
-            self.generator = SyntheticForestGenerator(
-                patch_size=self.config.get("patch_size", 128),
-                num_bands=self.config.get("num_bands", 12),
-                sar_channels=self.config.get("sar_channels", 2),
-                time_steps=self.config.get("time_steps", 12),
-                seed=seed,
-            )
-            # Pre-generate all samples for consistent epoch-to-epoch behavior
-            self.samples = self.generator.generate_dataset(num_samples)
+            if num_samples < 1:
+                raise ValueError("num_samples must be positive")
+            # Per-index seeds preserve repeated observations without retaining
+            # tens of GB of image arrays for the default dataset in RAM.
+            self.samples = None
 
         elif source in REAL_DATA_SOURCES:
             # Real satellite data mode — load from adapter cache
@@ -123,12 +121,27 @@ class ForestMindDataset(Dataset):
         logger.info(f"[dataset] Real data source '{source}': {len(self.npz_files)} cached patches")
 
     def __len__(self) -> int:
+        if self.source == "synthetic":
+            return self.num_samples
         if self.samples is not None:
             return len(self.samples)
         return len(self.npz_files)
 
     def __getitem__(self, idx: int) -> dict:
-        if self.samples is not None:
+        if idx < 0:
+            idx += len(self)
+        if not 0 <= idx < len(self):
+            raise IndexError(idx)
+        if self.source == "synthetic":
+            generator = SyntheticForestGenerator(
+                patch_size=self.config.get("patch_size", 128),
+                num_bands=self.config.get("num_bands", 12),
+                sar_channels=self.config.get("sar_channels", 2),
+                time_steps=self.config.get("time_steps", 12),
+                seed=np.random.SeedSequence([self.seed, idx]),
+            )
+            sample = generator.generate_sample()
+        elif self.samples is not None:
             # Return a copy to avoid in-place transform issues
             sample = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in self.samples[idx].items()}
         else:
@@ -337,8 +350,21 @@ def create_dataloaders(
     """
     data_cfg = config.get("data", config)
 
-    train_transform = get_train_transforms()
-    eval_transform = get_eval_transforms()
+    normalization = data_cfg.get("normalization")
+    foundation_cfg = config.get("foundation", {})
+    foundation_name = foundation_cfg.get("name", "custom_vit")
+    pretrained = foundation_name in ("prithvi", "terramind") and not foundation_cfg.get(
+        foundation_name, {}).get("use_proxy", False)
+    if pretrained:
+        required_stats = {"optical_mean", "optical_std", "sar_mean", "sar_std"}
+        if not isinstance(normalization, dict) or not required_stats.issubset(normalization):
+            raise ValueError(
+                "Pretrained encoders require explicit data.normalization optical_mean/std and "
+                "sar_mean/std matching the checkpoint AND input units. Synthetic default "
+                "statistics are not compatible with pretrained models."
+            )
+    train_transform = get_train_transforms(normalization=normalization)
+    eval_transform = get_eval_transforms(normalization=normalization)
 
     source = data_cfg.get("source", "synthetic")
     source_p = Path(source)
@@ -357,6 +383,30 @@ def create_dataloaders(
                 "files across splits would leak evaluation data. Split by geography and time."
             )
         train_source, val_source, test_source = map(str, split_paths)
+        resolved = [path.resolve() for path in split_paths]
+        if len(set(resolved)) != 3:
+            raise ValueError("Dataset split directories must refer to distinct locations")
+        # When locations are provided, enforce geographic holdouts as well as
+        # separate directories. Metadata-free datasets need an external split audit.
+        owners = {}
+        for split, path in zip(("train", "val", "test"), split_paths):
+            for file in path.glob("*.npz"):
+                with np.load(file, allow_pickle=False) as record:
+                    targets = {"health_state", "health_score", "drivers", "driver_strengths", "trajectory"}
+                    if not targets.issubset(record.files):
+                        raise ValueError(f"{file} lacks supervised targets; raw caches cannot train a model")
+                    if "label_valid" in record and not bool(record["label_valid"]):
+                        raise ValueError(f"{file} is explicitly unlabeled")
+                    location = None
+                    if "location_id" in record:
+                        location = str(record["location_id"])
+                    elif all(key in record for key in ("bbox_west", "bbox_south", "bbox_east", "bbox_north")):
+                        location = tuple(float(record[key]) for key in
+                                         ("bbox_west", "bbox_south", "bbox_east", "bbox_north"))
+                    if location is not None:
+                        if location in owners and owners[location] != split:
+                            raise ValueError(f"Geographic leakage: location {location} appears in multiple splits")
+                        owners[location] = split
 
     train_dataset = ForestMindDataset(
         source=train_source,
