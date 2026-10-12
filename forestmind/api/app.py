@@ -150,6 +150,22 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
     def get_region_alerts(region_id: str):
         return {"alerts": require_analysis(region_id)["alerts"]}
 
+    @app.get("/api/v1/regions/{region_id}/evaluation")
+    def evaluate_region(region_id: str):
+        """Backtest the same fixed indicator using only history before each cutoff."""
+        from forestmind.monitoring.evaluation import backtest_prepared
+
+        saved = store.region(region_id)
+        if saved is None:
+            raise HTTPException(404, "Region not found")
+        region, observations = saved
+        return backtest_prepared({
+            "name": region["name"], "country": region["country"],
+            "source": region["provenance"]["source"],
+            "synthetic": region["provenance"].get("synthetic", False),
+            "geometry": region["geometry"], "observations": observations,
+        })
+
     @app.get("/api/v1/alerts")
     def get_alerts():
         return {"alerts": store.list_alerts()}
