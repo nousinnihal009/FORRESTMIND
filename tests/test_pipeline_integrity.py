@@ -200,3 +200,69 @@ def test_harmonizer_honors_target_subset():
     harmonizer = BandHarmonizer(target_bands=["B04", "B08"])
     assert harmonizer.harmonize_landsat(np.zeros((7, 3, 3))).shape == (2, 3, 3)
     assert harmonizer.harmonize(np.zeros((12, 3, 3)), "sentinel2").shape == (2, 3, 3)
+
+
+def test_pretrained_training_requires_checkpoint_normalization():
+    with pytest.raises(ValueError, match="explicit data.normalization"):
+        create_dataloaders({"foundation": {"name": "terramind"}})
+
+
+def test_normalization_rejects_invalid_standard_deviation():
+    from forestmind.data.transforms import Normalize
+    with pytest.raises(ValueError, match="positive"):
+        Normalize(sar_std=[0., 1.])
+
+
+def test_synthetic_dataset_is_lazy_and_repeatable_by_index():
+    dataset = ForestMindDataset(num_samples=100_000,
+                               config={"patch_size": 32, "time_steps": 2})
+    assert dataset.samples is None
+    assert len(dataset) == 100_000
+    first, repeat, different = dataset[3], dataset[3], dataset[4]
+    np.testing.assert_equal(first["optical"], repeat["optical"])
+    assert not np.array_equal(first["optical"], different["optical"])
+
+
+def test_geographic_overlap_between_supervised_splits_is_rejected(tmp_path):
+    for split in ("train", "val", "test"):
+        directory = tmp_path / split
+        directory.mkdir()
+        np.savez(directory / "sample.npz", location_id="same-location",
+                 health_state=0, health_score=80., drivers=np.zeros(8),
+                 driver_strengths=np.zeros(8), trajectory=np.zeros(5))
+    with pytest.raises(ValueError, match="Geographic leakage"):
+        create_dataloaders({"data": {"source": str(tmp_path)}})
+
+
+def test_cache_geometry_and_version_are_explicit(tmp_path):
+    from datetime import datetime, timezone
+    from forestmind.data.adapters.base import PREPROCESSING_VERSION, SceneMetadata
+    from forestmind.data.adapters.sentinel2 import Sentinel2Adapter
+    from forestmind.utils.geo import BoundingBox
+
+    bbox = BoundingBox(west=1, south=2, east=3, north=4)
+    scene = SceneMetadata("scene", "sentinel2", datetime(2024, 1, 1, tzinfo=timezone.utc), bbox)
+    adapter = Sentinel2Adapter(cache_dir=tmp_path, patch_size=32)
+    path = adapter.cache_path_for_scene(scene, bbox)
+    adapter.save_patch_to_cache(path, np.ones((12, 32, 32)), scene, bbox,
+                                preprocessing_version=PREPROCESSING_VERSION,
+                                data_units="surface_reflectance_0_1")
+    with np.load(path, allow_pickle=False) as record:
+        assert str(record["preprocessing_version"]) == "forestmind-grid-v2"
+        assert str(record["grid_crs"]) == "EPSG:4326"
+        np.testing.assert_equal(record["grid_transform"], [0.0625, 0, 1, 0, -0.0625, 4])
+        assert str(record["provider"]) == "microsoft-planetary-computer"
+        assert str(record["scene_id"]) == "scene"
+
+
+def test_different_grid_sizes_do_not_reuse_cache(tmp_path):
+    from datetime import datetime
+    from forestmind.data.adapters.base import SceneMetadata
+    from forestmind.data.adapters.sentinel2 import Sentinel2Adapter
+    from forestmind.utils.geo import BoundingBox
+
+    bbox = BoundingBox(west=1, south=2, east=3, north=4)
+    scene = SceneMetadata("scene", "sentinel2", datetime(2024, 1, 1), bbox)
+    small = Sentinel2Adapter(cache_dir=tmp_path, patch_size=32)
+    large = Sentinel2Adapter(cache_dir=tmp_path, patch_size=128)
+    assert small.cache_path_for_scene(scene, bbox) != large.cache_path_for_scene(scene, bbox)
