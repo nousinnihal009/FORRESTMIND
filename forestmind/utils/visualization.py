@@ -380,92 +380,105 @@ def plot_tipping_point_dashboard(
     theta = np.linspace(np.pi, 0, 100)
     ax_gauge.plot(np.cos(theta), np.sin(theta), color="#ecf0f1", linewidth=20, solid_capstyle="round")
     
-    # Fill portion based on risk
-    fill_idx = int(tp.risk_score * 100)
+    # A missing screening score is unavailable, never represented as zero risk.
+    risk_score = _finite_value(tp.risk_score)
+    fill_idx = int(np.clip(risk_score, 0, 1) * len(theta)) if risk_score is not None else 0
     if fill_idx > 0:
         theta_fill = theta[:fill_idx]
         ax_gauge.plot(np.cos(theta_fill), np.sin(theta_fill), color=risk_color, linewidth=20, solid_capstyle="round")
 
-    ax_gauge.text(0, -0.1, f"{tp.risk_score:.2f}", fontsize=28, ha="center", va="center", fontweight="bold", color=risk_color)
+    ax_gauge.text(0, -0.1, f"{risk_score:.2f}" if risk_score is not None else "Unavailable",
+                  fontsize=28 if risk_score is not None else 18, ha="center", va="center",
+                  fontweight="bold", color=risk_color)
     ax_gauge.text(0, -0.4, tp.risk_category, fontsize=14, ha="center", va="center", color=risk_color)
     ax_gauge.set_xlim(-1.3, 1.3)
     ax_gauge.set_ylim(-0.6, 1.3)
     ax_gauge.set_aspect("equal")
     ax_gauge.axis("off")
-    ax_gauge.set_title("Risk Score", fontsize=12, fontweight="bold")
+    ax_gauge.set_title("Heuristic screening index", fontsize=12, fontweight="bold")
 
-    # ─── Top middle: Component radar ──────────────────
-    ax_radar = fig.add_subplot(gs[0, 1], projection="polar")
-    categories = ["CSD", "Resilience\n(inverse)", "Fragmentation", "Momentum", "Drought\nSensitivity"]
-    values = [
-        tp.csd_score,
-        1 - tp.resilience_score,
-        tp.fragmentation_score,
-        tp.momentum_score,
-        tp.drought_sensitivity_score,
-    ]
-    
-    angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
-    values_plot = values + [values[0]]
-    angles_plot = angles + [angles[0]]
-    
-    ax_radar.fill(angles_plot, values_plot, alpha=0.25, color=risk_color)
-    ax_radar.plot(angles_plot, values_plot, "o-", color=risk_color, linewidth=2)
-    ax_radar.set_xticks(angles)
-    ax_radar.set_xticklabels(categories, fontsize=8)
-    ax_radar.set_ylim(0, 1)
-    ax_radar.set_title("Risk Components", fontsize=12, fontweight="bold", pad=20)
+    # Bars allow missing dimensions to remain visibly unavailable. A closed
+    # radar polygon would imply a numeric value for every component.
+    ax_components = fig.add_subplot(gs[0, 1])
+    resilience = _finite_value(tp.resilience_score)
+    components = {
+        "CSD heuristic": _finite_value(tp.csd_score),
+        "Limited rebound proxy": 1 - resilience if resilience is not None else None,
+        "Spatial fragmentation": _finite_value(tp.fragmentation_score),
+        "Decline proxy": _finite_value(tp.momentum_score),
+        "Drought-coincident drop": _finite_value(tp.drought_sensitivity_score),
+    }
+    for index, value in enumerate(components.values()):
+        if value is None:
+            ax_components.text(0.02, index, "Unavailable", va="center", fontsize=9,
+                               color="#7f8c8d")
+        else:
+            ax_components.barh(index, value, color=risk_color, alpha=0.8, height=0.5)
+    ax_components.set_yticks(np.arange(len(components)))
+    ax_components.set_yticklabels(list(components), fontsize=8)
+    ax_components.set_ylim(len(components) - 0.5, -0.5)
+    ax_components.set_xlim(0, 1)
+    ax_components.set_title("Selected screening components", fontsize=11, fontweight="bold")
 
     # ─── Top right: CSD details ───────────────────────
     ax_csd = fig.add_subplot(gs[0, 2])
-    if tp.csd_result:
+    if tp.csd_result and getattr(tp.csd_result, "status", "available") == "available":
         csd = tp.csd_result
         metrics = {
-            "AR(1) Coeff": csd.ar1_coefficient,
-            "AR(1) Trend": (csd.ar1_trend + 1) / 2,
-            "Variance Trend": (csd.variance_trend + 1) / 2,
-            "AC Trend": (csd.autocorrelation_trend + 1) / 2,
-            "Recovery Rate": csd.recovery_rate,
+            "AR(1) coefficient": _finite_value(csd.ar1_coefficient),
+            "AR(1) trend (tau)": _finite_value(csd.ar1_trend),
+            "Variance trend (tau)": _finite_value(csd.variance_trend),
+            "Correlation trend (tau)": _finite_value(csd.autocorrelation_trend),
+            "Persistence proxy": _finite_value(csd.recovery_rate),
         }
         names = list(metrics.keys())
-        vals = list(metrics.values())
         y_pos = np.arange(len(names))
-        bar_colors = ["#e74c3c" if v > 0.7 else "#f39c12" if v > 0.4 else "#2ecc71" for v in vals]
-        ax_csd.barh(y_pos, vals, color=bar_colors, alpha=0.8, height=0.5)
+        vals = [value for value in metrics.values() if value is not None]
+        for index, value in enumerate(metrics.values()):
+            if value is None:
+                ax_csd.text(0.02, index, "Unavailable", va="center", fontsize=9,
+                            color="#7f8c8d", transform=ax_csd.get_yaxis_transform())
+            else:
+                ax_csd.barh(index, value, color="#3498db", alpha=0.8, height=0.5)
         ax_csd.set_yticks(y_pos)
         ax_csd.set_yticklabels(names, fontsize=9)
-        ax_csd.set_xlim(0, 1.1)
-        ax_csd.set_title("CSD Indicators", fontsize=12, fontweight="bold")
-        ax_csd.invert_yaxis()
+        ax_csd.set_xlim(min([-1.1] + [value * 1.1 for value in vals]),
+                         max([1.1] + [value * 1.1 for value in vals]))
+        ax_csd.set_ylim(len(names) - 0.5, -0.5)
+        ax_csd.axvline(0, color="#95a5a6", linewidth=0.8)
+        ax_csd.set_xlabel("Raw statistics; proxy is not a measured recovery rate", fontsize=8)
+    else:
+        status = getattr(tp.csd_result, "status", "unavailable").replace("_", " ")
+        ax_csd.text(0.5, 0.5, f"Diagnostics unavailable\n{status}", transform=ax_csd.transAxes,
+                    ha="center", va="center", fontsize=11, color="#7f8c8d")
+        ax_csd.set_axis_off()
+    ax_csd.set_title("Descriptive CSD diagnostics", fontsize=11, fontweight="bold")
 
     # ─── Bottom: Health time series ───────────────────
     ax_ts = fig.add_subplot(gs[1, :])
-    t = np.arange(len(health_history))
-    ax_ts.plot(t, health_history * 100, "o-", color="#2c3e50", linewidth=2, markersize=4)
-    ax_ts.axhline(y=30, color="#8e44ad", linestyle=":", linewidth=1.5, alpha=0.7, label="Tipping threshold")
-    
-    # Color background by health bands
-    for low, high, color_hex, label in [
-        (80, 100, "#2ecc71", "Healthy"), (60, 80, "#f39c12", "Stressed"),
-        (40, 60, "#e67e22", "Degraded"), (15, 40, "#e74c3c", "Severe"),
-        (0, 15, "#7f8c8d", "Cleared"),
-    ]:
-        ax_ts.axhspan(low, high, color=color_hex, alpha=0.08)
+    history = np.asarray(health_history, dtype=float)
+    if history.ndim != 1:
+        raise ValueError("health_history must be one-dimensional")
+    t = np.arange(len(history))
+    ax_ts.plot(t, history * 100, "o-", color="#2c3e50", linewidth=2, markersize=4,
+               label="Historical condition estimates")
+    if not np.isfinite(history).any():
+        ax_ts.text(0.5, 0.5, "Historical condition unavailable", transform=ax_ts.transAxes,
+                   ha="center", va="center", color="#7f8c8d")
 
-    if tp.time_to_tipping is not None and tp.time_to_tipping > 0:
-        ttp_steps = tp.time_to_tipping / 30
-        ax_ts.axvline(x=len(health_history) - 1 + ttp_steps, color="#8e44ad",
-                      linestyle="--", linewidth=2, alpha=0.7, label=f"Est. tipping: ~{tp.time_to_tipping/365:.1f}yr")
-
-    ax_ts.set_xlabel("Time Step", fontsize=11)
-    ax_ts.set_ylabel("Health Score", fontsize=11)
-    ax_ts.set_title("Health Trajectory", fontsize=12, fontweight="bold")
+    ax_ts.set_xlabel("Observation index", fontsize=11)
+    ax_ts.set_ylabel("Condition score (uncalibrated)", fontsize=11)
+    ax_ts.set_title("Historical Condition", fontsize=12, fontweight="bold")
     ax_ts.set_ylim(-5, 105)
     ax_ts.legend(fontsize=9)
     ax_ts.grid(alpha=0.3)
 
     fig.suptitle(title, fontsize=16, fontweight="bold")
+    fig.text(0.5, 0.01,
+             "Screening indicators do not establish tipping probabilities, tipping dates or ecological irreversibility.",
+             ha="center", fontsize=10, color="#7f8c8d")
 
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.show()
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    else:
+        plt.show()
