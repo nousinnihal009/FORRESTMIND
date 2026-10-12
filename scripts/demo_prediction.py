@@ -51,50 +51,62 @@ def main():
     setup_logging()
     logger = logging.getLogger("demo")
 
-    # ─── Generate a Synthetic Sample ──────────────────────
-    logger.info("Generating synthetic satellite observation...")
+    # Resolve the effective model/data configuration before generating inputs.
+    import yaml
+    from forestmind.models.forestmind_model import ForestMindModel
     from forestmind.data.synthetic import SyntheticForestGenerator, HEALTH_STATES, DRIVER_CLASSES
     from forestmind.data.transforms import Normalize, ToTensor, Compose
 
-    generator = SyntheticForestGenerator(seed=args.seed)
-    sample = generator.generate_sample()
-
-    logger.info(f"  Patch: {sample['optical'].shape[0]} timesteps x "
-                f"{sample['optical'].shape[1]} bands x "
-                f"{sample['optical'].shape[2]}x{sample['optical'].shape[3]} pixels")
-    logger.info(f"  Ground-truth health: {HEALTH_STATES[sample['health_state']]} "
-                f"({sample['health_score']:.1f}/100)")
-    active = [DRIVER_CLASSES[i] for i, d in enumerate(sample['drivers']) if d > 0]
-    logger.info(f"  Ground-truth drivers: {active if active else 'None'}")
-
-    # ─── Build Model ─────────────────────────────────────
-    import yaml
-    from forestmind.models.forestmind_model import ForestMindModel
-
-    if args.config:
-        with open(args.config) as f:
-            config = yaml.safe_load(f)
-    else:
-        config_path = Path(__file__).resolve().parent.parent / "configs" / "default.yaml"
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-
+    checkpoint = None
     if args.checkpoint:
         logger.info(f"Loading checkpoint: {args.checkpoint}")
         checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-        if "config" in checkpoint:
-            config = checkpoint["config"]
-            logger.info("Using config from checkpoint")
-        logger.info("Building ForestMind model...")
-        model = ForestMindModel(config)
+    if checkpoint is not None and "config" in checkpoint:
+        config = checkpoint["config"]
+        logger.info("Using checkpoint config for model architecture and synthetic sample dimensions")
+    else:
+        config_path = args.config or Path(__file__).resolve().parent.parent / "configs" / "default.yaml"
+        with open(config_path, encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+
+    foundation = config.get("foundation", {})
+    foundation_name = foundation.get("name", "custom_vit")
+    if foundation_name in ("prithvi", "terramind") and not foundation.get(
+        foundation_name, {}
+    ).get("use_proxy", False):
+        parser.error(
+            "This synthetic demo does not support native pretrained encoders. Use real inputs "
+            "with checkpoint-specific normalization, or explicitly choose use_proxy: true "
+            "for an untrained development experiment."
+        )
+
+    torch.manual_seed(args.seed)
+    logger.info("Building ForestMind model...")
+    model = ForestMindModel(config)
+    if checkpoint is not None:
         model.load_state_dict(checkpoint["model_state_dict"])
     else:
-        # Use smaller config for untrained demo
-        config["foundation"]["custom_vit"]["depth"] = 4
-        config["temporal"]["depth"] = 2
-        logger.info("Building ForestMind model...")
-        model = ForestMindModel(config)
-        logger.warning("Untrained demonstration weights: outputs are not validated forest assessments")
+        logger.warning("Using untrained demonstration weights")
+    logger.warning("Synthetic demonstration: model scores are not validated ecological assessments")
+
+    data_config = config.get("data", {})
+    horizons = model.trajectory_head.horizon_days
+    logger.info("Generating synthetic satellite observation...")
+    generator = SyntheticForestGenerator(
+        patch_size=data_config.get("patch_size", 128),
+        num_bands=data_config.get("num_bands", 12),
+        sar_channels=data_config.get("sar_channels", 2),
+        time_steps=data_config.get("time_steps", 12),
+        seed=args.seed,
+    )
+    sample = generator.generate_sample(horizons_days=horizons)
+    logger.info(f"  Patch: {sample['optical'].shape[0]} timesteps x "
+                f"{sample['optical'].shape[1]} bands x "
+                f"{sample['optical'].shape[2]}x{sample['optical'].shape[3]} pixels")
+    logger.info(f"  Synthetic reference health: {HEALTH_STATES[sample['health_state']]} "
+                f"({sample['health_score']:.1f}/100)")
+    active = [DRIVER_CLASSES[i] for i, driver in enumerate(sample['drivers']) if driver > 0]
+    logger.info(f"  Synthetic reference drivers: {active if active else 'None'}")
 
     # ─── Run Prediction ──────────────────────────────────
     logger.info("Running model prediction...")
@@ -110,25 +122,25 @@ def main():
     prediction = model.predict(optical, sar, timestamps)
 
     print("\n" + "=" * 60)
-    print("  FORESTMIND MODEL PREDICTION")
+    print("  FORESTMIND SYNTHETIC MODEL DEMO")
     print("=" * 60)
     print(f"\n  Health State:  {prediction['health_state']}")
-    print(f"  Health Score:  {prediction['health_score']}/100")
-    print(f"  Confidence:    {prediction['health_confidence']}%")
+    print(f"  Model health score:  {prediction['health_score']}/100")
+    print(f"  Classification score: {prediction['health_confidence']}% (uncalibrated)")
 
     if prediction["active_drivers"]:
-        print("\n  Active Drivers:")
+        print("\n  Candidate drivers (uncalibrated model scores):")
         for d in prediction["active_drivers"]:
-            print(f"    - {d['name']:20s} conf={d['confidence']:.1f}%  strength={d['strength']:.1f}%")
+            print(f"    - {d['name']:20s} score={d['confidence']:.1f}%  strength={d['strength']:.1f}%")
     else:
-        print("\n  No active degradation drivers detected")
+        print("\n  No candidate drivers exceed the model threshold")
 
     print("\n  Predicted Trajectory:")
     for horizon, score in zip(prediction["trajectory"]["horizons"], prediction["trajectory"]["health_scores"]):
         print(f"    {horizon:>10s} -> {score:.1f}/100")
 
     if "uncertainty" in prediction["trajectory"]:
-        print("\n  Uncertainty (±):")
+        print("\n  Model standard deviation (uncalibrated):")
         for horizon, unc in zip(prediction["trajectory"]["horizons"], prediction["trajectory"]["uncertainty"]):
             print(f"    {horizon:>10s} -> +/-{unc:.1f}")
 
@@ -152,7 +164,7 @@ def main():
         active_drivers=prediction["active_drivers"],
         driver_strengths=np.asarray(prediction["driver_strengths"]),
         trajectory_scores=np.array(prediction["trajectory"]["health_scores"]),
-        trajectory_uncertainty=np.array(prediction["trajectory"].get("uncertainty", [0]*5)),
+        trajectory_uncertainty=np.array(prediction["trajectory"].get("uncertainty", [0]*len(horizons))),
         location="Synthetic Forest Patch (Demo)",
         horizon_days=model.trajectory_head.horizon_days,
         timestamps=sample["timestamps"],
@@ -178,7 +190,7 @@ def main():
             plot_health_trajectory(
                 sample["health_history"],
                 predicted_trajectory=np.array(prediction["trajectory"]["health_scores"]) / 100,
-                predicted_uncertainty=np.array(prediction["trajectory"].get("uncertainty", [0]*5)) / 100,
+                predicted_uncertainty=np.array(prediction["trajectory"].get("uncertainty", [0]*len(horizons))) / 100,
                 horizon_labels=prediction["trajectory"]["horizons"],
             )
 
