@@ -279,6 +279,33 @@ class TerraMindAdapter(FoundationModelBase):
         # TerraMind has no CLS token; pool the final layer's spatial tokens.
         return self.projection(outputs[-1].mean(dim=1))
 
+    def encode_modalities(self, optical: Tensor, sar: Tensor,
+                          optical_mask: Tensor, sar_mask: Tensor) -> Tensor:
+        """Forward only observed modality keys to a native pretrained backbone."""
+        if self._is_proxy:
+            return self._encode_proxy(optical, sar)
+        result = optical.new_zeros(optical.shape[0], self._target_dim)
+        for has_optical, has_sar in ((True, False), (False, True), (True, True)):
+            selected = (optical_mask == has_optical) & (sar_mask == has_sar)
+            if not selected.any():
+                continue
+            modalities = {}
+            if has_optical:
+                modalities["S2L2A"] = optical[selected]
+            if has_sar:
+                modalities["S1GRD"] = sar[selected]
+            outputs = self.backbone(modalities)
+            if not isinstance(outputs, (list, tuple)) or outputs[-1].ndim != 3:
+                raise RuntimeError("Unexpected TerraTorch TerraMind output: expected layer token tensors")
+            result[selected] = self.projection(outputs[-1].mean(dim=1))
+        return result
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if hasattr(self, "backbone") and not any(p.requires_grad for p in self.backbone.parameters()):
+            self.backbone.eval()
+        return self
+
     @property
     def embedding_dim(self) -> int:
         return self._target_dim
