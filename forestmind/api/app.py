@@ -63,6 +63,8 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
         response.headers["X-Frame-Options"] = "DENY"
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+        elif request.url.path.startswith(("/static/", "/assets/")):
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     def require_analysis(region_id: str) -> dict:
