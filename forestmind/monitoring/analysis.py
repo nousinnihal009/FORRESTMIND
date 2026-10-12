@@ -268,6 +268,7 @@ def sensitivity_scenario(analysis: dict, parameters: dict) -> dict:
         }})
     return {
         "region_id": analysis["id"], "parameters": parameters,
+        "provenance": analysis["provenance"],
         "baseline": points, "scenario": scenario,
         "delta": rounded(scenario[-1]["score"] - points[-1]["score"]) if points else None,
         "method": "User-controlled linear sensitivity illustration", "calibrated": False,
