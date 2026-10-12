@@ -191,3 +191,17 @@ def test_engine_propagates_horizons_and_csd_configuration():
     assert "5yr" not in summary
     assert "uncalibrated" in summary
     json.dumps(asdict(report), allow_nan=False)
+
+
+@pytest.mark.parametrize("history", [[], [np.nan] * 10, [0.8, 0.7]])
+def test_report_summary_handles_all_unavailable_diagnostics(history):
+    report = EcologicalRiskEngine().analyze(
+        health_history=np.asarray(history), health_state=1,
+        health_score=60, health_confidence=None, active_drivers=[],
+        driver_strengths=np.zeros(8), trajectory_scores=np.array([55, 45]),
+        horizon_days=[30, 90],
+    )
+    assert report.tipping_point.risk_score is None
+    assert report.interventions.recommended is None
+    assert "Heuristic index: unavailable (Insufficient data)" in report.summary()
+    json.dumps(asdict(report), allow_nan=False)
