@@ -168,9 +168,22 @@ function renderDetail() {
   }else if(state.tab==='resilience'){
     const s=r.resilience;
     $('#detail-body').innerHTML=`<div class="resilience-grid"><div class="signal-card"><small>Lag-1 autocorrelation</small><strong>${numeric(s.ar1,3)}</strong><p>Persistence in the prepared vegetation series. A statistical indicator, not a tipping-point probability.</p></div><div class="signal-card"><small>Residual variance</small><strong>${numeric(s.variance,4)}</strong><p>Variability after preprocessing. Interpretation depends on record quality and length.</p></div><div class="signal-note"><h3>${esc(String(s.status || 'Insufficient evidence').replaceAll('_', ' '))}</h3><p>${esc(Array.isArray(s.evidence)?s.evidence.join(' '):s.evidence || '')}</p><p style="margin-top:10px">${esc(s.trend || '')}</p></div></div><div class="evidence-disclaimer">${esc(s.caveat || 'These exploratory indicators cannot establish an irreversible ecological tipping point.')}</div>`;
-  }else{
+  }else if(state.tab==='observations'){
     $('#detail-body').innerHTML=`<div class="observed-alerts">${(r.alerts||[]).map(a=>`<article class="observation-alert"><div>${badge(a.severity)}<strong>${esc(a.title)}</strong><small>${esc(dateLabel(a.date))}</small></div><p>${esc(a.message)}</p></article>`).join('') || '<p class="chart-caveat">No active alert in the current assessment.</p>'}</div><div class="observations-caption"><strong>The observation record</strong><span>${isDemo(r)?'Synthetic measurements':'User-provided measurements'} · — denotes missing data</span></div><div class="observation-table table-scroll"><table><thead><tr><th>Date</th><th>NDVI</th><th>NDMI</th><th>NBR</th><th>Rainfall anomaly (σ)</th><th>Heat anomaly (°C)</th><th>Valid pixels</th><th>Index / 100</th></tr></thead><tbody>${[...r.observations].reverse().map(o=>`<tr><td>${esc(dateLabel(o.date))}</td><td>${numeric(o.ndvi,3)}</td><td>${numeric(o.ndmi,3)}</td><td>${numeric(o.nbr,3)}</td><td>${numeric(o.precipitation_anomaly,2)}</td><td>${numeric(o.temperature_anomaly,2)}</td><td>${pct(o.valid_fraction)}</td><td>${numeric(o.health_score,1)}</td></tr>`).join('')}</tbody></table></div><div class="detail-foot"><span>${esc(r.provenance?.source)}</span><span>${esc(r.provenance?.geometry_note || '')}</span></div>`;
+  }else{
+    renderEvaluation(r.id);
   }
+}
+async function renderEvaluation(id) {
+  $('#detail-body').innerHTML='<div class="chart-skeleton skeleton" aria-label="Running historical evaluation"></div>';
+  try{
+    const result=await api('/regions/'+encodeURIComponent(id)+'/evaluation');
+    if(state.selected!==id||state.tab!=='evaluation')return;
+    const names={persistence:'Persistence',seasonal_naive:'Seasonal naive',damped_trend:'Damped trend'};
+    const rows=Object.entries(result.methods).flatMap(([method,scores])=>Object.entries(scores.by_horizon).map(([h,m])=>`<tr><td><strong>${names[method]}</strong></td><td>${h} month${h==='1'?'':'s'}</td><td>${m.n}</td><td>${numeric(m.mae,2)}</td><td>${numeric(m.rmse,2)}</td><td>${pct(m.coverage)}</td></tr>`));
+    $('#detail-body').innerHTML=`<div class="observations-caption"><strong>Historical baseline comparison</strong><button class="button secondary" id="export-evaluation">${icon('download',14)}Export evaluation</button></div><p class="chart-caveat" style="margin-bottom:16px">Each prediction uses only the observations available at its historical cutoff. Errors measure spectral index points; this is not validation against field-measured ecosystem health.</p><div class="table-scroll"><table><thead><tr><th>Baseline</th><th>Horizon</th><th>Scored targets</th><th>MAE ↓</th><th>RMSE ↓</th><th>Empirical range coverage</th></tr></thead><tbody>${rows.join('')}</tbody></table></div><div class="evidence-disclaimer">${esc(result.synthetic_warning || 'Imported observations have not been independently verified.')} Intervals remain uncalibrated. Overlapping cutoffs are dependent. Use an untouched period and region before claiming generalization.</div><p class="chart-caveat" style="margin-top:12px">Calendar-month targets are matched to the actual dated observation; nominal forecasts use 30, 180, and 365 days. Missing targets are skipped. A dash means unavailable.</p>`;
+    $('#export-evaluation').addEventListener('click',()=>downloadJSON(result,'forestmind-'+id+'-backtest.json'));
+  }catch(error){if(state.selected===id&&state.tab==='evaluation')$('#detail-body').innerHTML=`<p class="observations-empty">${esc(error.message)} Try selecting Backtesting again.</p>`;}
 }
 function renderTable() {
   if(!state.overview)return;
