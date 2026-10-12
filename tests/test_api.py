@@ -1,9 +1,9 @@
 """Local application end-to-end contracts, strict import, and persistence."""
 
-from copy import deepcopy
 import csv
 import importlib
 import io
+import json
 
 from fastapi.testclient import TestClient
 import pytest
@@ -31,6 +31,7 @@ def test_demo_overview_and_details(client):
     assert overview.headers["x-content-type-options"] == "nosniff"
     for summary in overview.json()["regions"]:
         region = client.get(f"/api/v1/regions/{summary['id']}").json()
+        assert summary["coverage"] == region["health"]["coverage"]
         assert len(region["observations"]) == 48
         assert region["provenance"]["synthetic"] is True
         assert region["confidence"] is None
@@ -128,6 +129,21 @@ def test_import_rejects_duplicate_dates_and_bad_geometry(client):
     assert client.post("/api/v1/regions/import", json=payload).status_code == 422
     payload["geometry"]["coordinates"] = [[[0, 0], [3, 0], [0, 2], [2, 2], [0, 0]]]
     assert client.post("/api/v1/regions/import", json=payload).status_code == 422
+
+
+@pytest.mark.parametrize("nonfinite", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_json_input_returns_validation_error(client, nonfinite):
+    payload = client.get("/api/v1/import-example").json()
+    payload["observations"][0]["ndvi"] = nonfinite
+    response = client.post("/api/v1/regions/import", content=json.dumps(payload),
+                           headers={"Content-Type": "application/json"})
+    assert response.status_code == 422
+    assert response.json()["detail"]
+
+
+def test_runtime_timestamps_are_explicitly_utc(client):
+    result = client.get("/api/v1/status").json()
+    assert result["timestamp"].endswith("+00:00")
 
 
 def test_short_import_does_not_manufacture_predictions(client):
