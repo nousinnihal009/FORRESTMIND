@@ -1,171 +1,176 @@
-# 🌲 ForestMind — Multimodal Forest Intelligence & Tipping-Point Early Warning
+# ForestMind
 
-> **"Is this ecosystem entering a trajectory toward irreversible degradation, why is it happening, and what is likely to happen next?"**
+**Forest observation, evidence, and early-warning research in one local workspace.**
 
-ForestMind is a research prototype for predicting forest degradation trajectories, attributing degradation drivers, and estimating ecological tipping-point risk — going far beyond binary "deforestation yes/no" classification.
+ForestMind combines a working monitoring application with a separate multimodal machine-learning pipeline. Inspect dated observations, vegetation condition, candidate disturbance evidence, exploratory forecasts, alerts, and explicit scenarios. Train and evaluate optical/radar models in the research pipeline.
 
-## Architecture
+The included Amazon regions are **synthetic demonstrations**. The dashboard's condition index, forecast envelopes and scenario coefficients are transparent, uncalibrated baselines. They do not establish ecological tipping points, causal drivers or intervention effectiveness. Imported measurements retain their source and an unverified-provenance label.
 
-```
-SATELLITE DATA (Sentinel-2, Sentinel-1, Landsat)
-         │
-         ↓
-Earth Observation Foundation Model ──── Swappable:
-  (CustomViT / Prithvi / TerraMind)     • CustomViT  (~5M params, CPU)
-         │                               • Prithvi-EO-2.0 (GPU)
-         ↓                               • TerraMind (GPU)
-Multimodal Fusion
-  (Cross-Attention / Gated / Concat)
-         │
-         ↓
-Temporal Transformer
-  (Continuous positional encoding)
-         │
-    ┌────┼────┐
-    ↓    ↓    ↓
- Health  Cause  Future
- State   Attribution  Trajectory
-    │    │    │
-    └────┼────┘
-         ↓
-Ecological Risk Engine
-  • Critical Slowing Down
-  • Tipping-Point Estimation
-  • Intervention Simulation
-         │
-         ↓
-EARLY WARNING SYSTEM
+## Run the application
+
+Python 3.10+ is required. From the repository root:
+
+```powershell
+python -m pip install -e ".[web,dev]"
+python scripts/serve.py
 ```
 
-## Key Features
+Open **http://127.0.0.1:8000**. Interactive API documentation: **http://127.0.0.1:8000/docs**.
 
-### 🏥 Forest Health Assessment
-- **5-level classification**: Healthy → Stressed → Degraded → Severely Degraded → Cleared
-- **Continuous score**: Fine-grained 0–100 health metric
+The server binds to localhost. Regions, analyses, alerts, scenarios and job status persist in `data/forestmind.db`. This is a **single-process, single-user local application with no authentication**; do not expose it directly to a public network. Use `--port 8001` if needed; `--reload` enables development reloading. Multiple worker processes are unsupported. Stop with Ctrl+C.
 
-### 🔍 Cause Attribution
-Multi-label detection of 8 degradation drivers:
-Agriculture, Cattle Pasture, Mining, Logging, Road Construction, Wildfire, Drought, Urban Expansion
+Choose a separate study database in PowerShell:
 
-### 📈 Future Trajectory Prediction
-Health projections at 5 horizons: 30 days, 6 months, 1 year, 3 years, 5 years — with calibrated uncertainty.
-
-### ⚠️ Tipping-Point Risk Assessment
-Real ecological indicators from dynamical systems theory:
-- **Critical Slowing Down** (AR(1) coefficient, variance amplification)
-- **Vegetation resilience** estimation
-- **Spatial fragmentation** analysis
-- **Drought sensitivity** assessment
-- **Time-to-tipping** estimation
-
-### 🛡️ Intervention Simulation
-Counterfactual "digital twin" modeling:
-- 7 intervention scenarios (conservation corridors, fire management, full protection, etc.)
-- Cost-effectiveness analysis
-- Comparative trajectory visualization
-
-## Quick Start
-
-### Install
-
-```bash
-cd forestmind
-pip install -e ".[dev]"
+```powershell
+$env:FORESTMIND_DB = "data/my-study.db"
+python scripts/serve.py
 ```
 
-### Generate Synthetic Data
+The frontend is packaged HTML/CSS/JavaScript served by FastAPI; no Node build is needed. Charts and region footprints render locally. The map is explicitly schematic, not satellite imagery or official protected-area boundaries. Optional Google Fonts have system-font fallbacks.
 
-```bash
-python scripts/generate_synthetic_data.py --num-train 2000 --num-val 400
+## Implemented capabilities
+
+| Area | Behavior |
+| --- | --- |
+| Monitoring | Four reproducible demo regions; strict JSON import for dated monthly measurements |
+| Spatial overview | Selectable WGS84 footprints, condition/coverage/alert layers and zoom |
+| Evidence | NDVI/NDMI/NBR history, candidate-driver evidence, coverage and dated alert explanations |
+| Forecasting | 30/180/365-day baseline with uncalibrated residual envelopes; withheld for inadequate histories |
+| Resilience | Descriptive season-adjusted autocorrelation and variance, with validity checks |
+| Backtesting | Persistence, seasonal naive and damped trend at historical cutoffs; auditable per-horizon exports |
+| Scenarios | Saved pressure/fire/restoration/climate sensitivity comparisons with explicit assumptions |
+| API/jobs | REST endpoints, SQLite persistence, background jobs and interrupted-job recovery |
+| Export | Region JSON, observation CSV, scenario JSON and backtesting JSON with provenance |
+| Satellite pipeline | Sentinel-2/Sentinel-1/Landsat adapters, common-grid caches and optical-cache import preparation |
+| Neural research | Custom ViT, explicit proxy/native pretrained modes, modality masks, temporal model and task heads |
+
+## Import observations
+
+Choose **Import observations** in the dashboard. **Use example template** loads a valid synthetic example; retain `synthetic: true` for fabricated data. The template is also available at `GET /api/v1/import-example`.
+
+```json
+{
+  "name": "My monitoring AOI",
+  "country": "Brazil",
+  "source": "Sentinel-2 composites; document provider and processing version",
+  "synthetic": false,
+  "notes": "Describe masking, aggregation and measurement units here.",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[-55.1,-3.5],[-55.0,-3.5],[-55.0,-3.4],[-55.1,-3.4],[-55.1,-3.5]]]
+  },
+  "observations": [
+    {"date":"2025-01-20","ndvi":0.78,"ndmi":0.42,"nbr":0.61,"valid_fraction":0.85}
+  ]
+}
 ```
 
-### Train
+Dates must be strictly increasing, unique, and at most one per month. Accepts 1–600 records and a simple closed WGS84 polygon without holes or antimeridian crossing. Missing optional measurements may be null or omitted; do not use zero for missing data. Indices lie in `[-1,1]`; valid fraction and forest cover in `[0,1]`. Optional context: precipitation anomaly (standard deviations), temperature anomaly (°C), SAR backscatter change (dB), forest cover and independently supplied fire anomaly. Invalid numeric types, nonfinite values, duplicate dates and malformed polygons are rejected.
 
-```bash
-python scripts/train.py --config configs/default.yaml
+A usable condition score requires all three spectral indices and at least 40% valid-pixel samples. Forecasting requires 12 consecutive usable months and a usable latest observation. Dashboard resilience diagnostics require at least 36 consecutive usable months. These are screening choices, not ecological standards.
+
+## Real satellite data → dashboard
+
+```powershell
+python -m pip install -e ".[web,real-data]"
+python scripts/download_data.py --sensors s2 --region=-55.10,-3.50,-55.08,-3.48 --start 2023-01-01 --end 2026-01-01 --max-scenes 100 --cache-dir data/real
+python scripts/prepare_observations.py --cache-dir data/real --sensor sentinel2 --name "My Sentinel-2 AOI" --country Brazil --region=-55.10,-3.50,-55.08,-3.48 --output data/my-region.json
 ```
 
-### Run Demo (no training required)
+Import `data/my-region.json`. Keep `data/my-region.provenance.json`: it records acquisition timestamps, cache hashes, provider metadata and aggregation quality counts. Monthly indices use valid pixel samples only. Empty months and auxiliary climate/fire/cover data are never invented.
 
-```bash
+The bridge requires current, explicitly georeferenced cache metadata; regenerate legacy caches. Bands are reprojected to the same WGS84 AOI grid. **Output resolution is AOI extent divided by patch size**, not an assumed 10 m resolution. A large bbox squeezed into 128 pixels is a coarse sample. Choose appropriate spatial units and inspect source quality.
+
+Downloads require provider availability and the optional raster/STAC stack. Numerical tests validate local grid alignment and data contracts; they do not prove all remote collections are accessible or establish ecological validity.
+
+## Backtest before interpreting forecasts
+
+The dashboard's **Backtesting** tab and CLI share one evaluation module:
+
+```powershell
+python scripts/backtest_monitoring.py --input data/my-region.json --output artifacts/my-region-backtest.json
+```
+
+Predictions use only history through each cutoff. Reports include MAE/RMSE, counts, skipped targets and empirical range coverage where bounds exist. Nominal 30/180/365-day forecasts are compared with actual dated observations in the matching 1/6/12 calendar months; both dates are retained.
+
+Targets remain a fixed spectral index, **not independent field labels**. Overlapping origins are dependent. Synthetic backtesting checks software behavior only. See [the research protocol](docs/RESEARCH_PROTOCOL.md).
+
+## Neural research workflow
+
+```powershell
+python scripts/train.py --config configs/quick_test.yaml
+python scripts/evaluate.py --checkpoint checkpoints/quick_test/best_model.pt
 python scripts/demo_prediction.py
 ```
 
-This runs the full pipeline on a synthetic sample with randomly initialized weights — demonstrating the complete data → model → risk analysis → intervention simulation pipeline.
+The quick test uses a tiny synthetic dataset and creates a new checkpoint. The no-checkpoint demo uses random weights and says so. Neither synthetic training nor a successful forward pass establishes ecological performance.
 
-### Run Tests
+Supervised disk datasets require separate `data.train_source`, `data.val_source` and `data.test_source` directories. Real satellite caches contain observations, not health/driver/future labels. Attach justified independent labels before supervised training. Duplicate location IDs or exact bounding boxes across splits are rejected when metadata exists; proper spatial buffers and temporal embargoes remain your responsibility.
 
-```bash
-pytest tests/ -v
+### Pretrained encoders
+
+```powershell
+python -m pip install -e ".[foundation]"
 ```
 
-## Project Structure
+Choose `foundation.name: prithvi` or `terramind`. Native adapters use TerraTorch and fail clearly if actual pretrained loading fails. `use_proxy: true` explicitly selects an **untrained development encoder**; a proxy is never silently substituted.
 
-```
-forestmind/
-├── configs/default.yaml          # Training configuration
-├── forestmind/
-│   ├── data/                     # Data pipeline
-│   │   ├── synthetic.py          #   Synthetic satellite data generator
-│   │   ├── transforms.py         #   EO-specific augmentations
-│   │   └── dataset.py            #   Unified dataset interface
-│   ├── models/
-│   │   ├── foundation/           # Swappable foundation models
-│   │   │   ├── base.py           #   Abstract interface
-│   │   │   ├── custom_vit.py     #   Lightweight ViT (CPU-friendly)
-│   │   │   ├── prithvi.py        #   Prithvi-EO-2.0 adapter
-│   │   │   └── terramind.py      #   TerraMind adapter
-│   │   ├── fusion/multimodal.py  # Cross-attention/gated/concat fusion
-│   │   ├── temporal/transformer.py # Temporal transformer (continuous PE)
-│   │   ├── heads/                # Prediction heads
-│   │   │   ├── health.py         #   5-class + continuous health
-│   │   │   ├── attribution.py    #   8-driver multi-label
-│   │   │   └── trajectory.py     #   Multi-horizon + uncertainty
-│   │   └── forestmind_model.py   # Full model assembly
-│   ├── risk/                     # Ecological Risk Engine
-│   │   ├── critical_slowing.py   #   CSD indicator analysis
-│   │   ├── tipping_point.py      #   Tipping-point estimation
-│   │   ├── intervention.py       #   Counterfactual simulation
-│   │   └── engine.py             #   Risk orchestration + reporting
-│   ├── training/                 # Training infrastructure
-│   │   ├── losses.py             #   Multi-task losses
-│   │   ├── metrics.py            #   Per-task evaluation metrics
-│   │   └── trainer.py            #   Training loop
-│   └── utils/
-│       ├── geo.py                # Geospatial utilities
-│       └── visualization.py     # Publication-quality plots
-├── scripts/                      # User-facing entry points
-│   ├── generate_synthetic_data.py
-│   ├── train.py
-│   ├── evaluate.py
-│   └── demo_prediction.py
-└── tests/                        # Test suite
+Native training/evaluation requires explicit `data.normalization` optical/SAR means and positive standard deviations. Match the checkpoint's documented units, band order, normalization and resolution. TerraMind uses native modality keys; Prithvi maps narrow NIR to Sentinel-2 B8A. Landsat does not measure Sentinel-2 red-edge/B8A bands, so unavailable channels are not fabricated. Verify compatibility before using a harmonized stack.
+
+Real pretrained weight downloads, GPU inference and independently labeled benchmarks require validation in the target environment. Older architecture checkpoints may require retraining.
+
+## API
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/status` | Service/method status |
+| GET | `/api/v1/overview` | Region summaries, coverage and counts |
+| POST | `/api/v1/regions/import` | Validate, save and analyze measurements |
+| GET | `/api/v1/regions/{id}` | Full evidence record |
+| GET | `/api/v1/regions/{id}/health` | Condition, components, quality |
+| GET | `/api/v1/regions/{id}/forecast` | Forecasts and limitations |
+| GET | `/api/v1/regions/{id}/drivers` | Candidate-driver evidence |
+| GET | `/api/v1/regions/{id}/alerts` | Dated region alerts |
+| GET | `/api/v1/regions/{id}/evaluation` | Historical baseline comparison |
+| POST | `/api/v1/analysis` | Start a job: `{ "region_id": "xingu" }` |
+| GET | `/api/v1/analysis/{job_id}` | Persisted job status/result |
+| POST | `/api/v1/scenarios` | Save a sensitivity comparison |
+| GET | `/api/v1/scenarios/{id}` | Retrieve comparison |
+| GET | `/api/v1/regions/{id}/export?format=json` | JSON report; `csv` exports measurements |
+
+## Verification
+
+```powershell
+python -m pytest tests -q
+node --check forestmind/web/app.js
 ```
 
-## Foundation Model Strategy
+Install `[web,dev,real-data]` for optional raster tests; without Rasterio they skip explicitly. Tests cover input validation, SQLite/job recovery, missingness, temporal information boundaries, scenario invariants, reprojection and controlled pretrained-adapter contracts. Mocked encoder tests are not real checkpoint benchmarks.
 
-ForestMind abstracts the foundation model behind a clean interface (`FoundationModelBase`). This lets you:
+## Architecture
 
-| Model | Status | Hardware | Best For |
-|-------|--------|----------|----------|
-| **CustomViT** | ✅ Ready | CPU | Development, prototyping |
-| **Prithvi-EO-2.0** | 🔌 Adapter ready | GPU (≥16GB) | Optical time-series (HLS) |
-| **TerraMind** | 🔌 Proxy mode | GPU (≥16GB) | Multimodal (optical + SAR + DEM) |
+```text
+Provider scenes → aligned masked cache → monthly import JSON → SQLite observations
+    → transparent condition / evidence / forecast methods
+    → FastAPI → dashboard / exports / scenarios / historical backtesting
 
-Switch models by changing one line in `configs/default.yaml`:
-```yaml
-foundation:
-  name: custom_vit  # → prithvi | terramind
+Separate research path:
+observations + independent labels + explicit data partitions
+    → normalization → EO encoder → measured-context fusion
+    → masked temporal model → condition / driver / trajectory heads
+    → exploratory risk diagnostics and scenario sensitivity
 ```
+
+`api`, `monitoring` and `web` implement the application. `data/adapters`, `models`, `training` and `risk` implement satellite/ML research. Workflows live in `scripts`, with regression tests in `tests`.
+
+See [methodology and limitations](docs/METHODOLOGY.md) and [the research protocol](docs/RESEARCH_PROTOCOL.md) before interpreting results.
 
 ## References
 
-- Scheffer et al. (2009) "Early-warning signals for critical transitions" *Nature*
-- Dakos et al. (2012) "Methods for Detecting Early Warnings" *PLoS ONE*
-- Verbesselt et al. (2016) "Remotely sensed resilience of tropical forests" *Nature Climate Change*
-- Prithvi-EO-2.0: A Versatile Multi-Temporal Foundation Model (IEEE TGRS 2025)
-- TerraMind: Large-Scale Generative Multimodality for Earth Observation (arXiv 2024)
+- [TerraMind official implementation](https://github.com/IBM/terramind) and [TerraTorch integration](https://github.com/torchgeo/terratorch/blob/main/docs/guide/terramind.md).
+- [Prithvi-EO-2.0 model card](https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-100M-TL).
+- [Remotely sensed resilience of tropical forests](https://www.nature.com/articles/nclimate3108).
+- [Emerging signals of declining forest resilience under climate change](https://www.nature.com/articles/s41586-022-04959-9).
+- [Rasterio: normalizing images to a consistent grid](https://rasterio.readthedocs.io/en/stable/topics/virtual-warping.html).
 
-## License
-
-Apache 2.0
+License: Apache-2.0.
