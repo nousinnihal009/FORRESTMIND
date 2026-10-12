@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+import random
 import sys
 from pathlib import Path
 
 import yaml
 import torch
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -69,6 +71,8 @@ def main():
     # Set seed
     seed = config.get("seed", 42)
     torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
     # Create data loaders
     data_cfg = config.get("data", {})
