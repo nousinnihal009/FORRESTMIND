@@ -32,8 +32,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.exit(2, f"Cannot prepare observations: {error}\n")
     print(f"Prepared {len(prepared.payload['observations'])} observed months: {output}")
     print(f"Acquisition provenance: {sidecar}")
-    if prepared.provenance["legacy_cache"]:
-        print("Legacy cache provenance is incomplete. Verify scaling and georegistration against source imagery.")
     print("Import the main JSON through the dashboard's Import observations action.")
     return 0
 
