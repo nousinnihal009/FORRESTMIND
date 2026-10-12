@@ -1,29 +1,10 @@
-"""
-Prithvi-EO-2.0 adapter for ForestMind.
+"""Prithvi encoder integration using the official TerraTorch backbone registry.
 
-Wraps the NASA/IBM Prithvi-EO-2.0 foundation model (available on HuggingFace)
-as a ForestMind-compatible encoder. Prithvi was trained on 4.2M global
-time-series samples from Harmonized Landsat/Sentinel-2 data.
-
-Prithvi-EO-2.0 key properties:
-  - Trained on 6-band HLS data (Blue, Green, Red, NIR, SWIR1, SWIR2)
-  - Supports multi-temporal input (multiple time steps natively)
-  - ViT-based architecture with masked autoencoder pretraining
-  - Available in 100M, 300M, and 600M variants on HuggingFace
-
-Integration modes:
-  1. FULL MODE: Load actual pretrained weights from HuggingFace (GPU required)
-  2. PROXY MODE: Lightweight proxy encoder matching Prithvi's interface
-     (CPU-friendly, used when transformers/GPU not available)
-
-Requires (full mode):
-  - GPU with ≥16GB VRAM
-  - pip install transformers safetensors huggingface-hub
-  - Internet access (first run only, then cached)
-
-Reference:
-  Prithvi-EO-2.0: A Versatile Multi-Temporal Foundation Model for
-  Earth Observation Applications (IEEE TGRS 2025)
+Pretrained mode requires terratorch, cached/downloadable weights, and inputs
+normalized for that checkpoint. Loading failures are explicit. Set use_proxy=True
+only for an untrained CNN development baseline; it is not the pretrained model.
+Projection and task heads still require supervised training even with a pretrained
+encoder. Model memory requirements depend on the selected registry architecture.
 """
 
 from __future__ import annotations
@@ -50,13 +31,6 @@ PRITHVI_NUM_BANDS = 6
 OUR_TO_PRITHVI_INDICES = [1, 2, 3, 8, 10, 11]
 
 
-def _check_transformers_available() -> bool:
-    """Check if HuggingFace transformers is available."""
-    try:
-        import transformers
-        return True
-    except ImportError:
-        return False
 
 
 class PrithviAdapter(FoundationModelBase):
@@ -72,11 +46,11 @@ class PrithviAdapter(FoundationModelBase):
       3. Projection: native embedding → ForestMind target_dim
 
     Args:
-        model_name: HuggingFace model identifier.
+        model_name: TerraTorch backbone registry identifier.
         target_dim: Target embedding dimension for ForestMind.
         freeze_backbone: Whether to freeze the pretrained weights.
         in_channels: Number of input channels to adapt.
-        use_proxy: Force proxy mode even if transformers is available.
+        use_proxy: Explicitly request an untrained CNN development baseline.
     """
 
     def __init__(
