@@ -228,10 +228,11 @@ def prepare_cached_observations(
     for row in records:
         digest = hashlib.sha256()
         with row["file"].open("rb") as handle:
-            while block := handle.read(1024 * 1024):
+            while block := handle.read(64 * 1024):
                 digest.update(block)
         acquisition_manifest.append({
             **{key: value for key, value in row.items() if key not in {"file", "index_sums", "datetime", "family"}},
+            "bbox": list(row["bbox"]),
             "cache_file": str(row["file"].relative_to(root)), "sha256": digest.hexdigest(),
             "datetime_utc": row["datetime"].isoformat(),
         })
