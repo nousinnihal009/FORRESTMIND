@@ -1,12 +1,12 @@
 """
 Visualization utilities for ForestMind predictions.
 
-Generates publication-quality plots for:
+Generates exploratory plots for:
   - Multi-spectral patch visualization (RGB composites)
   - Temporal health trajectories with predictions
-  - Driver attribution bar charts
-  - Tipping-point risk dashboards
-  - Intervention comparison charts
+  - Candidate pressure scores
+  - Uncalibrated ecological screening dashboards
+  - Hypothetical intervention comparison charts
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ import numpy as np
 
 try:
     import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
     from matplotlib.gridspec import GridSpec
     HAS_MPL = True
 except ImportError:
@@ -62,6 +61,14 @@ def _check_matplotlib():
         )
 
 
+def _finite_value(value) -> float | None:
+    """Treat missing diagnostics as unavailable, never as a numeric zero."""
+    if value is None:
+        return None
+    number = float(value)
+    return number if np.isfinite(number) else None
+
+
 def plot_rgb_composite(
     optical: np.ndarray,
     timestep: int = -1,
@@ -103,7 +110,7 @@ def plot_health_trajectory(
     predicted_trajectory: np.ndarray | None = None,
     predicted_uncertainty: np.ndarray | None = None,
     horizon_labels: list[str] | None = None,
-    title: str = "Forest Health Trajectory",
+    title: str = "Forest Condition Trajectory (uncalibrated)",
     save_path: Optional[str | Path] = None,
 ) -> None:
     """Plot health trajectory with historical data and future predictions.
@@ -118,48 +125,54 @@ def plot_health_trajectory(
     """
     _check_matplotlib()
 
-    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+    health_history = np.asarray(health_history, dtype=float)
+    if health_history.ndim != 1:
+        raise ValueError("health_history must be one-dimensional")
+    if predicted_trajectory is not None:
+        predicted_trajectory = np.asarray(predicted_trajectory, dtype=float)
+        if predicted_trajectory.ndim != 1:
+            raise ValueError("predicted_trajectory must be one-dimensional")
+        if horizon_labels is not None and len(horizon_labels) != len(predicted_trajectory):
+            raise ValueError("horizon_labels must match predicted_trajectory")
+        if predicted_uncertainty is not None:
+            predicted_uncertainty = np.asarray(predicted_uncertainty, dtype=float)
+            if predicted_uncertainty.shape != predicted_trajectory.shape:
+                raise ValueError("predicted_uncertainty must match predicted_trajectory")
 
-    # Health state background colors
-    health_bands = [
-        (0.80, 1.00, "#2ecc7133", "Healthy"),
-        (0.60, 0.80, "#f39c1233", "Stressed"),
-        (0.40, 0.60, "#e67e2233", "Degraded"),
-        (0.15, 0.40, "#e74c3c33", "Severely Degraded"),
-        (0.00, 0.15, "#7f8c8d33", "Cleared"),
-    ]
-    for low, high, color, label in health_bands:
-        ax.axhspan(low * 100, high * 100, color=color, alpha=0.3)
+    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
 
     # Historical trajectory
     t_hist = np.arange(len(health_history))
     ax.plot(
         t_hist, health_history * 100, "o-",
         color="#2c3e50", linewidth=2, markersize=5,
-        label="Observed", zorder=5,
+        label="Historical condition estimates", zorder=5,
     )
 
     # Predicted trajectory
-    if predicted_trajectory is not None:
-        t_pred_start = len(health_history) - 1
-        t_pred = np.arange(t_pred_start, t_pred_start + len(predicted_trajectory) + 1)
-        pred_with_current = np.concatenate([[health_history[-1]], predicted_trajectory])
+    if predicted_trajectory is not None and len(predicted_trajectory):
+        anchored = bool(len(health_history))
+        t_pred_start = len(health_history) - 1 if anchored else 0
+        pred_with_current = (np.concatenate([[health_history[-1]], predicted_trajectory])
+                             if anchored else predicted_trajectory)
+        t_pred = np.arange(t_pred_start, t_pred_start + len(pred_with_current))
         pred_scores = pred_with_current * 100
 
         ax.plot(
             t_pred, pred_scores, "s--",
             color="#e74c3c", linewidth=2, markersize=6,
-            label="Predicted", zorder=5,
+            label="Model projection (uncalibrated)", zorder=5,
         )
 
         # Uncertainty band
         if predicted_uncertainty is not None:
-            unc_with_zero = np.concatenate([[0], predicted_uncertainty])
+            unc_with_zero = (np.concatenate([[0], predicted_uncertainty])
+                             if anchored else predicted_uncertainty)
             upper = pred_scores + unc_with_zero * 100
             lower = pred_scores - unc_with_zero * 100
             ax.fill_between(
                 t_pred, lower, upper,
-                color="#e74c3c", alpha=0.15, label="Uncertainty",
+                color="#e74c3c", alpha=0.15, label="Model spread (uncalibrated)",
             )
 
         # Horizon labels
@@ -167,16 +180,16 @@ def plot_health_trajectory(
             for i, label in enumerate(horizon_labels):
                 ax.annotate(
                     label,
-                    (t_pred[i + 1], pred_scores[i + 1]),
+                    (t_pred[i + int(anchored)], pred_scores[i + int(anchored)]),
                     textcoords="offset points", xytext=(0, 12),
                     fontsize=8, ha="center", color="#e74c3c",
                 )
 
-    # Tipping point threshold
-    ax.axhline(y=30, color="#8e44ad", linestyle=":", linewidth=1.5, alpha=0.7, label="Tipping threshold")
-
-    ax.set_xlabel("Time Step", fontsize=12)
-    ax.set_ylabel("Forest Health Score", fontsize=12)
+    if not len(health_history):
+        ax.text(0.02, 0.95, "Historical condition unavailable", transform=ax.transAxes,
+                ha="left", va="top", color="#7f8c8d")
+    ax.set_xlabel("Observation / forecast index (forecast spacing is not elapsed time)", fontsize=10)
+    ax.set_ylabel("Condition score (uncalibrated)", fontsize=12)
     ax.set_title(title, fontsize=14, fontweight="bold")
     ax.set_ylim(-5, 105)
     ax.legend(loc="lower left", fontsize=10)
@@ -184,15 +197,16 @@ def plot_health_trajectory(
 
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.show()
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    else:
+        plt.show()
 
 
 def plot_driver_attribution(
     driver_names: list[str],
     driver_probs: np.ndarray,
     driver_strengths: np.ndarray | None = None,
-    title: str = "Degradation Driver Attribution",
+    title: str = "Candidate Pressure Scores (uncalibrated)",
     save_path: Optional[str | Path] = None,
 ) -> None:
     """Plot driver attribution as horizontal bar chart.
@@ -230,12 +244,12 @@ def plot_driver_attribution(
                     va="center", fontsize=9, color="#2c3e50",
                 )
 
-    # Detection threshold line
-    ax.axvline(x=50, color="#e74c3c", linestyle="--", alpha=0.5, label="Detection threshold")
+    # An operating cutoff does not establish causal attribution or calibration.
+    ax.axvline(x=50, color="#e74c3c", linestyle="--", alpha=0.5, label="Illustrative score cutoff")
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(sorted_names)
-    ax.set_xlabel("Detection Probability (%)", fontsize=12)
+    ax.set_xlabel("Model score (0–100; uncalibrated, not causal contribution)", fontsize=10)
     ax.set_title(title, fontsize=14, fontweight="bold")
     ax.set_xlim(0, 110)
     ax.legend()
@@ -249,7 +263,7 @@ def plot_driver_attribution(
 
 def plot_intervention_comparison(
     intervention_analysis,
-    title: str = "Intervention Scenario Comparison",
+    title: str = "Hypothetical Intervention Scenarios (uncalibrated)",
     save_path: Optional[str | Path] = None,
 ) -> None:
     """Plot comparison of intervention scenarios.
@@ -266,17 +280,20 @@ def plot_intervention_comparison(
     analysis: InterventionAnalysis = intervention_analysis
     horizons = analysis.horizons
     num_horizons = len(horizons)
+    scenarios = analysis.scenarios or [analysis.baseline]
+    if any(len(result.projected_health_100) != num_horizons for result in scenarios):
+        raise ValueError("Each scenario must have one score per configured horizon")
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
     # Left: trajectory comparison
     x = np.arange(num_horizons)
-    width = 0.8 / len(analysis.scenarios)
+    width = 0.8 / len(scenarios)
 
-    colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(analysis.scenarios)))
+    colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(scenarios)))
 
-    for i, result in enumerate(analysis.scenarios):
-        scores = result.projected_health_100[:num_horizons]
+    for i, result in enumerate(scenarios):
+        scores = result.projected_health_100
         ax1.bar(
             x + i * width - 0.4 + width / 2,
             scores,
@@ -287,9 +304,9 @@ def plot_intervention_comparison(
         )
 
     ax1.set_xticks(x)
-    ax1.set_xticklabels(horizons[:num_horizons], fontsize=10)
-    ax1.set_ylabel("Projected Health Score", fontsize=12)
-    ax1.set_title("Projected Health by Scenario", fontsize=13, fontweight="bold")
+    ax1.set_xticklabels(horizons, fontsize=10)
+    ax1.set_ylabel("Conditional health score", fontsize=12)
+    ax1.set_title("Health Under Scenario Assumptions", fontsize=13, fontweight="bold")
     ax1.legend(fontsize=8, loc="upper right")
     ax1.set_ylim(0, 105)
     ax1.grid(axis="y", alpha=0.3)
@@ -306,32 +323,40 @@ def plot_intervention_comparison(
         ax2.barh(y_pos, cost_eff, color=bar_colors, alpha=0.8, height=0.5)
         ax2.set_yticks(y_pos)
         ax2.set_yticklabels(scenario_names, fontsize=10)
-        ax2.set_xlabel("Cost-Effectiveness Score", fontsize=12)
-        ax2.set_title("Cost-Effectiveness Analysis", fontsize=13, fontweight="bold")
+        ax2.set_xlabel("Assumed mean benefit / relative cost", fontsize=11)
+        ax2.set_title("Illustrative Scenario Ranking", fontsize=13, fontweight="bold")
         ax2.invert_yaxis()
 
         if analysis.recommended:
             ax2.annotate(
-                "★ Recommended",
+                "Highest assumed benefit/cost",
                 xy=(0.95, 0.02), xycoords="axes fraction",
                 fontsize=10, color="#2ecc71", fontweight="bold",
                 ha="right",
             )
 
+    else:
+        ax2.text(0.5, 0.5, "No active intervention scenarios", transform=ax2.transAxes,
+                 ha="center", va="center", color="#7f8c8d")
+        ax2.set_axis_off()
+
     fig.suptitle(title, fontsize=15, fontweight="bold", y=1.02)
+    fig.text(0.5, -0.02, "Scenario differences are conditional assumptions, not validated causal intervention effects.",
+             ha="center", fontsize=10, color="#7f8c8d")
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.show()
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    else:
+        plt.show()
 
 
 def plot_tipping_point_dashboard(
     assessment,
     health_history: np.ndarray,
-    title: str = "Tipping-Point Risk Assessment",
+    title: str = "Exploratory Ecological Screening (uncalibrated)",
     save_path: Optional[str | Path] = None,
 ) -> None:
-    """Plot a comprehensive tipping-point risk dashboard.
+    """Plot available screening indicators without claiming tipping probabilities.
     
     Args:
         assessment: TippingPointAssessment result.
