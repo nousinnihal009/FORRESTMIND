@@ -27,6 +27,7 @@ import numpy as np
 from forestmind.utils.geo import BoundingBox
 
 logger = logging.getLogger(__name__)
+PREPROCESSING_VERSION = "forestmind-grid-v2"
 
 
 # ─── Data Structures ──────────────────────────────────────────────────────────
@@ -234,7 +235,8 @@ class SatelliteAdapterBase(ABC):
     def cache_path_for_scene(self, scene: SceneMetadata, bbox: BoundingBox) -> Path:
         """Generate a deterministic cache path for a scene + bbox pair."""
         bbox_hash = hashlib.md5(
-            f"{bbox.west:.6f}_{bbox.south:.6f}_{bbox.east:.6f}_{bbox.north:.6f}".encode()
+            f"{bbox.west:.6f}_{bbox.south:.6f}_{bbox.east:.6f}_{bbox.north:.6f}"
+            f"_{self.patch_size}_{PREPROCESSING_VERSION}".encode()
         ).hexdigest()[:8]
         filename = f"{scene.scene_id}_{bbox_hash}.npz"
         sensor_dir = self.cache_dir / self.sensor_name
@@ -252,6 +254,8 @@ class SatelliteAdapterBase(ABC):
         scene: SceneMetadata,
         bbox: BoundingBox,
         quality_mask: np.ndarray | None = None,
+        preprocessing_version: str | None = None,
+        data_units: str = "unknown",
     ) -> None:
         """Save preprocessed data to the cache."""
         save_dict = {
@@ -265,7 +269,20 @@ class SatelliteAdapterBase(ABC):
             "bbox_east": bbox.east,
             "bbox_north": bbox.north,
             "cloud_cover": scene.cloud_cover if scene.cloud_cover is not None else -1.0,
+            "scene_id": scene.scene_id,
+            "preprocessing_version": preprocessing_version or "unverified",
+            "provider": "microsoft-planetary-computer" if preprocessing_version else "unknown",
+            "data_units": data_units,
         }
+        if preprocessing_version == PREPROCESSING_VERSION:
+            dx = (bbox.east - bbox.west) / data.shape[-1]
+            dy = (bbox.north - bbox.south) / data.shape[-2]
+            save_dict.update({
+                "grid_crs": "EPSG:4326",
+                "grid_transform": np.asarray([dx, 0., bbox.west, 0., -dy, bbox.north]),
+                "pixel_size_degrees": np.asarray([dx, dy]),
+                "requested_source_resolution_m": self.resolution,
+            })
         if quality_mask is not None:
             save_dict["quality_mask"] = quality_mask
 
