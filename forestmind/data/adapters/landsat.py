@@ -86,7 +86,7 @@ class LandsatAdapter(SatelliteAdapterBase):
     Args:
         cache_dir: Local directory for caching downloaded data.
         patch_size: Target spatial size in pixels.
-        resolution: Target spatial resolution in meters (default 30m native).
+        resolution: Nominal source resolution; final grid follows bbox / patch_size.
         platforms: List of Landsat platforms to include ("landsat-8", "landsat-9").
     """
 
