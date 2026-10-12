@@ -1,5 +1,8 @@
 # ForestMind — Sentinel-2 + Sentinel-1 Real Data Configuration
 # Uses real satellite data from Planetary Computer
+# Download/inference configuration. Raw caches have no supervised labels.
+# Training requires labeled sequence NPZs in independent train/val/test folders.
+# Image output resolution follows bbox extent / patch_size, not the native resolution below.
 
 # ─── Data ───────────────────────────────────────────────
 data:
@@ -43,11 +46,13 @@ foundation:
     mlp_ratio: 4.0
     drop_rate: 0.1
   prithvi:
-    model_name: "ibm-nasa-geospatial/Prithvi-EO-2.0-300M"
+    model_name: "prithvi_eo_v2_300"
     freeze: true
+    use_proxy: true              # untrained CNN experiment; not pretrained Prithvi
   terramind:
-    model_name: "terramind-base"
+    model_name: "terramind_v1_base"
     freeze: true
+    use_proxy: true              # untrained CNN experiment; not pretrained TerraMind
 
 # ─── Fusion ────────────────────────────────────────────
 fusion:
