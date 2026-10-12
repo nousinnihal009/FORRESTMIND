@@ -257,8 +257,9 @@ def plot_driver_attribution(
 
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.show()
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    else:
+        plt.show()
 
 
 def plot_intervention_comparison(
@@ -369,8 +370,8 @@ def plot_tipping_point_dashboard(
     from forestmind.risk.tipping_point import TippingPointAssessment
     tp: TippingPointAssessment = assessment
 
-    fig = plt.figure(figsize=(14, 8))
-    gs = GridSpec(2, 3, figure=fig, hspace=0.35, wspace=0.35)
+    fig = plt.figure(figsize=(16, 8))
+    gs = GridSpec(2, 3, figure=fig, hspace=0.4, wspace=0.8)
 
     # ─── Top left: Risk gauge ──────────────────────────
     ax_gauge = fig.add_subplot(gs[0, 0])
@@ -429,7 +430,7 @@ def plot_tipping_point_dashboard(
             "AR(1) trend (tau)": _finite_value(csd.ar1_trend),
             "Variance trend (tau)": _finite_value(csd.variance_trend),
             "Correlation trend (tau)": _finite_value(csd.autocorrelation_trend),
-            "Persistence proxy": _finite_value(csd.recovery_rate),
+            "1 − clipped AR(1)": _finite_value(csd.recovery_rate),
         }
         names = list(metrics.keys())
         y_pos = np.arange(len(names))
@@ -446,7 +447,7 @@ def plot_tipping_point_dashboard(
                          max([1.1] + [value * 1.1 for value in vals]))
         ax_csd.set_ylim(len(names) - 0.5, -0.5)
         ax_csd.axvline(0, color="#95a5a6", linewidth=0.8)
-        ax_csd.set_xlabel("Raw statistics; proxy is not a measured recovery rate", fontsize=8)
+        ax_csd.set_xlabel("Raw statistics; transformed AR(1)\nis not measured recovery", fontsize=8)
     else:
         status = getattr(tp.csd_result, "status", "unavailable").replace("_", " ")
         ax_csd.text(0.5, 0.5, f"Diagnostics unavailable\n{status}", transform=ax_csd.transAxes,
