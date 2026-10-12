@@ -6,7 +6,7 @@ from the Microsoft Planetary Computer STAC API.
 
 Sentinel-2 provides:
   - 13 spectral bands (we use 12, excluding B10/cirrus)
-  - 10m, 20m, 60m native resolutions (we resample to 10m)
+  - 10m, 20m, 60m native resolutions (aligned to the requested AOI grid)
   - ~5-day revisit time (at equator, more frequent at higher latitudes)
   - Scene Classification Layer (SCL) for cloud masking
 
@@ -84,7 +84,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
     Args:
         cache_dir: Local directory for caching downloaded data.
         patch_size: Target spatial size in pixels.
-        resolution: Target spatial resolution in meters (default 10m).
+        resolution: Nominal source resolution; final grid follows bbox / patch_size.
         scale_factor: Reflectance scale factor for L2A products.
     """
 
@@ -187,7 +187,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
 
         For each scene:
           1. Read each band as a windowed read (cropped to bbox)
-          2. Resample 20m/60m bands to 10m
+          2. Reproject every band to one geographic AOI grid
           3. Apply SCL cloud mask
           4. Scale to [0, 1] surface reflectance
           5. Resize to target patch_size
@@ -242,7 +242,6 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                     href = item.assets[asset_key].href
 
                     with rasterio.open(href) as src:
-                        # Compute window from bbox
                         band_data, valid = read_aligned_band(src, bbox, self.patch_size)
                         quality_mask &= valid
 
