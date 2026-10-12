@@ -24,6 +24,7 @@ SENSORS = {
 }
 BANDS = {"sentinel2": ("B08", "B04", "B11", "B12"),
          "landsat": ("B5", "B4", "B6", "B7")}
+REQUIRED_PREPROCESSING_VERSION = "forestmind-grid-v2"
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ def validate_bbox(values) -> tuple[float, float, float, float]:
     return west, south, east, north
 
 
-def _load_acquisition(path: Path, requested: str) -> dict | None:
+def _load_acquisition(path: Path, requested: str, target_bbox=None) -> dict | None:
     try:
         with np.load(path, allow_pickle=False) as cache:
             sensor = _text_scalar(cache, "sensor")
@@ -63,6 +64,16 @@ def _load_acquisition(path: Path, requested: str) -> dict | None:
                 return None
             family = "landsat" if sensor.startswith("landsat") else sensor
             bbox = validate_bbox([float(cache[f"bbox_{edge}"]) for edge in ("west", "south", "east", "north")])
+            if target_bbox is not None and not np.allclose(bbox, target_bbox, rtol=0, atol=1e-7):
+                return None
+            version = _text_scalar(cache, "preprocessing_version", "legacy-unversioned")
+            if version != REQUIRED_PREPROCESSING_VERSION:
+                raise ValueError("Legacy or unverified preprocessing: regenerate acquisitions with the current "
+                                 "download_data.py adapters (required version: forestmind-grid-v2)")
+            if _text_scalar(cache, "data_units") != "surface_reflectance_0_1":
+                raise ValueError("Expected surface_reflectance_0_1 optical units; raw DN or normalized model inputs are not supported")
+            if _text_scalar(cache, "grid_crs") != "EPSG:4326":
+                raise ValueError("Cache must use the adapter's declared EPSG:4326 output grid")
             acquired = datetime.fromisoformat(_text_scalar(cache, "datetime_iso").replace("Z", "+00:00"))
             if acquired.tzinfo is None or acquired.utcoffset() is None:
                 raise ValueError("Acquisition datetime_iso must include its timezone")
@@ -74,6 +85,12 @@ def _load_acquisition(path: Path, requested: str) -> dict | None:
             data = np.asarray(cache["data"])
             if data.ndim != 3 or min(data.shape) < 1 or data.dtype.kind != "f":
                 raise ValueError("Expected a nonempty floating-point reflectance array (bands,height,width)")
+            west, south, east, north = bbox
+            height, width = data.shape[1:]
+            transform = np.asarray(cache["grid_transform"], dtype=float)
+            expected = [(east - west) / width, 0, west, 0, -(north - south) / height, north]
+            if transform.shape != (6,) or not np.isfinite(transform).all() or not np.allclose(transform, expected, rtol=0, atol=1e-10):
+                raise ValueError("Cache grid transform does not match its bbox and spatial shape")
             names_array = cache["band_names"]
             if names_array.ndim != 1 or names_array.dtype.kind not in {"U", "S"}:
                 raise ValueError("band_names must be a one-dimensional text array")
@@ -106,9 +123,10 @@ def _load_acquisition(path: Path, requested: str) -> dict | None:
                 "source_band_names": names,
                 "invalid_numeric_samples": int((~finite | ~reflectance_valid).sum()),
                 "scene_id": _text_scalar(cache, "scene_id", path.stem),
-                "provider": _text_scalar(cache, "provider", "Not recorded in legacy cache"),
-                "collection": _text_scalar(cache, "collection", "Not recorded in legacy cache"),
-                "preprocessing_version": _text_scalar(cache, "preprocessing_version", "legacy-unversioned"),
+                "provider": _text_scalar(cache, "provider"),
+                "collection": _text_scalar(cache, "collection", "Not recorded in cache"),
+                "preprocessing_version": version, "grid_crs": "EPSG:4326",
+                "grid_transform": transform.tolist(), "data_units": "surface_reflectance_0_1",
             }
             # Optional provider provenance is preserved only when actually present.
             for key in ("crs", "grid_crs", "reflectance_units"):
@@ -144,10 +162,8 @@ def prepare_cached_observations(
     target_bbox = validate_bbox(bbox) if bbox is not None else None
     records = []
     for path in sorted(directory.rglob("*.npz")):
-        record = _load_acquisition(path, requested)
+        record = _load_acquisition(path, requested, target_bbox)
         if record is None:
-            continue
-        if target_bbox is not None and not np.allclose(record["bbox"], target_bbox, rtol=0, atol=1e-7):
             continue
         records.append(record)
     if not records:
@@ -186,7 +202,6 @@ def prepare_cached_observations(
     versions = sorted({row["preprocessing_version"] for row in records})
     west, south, east, north = records[0]["bbox"]
     method = "Monthly mean of valid pixel index samples from cached optical acquisitions"
-    legacy = "legacy-unversioned" in versions
     notes = (
         f"{method}. UTC month labels use the last actual acquisition date; no missing month is filled. "
         "valid_fraction is valid pixel samples / all pixel samples across that month's acquisitions, "
@@ -194,8 +209,6 @@ def prepare_cached_observations(
         "Explicit quality mask, finite [0,1] reflectance and positive denominators required. "
         "No climate, fire, SAR change or forest-cover values were supplied. "
         f"{len(records)} acquisitions; preprocessing: {', '.join(versions)}. "
-        + ("Legacy cache: provider/grid preprocessing provenance is incomplete; verify georegistration "
-           "and scaling against original imagery before relying on these indicators. " if legacy else "")
         + "The companion provenance JSON records source files, acquisition timestamps and hashes. "
         "Cache metadata and provider claims are not independently verified."
     )
@@ -209,6 +222,8 @@ def prepare_cached_observations(
             [west, south], [east, south], [east, north], [west, north], [west, south],
         ]]}, "observations": observations,
     }).model_dump(exclude_none=True)
+    # Keep unavailable optical indices explicitly null; omit unobserved auxiliary channels.
+    payload["observations"] = observations
     acquisition_manifest = []
     for row in records:
         digest = hashlib.sha256()
@@ -224,7 +239,7 @@ def prepare_cached_observations(
         "format_version": 1, "created_at": datetime.now(timezone.utc).isoformat(),
         "sensor_selection": requested, "bbox_wgs84": [west, south, east, north],
         "method": method, "providers": providers, "collections": collections,
-        "preprocessing_versions": versions, "legacy_cache": legacy,
+        "preprocessing_versions": versions, "legacy_cache": False,
         "independently_verified": False, "monthly_aggregation": months,
         "acquisitions": acquisition_manifest,
         "limitations": [
