@@ -262,7 +262,7 @@ class ForestMindTrainer:
 
     def load_checkpoint(self, path: str):
         """Load model checkpoint."""
-        state = torch.load(path, map_location=self.device, weights_only=False)
+        state = torch.load(path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(state["model_state_dict"])
         self.optimizer.load_state_dict(state["optimizer_state_dict"])
         self.current_epoch = state.get("epoch", -1) + 1
