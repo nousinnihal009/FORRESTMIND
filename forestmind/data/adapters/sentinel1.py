@@ -59,7 +59,7 @@ class Sentinel1Adapter(SatelliteAdapterBase):
     Args:
         cache_dir: Local directory for caching downloaded data.
         patch_size: Target spatial size in pixels.
-        resolution: Target spatial resolution in meters (default 10m).
+        resolution: Nominal source resolution; final grid follows bbox / patch_size.
         orbit_direction: Filter by orbit direction ("ascending", "descending", or None).
     """
 
