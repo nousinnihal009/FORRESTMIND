@@ -21,6 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 web = [
     "fastapi>=0.115",
+    "pydantic>=2.8",
     "uvicorn>=0.30",
 ]
 geo = [
