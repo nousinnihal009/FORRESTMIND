@@ -31,7 +31,9 @@ from forestmind.data.adapters.base import (
     PatchData,
     SatelliteAdapterBase,
     SceneMetadata,
+    PREPROCESSING_VERSION,
 )
+from forestmind.data.adapters.raster import read_aligned_band
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,7 @@ LANDSAT_ASSET_KEYS = {
 
 # QA_PIXEL bit flags for cloud/shadow masking (Landsat Collection 2)
 # Bit 1: Dilated Cloud, Bit 3: Cloud, Bit 4: Cloud Shadow
-QA_CLOUD_BITS = (1 << 1) | (1 << 3) | (1 << 4)
+QA_CLOUD_BITS = sum(1 << bit for bit in (0, 1, 2, 3, 4, 5))
 
 # Landsat C2 L2 scale and offset
 # Surface reflectance = DN * 0.0000275 - 0.2
@@ -222,8 +224,6 @@ class LandsatAdapter(SatelliteAdapterBase):
         """
         try:
             import rasterio
-            from rasterio.warp import Resampling
-            from rasterio.windows import from_bounds
         except ImportError:
             raise ImportError(
                 "Landsat adapter requires 'rasterio'. "
@@ -256,22 +256,14 @@ class LandsatAdapter(SatelliteAdapterBase):
                 item = pc.sign(item)
 
                 band_arrays = []
+                quality_mask = np.ones((self.patch_size, self.patch_size), dtype=bool)
                 for band_name in LANDSAT_BANDS:
                     asset_key = LANDSAT_ASSET_KEYS[band_name]
                     href = item.assets[asset_key].href
 
                     with rasterio.open(href) as src:
-                        window = from_bounds(
-                            bbox.west, bbox.south, bbox.east, bbox.north,
-                            transform=src.transform,
-                        )
-
-                        band_data = src.read(
-                            1,
-                            window=window,
-                            out_shape=(self.patch_size, self.patch_size),
-                            resampling=Resampling.bilinear,
-                        ).astype(np.float32)
+                        band_data, valid = read_aligned_band(src, bbox, self.patch_size)
+                        quality_mask &= valid
 
                         # Apply Collection 2 scale and offset
                         band_data = band_data * LANDSAT_SCALE + LANDSAT_OFFSET
@@ -283,27 +275,26 @@ class LandsatAdapter(SatelliteAdapterBase):
                 patch = np.stack(band_arrays, axis=0)
 
                 # Read QA_PIXEL for cloud masking
-                quality_mask = None
                 qa_key = LANDSAT_ASSET_KEYS["QA"]
                 if qa_key in item.assets:
                     qa_href = item.assets[qa_key].href
                     with rasterio.open(qa_href) as src:
-                        window = from_bounds(
-                            bbox.west, bbox.south, bbox.east, bbox.north,
-                            transform=src.transform,
-                        )
-                        qa = src.read(
-                            1,
-                            window=window,
-                            out_shape=(self.patch_size, self.patch_size),
-                            resampling=Resampling.nearest,
-                        ).astype(np.uint16)
-
+                        qa, qa_valid = read_aligned_band(src, bbox, self.patch_size, categorical=True)
+                        qa = qa.astype(np.uint16)
                         # True = valid pixel (no cloud/shadow bits set)
-                        quality_mask = (qa & QA_CLOUD_BITS) == 0
+                        quality_mask &= qa_valid & ((qa & QA_CLOUD_BITS) == 0)
+
+                else:
+                    raise ValueError("Landsat scene lacks QA_PIXEL quality data")
+
+                if not quality_mask.any():
+                    raise ValueError("Scene has no valid pixels in the requested region")
+                patch[:, ~quality_mask] = 0
 
                 # Save to cache
-                self.save_patch_to_cache(cache_path, patch, scene, bbox, quality_mask)
+                self.save_patch_to_cache(cache_path, patch, scene, bbox, quality_mask,
+                                         preprocessing_version=PREPROCESSING_VERSION,
+                                         data_units="surface_reflectance_0_1")
                 paths.append(cache_path)
 
             except Exception as e:
