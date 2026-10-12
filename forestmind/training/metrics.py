@@ -111,7 +111,7 @@ class ForestMindMetrics:
 
         # ─── Health Metrics ────────────────────────────────
         if self._health_total > 0:
-            result.health_accuracy = self._health_correct / self._health_total
+            result.health_accuracy = float(self._health_correct / self._health_total)
 
             # Macro F1
             preds = np.array(self._health_preds)
