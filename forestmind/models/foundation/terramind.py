@@ -1,27 +1,10 @@
-"""
-TerraMind adapter for ForestMind.
+"""TerraMind encoder integration using the official TerraTorch backbone registry.
 
-Wraps the TerraMind multimodal EO foundation model as a ForestMind-compatible
-encoder. TerraMind natively supports optical, SAR, and DEM modalities,
-making it ideal for our multimodal pipeline.
-
-TerraMind key properties:
-  - Multimodal architecture: processes optical + SAR streams simultaneously
-  - Cross-modal attention for joint representation learning
-  - Generative pretraining on diverse EO data
-  - Available as open-source checkpoint
-
-Integration modes:
-  1. FULL MODE: Load actual TerraMind checkpoint (GPU required)
-  2. PROXY MODE: Lightweight multimodal proxy encoder (CPU-friendly)
-
-Requires (full mode):
-  - GPU with ≥16GB VRAM
-  - pip install transformers safetensors
-  - Model checkpoint download
-
-Reference:
-  TerraMind: Large-Scale Generative Multimodality for Earth Observation (arXiv 2024)
+Pretrained mode requires terratorch, cached/downloadable weights, and inputs
+normalized for that checkpoint. Loading failures are explicit. Set use_proxy=True
+only for an untrained CNN development baseline; it is not the pretrained model.
+Projection and task heads still require supervised training even with a pretrained
+encoder. Model memory requirements depend on the selected registry architecture.
 """
 
 from __future__ import annotations
@@ -37,13 +20,6 @@ from forestmind.models.foundation.base import FoundationModelBase
 logger = logging.getLogger(__name__)
 
 
-def _check_transformers_available() -> bool:
-    """Check if HuggingFace transformers is available."""
-    try:
-        import transformers
-        return True
-    except ImportError:
-        return False
 
 
 class TerraMindAdapter(FoundationModelBase):
@@ -56,15 +32,15 @@ class TerraMindAdapter(FoundationModelBase):
       3. Cross-modal fusion
       4. Projecting the output embedding to ForestMind's target dimension
 
-    Operates in FULL mode (real weights) or PROXY mode (lightweight fallback).
+    Operates in FULL mode (real weights) or PROXY mode (explicit untrained baseline).
 
     Args:
-        model_name: Model identifier or HuggingFace checkpoint path.
+        model_name: TerraTorch backbone registry identifier.
         target_dim: Target embedding dimension.
         freeze_backbone: Whether to freeze pretrained weights.
         optical_channels: Number of optical input channels.
         sar_channels: Number of SAR input channels.
-        use_proxy: Force proxy mode even if checkpoint is available.
+        use_proxy: Explicitly request an untrained CNN development baseline.
     """
 
     def __init__(
@@ -102,7 +78,7 @@ class TerraMindAdapter(FoundationModelBase):
     ) -> bool:
         """Attempt to load actual TerraMind checkpoint.
 
-        Returns True if successful, False if fallback to proxy needed.
+        Returns True only when pretrained weights were loaded successfully.
         """
         try:
             from terratorch.registry import BACKBONE_REGISTRY
