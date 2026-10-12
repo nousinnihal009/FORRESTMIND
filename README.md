@@ -105,7 +105,7 @@ python scripts/demo_prediction.py
 
 The quick test uses a tiny synthetic dataset and creates a new checkpoint. The no-checkpoint demo uses random weights and says so. Neither synthetic training nor a successful forward pass establishes ecological performance.
 
-Supervised disk datasets require separate `data.train_source`, `data.val_source` and `data.test_source` directories. Real satellite caches contain observations, not health/driver/future labels. Attach justified independent labels before supervised training. Duplicate location IDs or exact bounding boxes across splits are rejected when metadata exists; proper spatial buffers and temporal embargoes remain your responsibility.
+For supervised disk data, set `data.source` to a directory containing separate `train/`, `val/` and `test/` subdirectories of labeled NPZ sequences. Real satellite caches contain observations, not health/driver/future labels. Attach justified independent labels before supervised training. Duplicate location IDs or exact bounding boxes across splits are rejected when metadata exists; proper spatial buffers and temporal embargoes remain your responsibility.
 
 ### Pretrained encoders
 
