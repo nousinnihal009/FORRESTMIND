@@ -30,7 +30,9 @@ from forestmind.data.adapters.base import (
     PatchData,
     SatelliteAdapterBase,
     SceneMetadata,
+    PREPROCESSING_VERSION,
 )
+from forestmind.data.adapters.raster import read_aligned_band
 
 logger = logging.getLogger(__name__)
 
@@ -189,8 +191,6 @@ class Sentinel1Adapter(SatelliteAdapterBase):
         """
         try:
             import rasterio
-            from rasterio.warp import Resampling
-            from rasterio.windows import from_bounds
         except ImportError:
             raise ImportError(
                 "Sentinel-1 adapter requires 'rasterio'. "
@@ -223,22 +223,15 @@ class Sentinel1Adapter(SatelliteAdapterBase):
                 item = pc.sign(item)
 
                 band_arrays = []
+                quality_mask = np.ones((self.patch_size, self.patch_size), dtype=bool)
                 for pol in ["vv", "vh"]:
                     href = item.assets[pol].href
 
                     with rasterio.open(href) as src:
-                        window = from_bounds(
-                            bbox.west, bbox.south, bbox.east, bbox.north,
-                            transform=src.transform,
-                        )
+                        band_data, valid = read_aligned_band(src, bbox, self.patch_size)
+                        quality_mask &= valid
 
-                        band_data = src.read(
-                            1,
-                            window=window,
-                            out_shape=(self.patch_size, self.patch_size),
-                            resampling=Resampling.bilinear,
-                        ).astype(np.float32)
-
+                        quality_mask &= band_data > 0
                         # Convert linear power to dB
                         band_data = np.where(
                             band_data > 0,
@@ -255,8 +248,14 @@ class Sentinel1Adapter(SatelliteAdapterBase):
                 # Stack: (2, H, W)
                 patch = np.stack(band_arrays, axis=0)
 
+                if not quality_mask.any():
+                    raise ValueError("Scene has no valid pixels in the requested region")
+                patch[:, ~quality_mask] = 0
+
                 # Save to cache
-                self.save_patch_to_cache(cache_path, patch, scene, bbox)
+                self.save_patch_to_cache(cache_path, patch, scene, bbox, quality_mask,
+                                         preprocessing_version=PREPROCESSING_VERSION,
+                                         data_units="backscatter_db_scaled_minus25_0")
                 paths.append(cache_path)
 
             except Exception as e:
