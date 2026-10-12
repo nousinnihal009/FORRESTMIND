@@ -21,6 +21,7 @@ from forestmind.data.dataset import create_dataloaders
 from forestmind.models.forestmind_model import ForestMindModel
 from forestmind.training.losses import ForestMindLoss
 from forestmind.training.metrics import ForestMindMetrics
+from forestmind.training.trainer import _get_device
 
 
 def setup_logging():
@@ -41,32 +42,23 @@ def main():
 
     parser = argparse.ArgumentParser(description="Evaluate ForestMind")
     parser.add_argument("--checkpoint", type=str, required=True, help="Model checkpoint path")
-    parser.add_argument("--config", type=str, default="configs/default.yaml", help="Config file")
+    parser.add_argument("--config", type=str, default=None, help="Optional evaluation config override")
     parser.add_argument("--split", type=str, default="test", choices=["val", "test"], help="Split to evaluate")
     args = parser.parse_args()
 
     setup_logging()
     logger = logging.getLogger("evaluate")
 
-    # Load config
-    with open(args.config) as f:
-        config = yaml.safe_load(f)
-
-    # Device
-    device_str = config.get("device", "auto")
-    if device_str == "auto":
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    else:
-        device = torch.device(device_str)
-
     # Load checkpoint
     logger.info(f"Loading checkpoint: {args.checkpoint}")
-    checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
-
-    # Use checkpoint config if available
-    if "config" in checkpoint:
-        config = checkpoint["config"]
-        logger.info("Using config from checkpoint")
+    checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+    config = checkpoint.get("config")
+    if args.config:
+        with open(args.config, encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+    if config is None:
+        parser.error("Checkpoint has no config; provide --config")
+    device = _get_device(config)
 
     # Create data
     data_cfg = config.get("data", {})
@@ -99,6 +91,12 @@ def main():
                 "sar": batch["sar"].to(device),
                 "timestamps": batch["timestamps"].to(device),
             }
+            if "label_valid" in batch and not torch.as_tensor(batch["label_valid"]).all():
+                raise ValueError("Evaluation requires observed labels")
+            for key in ("observation_mask", "optical_mask", "sar_mask", "quality_mask",
+                        "climate_context", "activity_context"):
+                if key in batch:
+                    inputs[key] = batch[key].to(device)
             targets = {
                 "health_state": batch["health_state"].to(device),
                 "health_score": batch["health_score"].to(device),
@@ -109,8 +107,9 @@ def main():
 
             outputs = model(**inputs)
             losses = criterion(outputs, targets)
-            total_loss += losses["total"].item()
-            num_batches += 1
+            batch_size = batch["optical"].shape[0]
+            total_loss += losses["total"].item() * batch_size
+            num_batches += batch_size
 
             metrics.update(outputs, targets)
 
