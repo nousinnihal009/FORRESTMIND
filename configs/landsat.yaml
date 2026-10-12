@@ -1,5 +1,7 @@
 # ForestMind — Landsat Historical Data Configuration
-# Uses Landsat-8/9 data harmonized to Sentinel-2 equivalent
+# Download/inference configuration; band alignment is not full HLS correction.
+# Raw caches have no supervised targets. Training requires independently split labeled NPZs.
+# Image output resolution follows bbox extent / patch_size, not native sensor resolution.
 
 # ─── Data ───────────────────────────────────────────────
 data:
@@ -41,6 +43,14 @@ foundation:
     num_heads: 8
     mlp_ratio: 4.0
     drop_rate: 0.1
+  prithvi:
+    model_name: "prithvi_eo_v2_300"
+    freeze: true
+    use_proxy: true              # untrained development baseline only
+  terramind:
+    model_name: "terramind_v1_base"
+    freeze: true
+    use_proxy: true              # untrained development baseline only
 
 # ─── Fusion ────────────────────────────────────────────
 fusion:
