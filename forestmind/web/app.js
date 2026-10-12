@@ -219,6 +219,7 @@ async function runScenario(event) {
     const result=await api('/scenarios',{method:'POST',body:JSON.stringify(values)});
     const region=await api('/regions/'+encodeURIComponent(values.region_id));
     state.scenario=result;
+    if(!result.baseline.length){$('#scenario-results').innerHTML='<div class="empty-state"><h2>More observations are needed</h2><p>This region has no eligible forecast. No scenario projection was produced. Supply twelve consecutive usable monthly records, including the latest month.</p></div>';return;}
     const b=result.baseline.at(-1),s=result.scenario.at(-1),delta=b&&s?s.score-b.score:null;
     const assumptions=Array.isArray(result.assumptions)?result.assumptions:Object.entries(result.assumptions||{}).map(([k,v])=>`${k}: ${typeof v==='object'?JSON.stringify(v):v}`);
     $('#scenario-results').innerHTML=`<div class="panel-heading"><div><div class="eyebrow">EXPLICIT ASSUMPTIONS · ILLUSTRATIVE OUTPUT</div><h2>${esc(region.name)}</h2></div>${badge('Uncalibrated')}</div><div class="scenario-result-body"><div class="scenario-metrics"><div class="scenario-metric"><small>Baseline · ${b?.horizon_days || '—'} days</small><strong>${numeric(b?.score,1)}</strong></div><div class="scenario-metric"><small>Scenario · same horizon</small><strong>${numeric(s?.score,1)}</strong></div><div class="scenario-metric"><small>Condition-point difference</small><strong>${typeof delta==='number'&&delta>0?'+':''}${numeric(delta,1)}</strong></div></div><div class="chart-topline"><div class="chart-legend"><span><i class="legend-line"></i>Observed</span><span><i class="legend-line dashed"></i>Baseline</span><span><i class="legend-line" style="border-color:#b3935c"></i>Scenario</span></div></div>${chart(region.forecast.historical.slice(-12),result.baseline,{alternative:result.scenario,label:'Baseline and hypothetical scenario condition trajectories'})}<div class="evidence-disclaimer">${esc(result.caveat)}</div><div class="scenario-assumptions"><strong>Assumptions saved with this comparison</strong><ul>${assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul><button id="export-scenario" class="button secondary">${icon('download',14)}Export comparison</button></div></div>`;
@@ -229,7 +230,7 @@ async function runScenario(event) {
 }
 function downloadJSON(data, filename) {const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function openImport() {$('#import-error').hidden=true;$('#import-dialog').showModal();}
-async function fillTemplate() {try {$('#import-json').value=JSON.stringify(await api('/import-example'),null,2);$('#file-name').textContent='Example template · replace with your observations';}catch(e){toast(e.message);}}
+async function fillTemplate() {try {$('#import-error').hidden=true;$('#import-json').value=JSON.stringify(await api('/import-example'),null,2);$('#file-name').textContent='Example template · replace with your observations';}catch(e){toast(e.message);}}
 async function importRegion(event) {
   event.preventDefault();const button=$('#submit-import');button.disabled=true;$('#import-error').hidden=true;
   try{
@@ -254,10 +255,13 @@ $('#run-analysis').addEventListener('click',runAnalysis);
 $('#export-region').addEventListener('click',async()=>{if(!state.selected)return;try{downloadJSON(await api('/regions/'+encodeURIComponent(state.selected)+'/export'),'forestmind-'+state.selected+'.json');}catch(error){toast(error.message);}});
 $('#scenario-form').addEventListener('submit',runScenario);
 $$('input[type="range"]').forEach(el=>el.addEventListener('input',()=>{$('#'+el.id+'-output').textContent=el.value+'%';}));
-$('#scenario-region').addEventListener('change',()=>{if(state.scenario){state.scenario=null;$('#scenario-results').innerHTML='<div class="empty-state"><h2>New region selected</h2><p>Compare trajectories to evaluate this region with the current assumptions.</p></div>';}});
+function invalidateScenario(){if(state.scenario){state.scenario=null;$('#scenario-results').innerHTML='<div class="empty-state"><h2>Assumptions changed</h2><p>Compare trajectories again to evaluate the selected region with these inputs.</p></div>';}}
+$('#scenario-region').addEventListener('change',invalidateScenario);
+$$('input[type="range"]').forEach(el=>el.addEventListener('input',invalidateScenario));
 $$('.import-trigger').forEach(el=>el.addEventListener('click',openImport));
 $('#close-import').addEventListener('click',()=>$('#import-dialog').close());
 $('#import-form').addEventListener('submit',importRegion);
+$('#import-json').addEventListener('input',()=>{$('#import-error').hidden=true;});
 $('#fill-template').addEventListener('click',fillTemplate);
 $('#download-template').addEventListener('click',async()=>{try{downloadJSON(await api('/import-example'),'forestmind-observation-template.json');}catch(error){toast(error.message);}});
 $('#import-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;if(file.size>2*1024*1024){$('#import-error').textContent='Choose a JSON file smaller than 2 MB.';$('#import-error').hidden=false;return;}$('#import-json').value=await file.text();$('#file-name').textContent=file.name;$('#import-error').hidden=true;});
