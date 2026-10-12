@@ -556,7 +556,7 @@ class SyntheticForestGenerator:
         else:
             return 4
 
-    def generate_sample(self) -> dict[str, np.ndarray | int | float]:
+    def generate_sample(self, horizons_days: list[int] | None = None) -> dict[str, np.ndarray | int | float]:
         """Generate a single synthetic multi-temporal satellite sample.
         
         Returns:
@@ -630,7 +630,8 @@ class SyntheticForestGenerator:
 
         # Future trajectory
         trajectory = self._compute_future_trajectory(
-            scenario, health_trajectory
+            scenario, health_trajectory,
+            horizons_days=horizons_days if horizons_days is not None else [30, 180, 365, 1095, 1825],
         )
 
         return {
