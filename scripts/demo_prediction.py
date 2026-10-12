@@ -81,7 +81,7 @@ def main():
 
     if args.checkpoint:
         logger.info(f"Loading checkpoint: {args.checkpoint}")
-        checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
         if "config" in checkpoint:
             config = checkpoint["config"]
             logger.info("Using config from checkpoint")
@@ -94,12 +94,13 @@ def main():
         config["temporal"]["depth"] = 2
         logger.info("Building ForestMind model...")
         model = ForestMindModel(config)
+        logger.warning("Untrained demonstration weights: outputs are not validated forest assessments")
 
     # ─── Run Prediction ──────────────────────────────────
     logger.info("Running model prediction...")
 
     # Prepare input
-    transform = Compose([Normalize(), ToTensor()])
+    transform = Compose([Normalize(**config.get("data", {}).get("normalization", {})), ToTensor()])
     transformed = transform(sample)
 
     optical = transformed["optical"].unsqueeze(0)   # (1, T, 12, H, W)
@@ -145,14 +146,16 @@ def main():
 
     report = risk_engine.analyze(
         health_history=sample["health_history"],
-        health_state=prediction["health_state"],
+        health_state=prediction["health_state_index"],
         health_score=prediction["health_score"],
         health_confidence=prediction["health_confidence"],
         active_drivers=prediction["active_drivers"],
-        driver_strengths=sample["driver_strengths"],
+        driver_strengths=np.asarray(prediction["driver_strengths"]),
         trajectory_scores=np.array(prediction["trajectory"]["health_scores"]),
         trajectory_uncertainty=np.array(prediction["trajectory"].get("uncertainty", [0]*5)),
         location="Synthetic Forest Patch (Demo)",
+        horizon_days=model.trajectory_head.horizon_days,
+        timestamps=sample["timestamps"],
     )
 
     # Print full report
