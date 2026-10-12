@@ -225,6 +225,12 @@ class PrithviAdapter(FoundationModelBase):
     def embedding_dim(self) -> int:
         return self._target_dim
 
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if hasattr(self, "backbone") and not any(p.requires_grad for p in self.backbone.parameters()):
+            self.backbone.eval()
+        return self
+
     @property
     def supports_modalities(self) -> list[str]:
         return ["optical"]  # Prithvi is primarily optical (HLS)
