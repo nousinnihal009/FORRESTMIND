@@ -5,13 +5,13 @@ from __future__ import annotations
 import csv
 from datetime import datetime, timezone
 import io
-import json
 import logging
 import os
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -28,7 +28,7 @@ def now() -> str:
 def _summary(result: dict) -> dict:
     fields = ("id", "name", "country", "area_km2", "center", "geometry", "status", "health_score",
               "health_change", "confidence", "quality", "latest_date", "alert_count", "provenance")
-    return {field: result[field] for field in fields}
+    return {**{field: result[field] for field in fields}, "coverage": result["health"]["coverage"]}
 
 
 def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> FastAPI:
@@ -45,6 +45,15 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
         "There is no authentication. Bind to localhost. " + DISCLAIMER
     ))
     app.state.store = store
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_request, error: RequestValidationError):
+        # Omit reflected input: nonstandard JSON NaN/Infinity must return a usable
+        # validation error rather than breaking the strict JSON error serializer.
+        return JSONResponse(status_code=422, content={"detail": [
+            {"loc": item["loc"], "msg": item["msg"], "type": item["type"]}
+            for item in error.errors()
+        ]})
 
     @app.middleware("http")
     async def local_response_headers(request, call_next):
