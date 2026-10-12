@@ -21,6 +21,8 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 artifacts/
+build/
+dist/
 
 # OS artifacts
 .DS_Store
