@@ -141,6 +141,14 @@ class Normalize:
         self.sar_std = sar_std if sar_std is not None else np.array(
             [0.18, 0.15], dtype=np.float32
         )
+        for name, count in (("optical_mean", 12), ("optical_std", 12),
+                            ("sar_mean", 2), ("sar_std", 2)):
+            values = np.asarray(getattr(self, name), dtype=np.float32)
+            if values.shape != (count,) or not np.isfinite(values).all():
+                raise ValueError(f"{name} must contain {count} finite band statistics")
+            if name.endswith("std") and (values <= 0).any():
+                raise ValueError(f"{name} values must be positive")
+            setattr(self, name, values)
 
     def __call__(self, sample: dict) -> dict:
         # Normalize optical: (T, C, H, W), stats broadcast over (T, 1, H, W)
@@ -193,21 +201,21 @@ class Compose:
         return sample
 
 
-def get_train_transforms(crop_size: int = 96) -> Compose:
+def get_train_transforms(crop_size: int = 96, normalization: dict | None = None) -> Compose:
     """Standard training transforms with augmentation."""
     return Compose([
         TemporalJitter(drop_prob=0.1),
         SpectralJitter(noise_std=0.01),
         SpatialFlipRotate(),
         # RandomCrop(crop_size=crop_size),  # Uncomment for larger patches
-        Normalize(),
+        Normalize(**(normalization or {})),
         ToTensor(),
     ])
 
 
-def get_eval_transforms() -> Compose:
+def get_eval_transforms(normalization: dict | None = None) -> Compose:
     """Evaluation transforms (no augmentation)."""
     return Compose([
-        Normalize(),
+        Normalize(**(normalization or {})),
         ToTensor(),
     ])
