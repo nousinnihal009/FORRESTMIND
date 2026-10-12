@@ -30,7 +30,9 @@ from forestmind.data.adapters.base import (
     PatchData,
     SatelliteAdapterBase,
     SceneMetadata,
+    PREPROCESSING_VERSION,
 )
+from forestmind.data.adapters.raster import read_aligned_band
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +202,6 @@ class Sentinel2Adapter(SatelliteAdapterBase):
         """
         try:
             import rasterio
-            from rasterio.warp import Resampling
-            from rasterio.windows import from_bounds
         except ImportError:
             raise ImportError(
                 "Sentinel-2 adapter requires 'rasterio'. "
@@ -236,27 +236,21 @@ class Sentinel2Adapter(SatelliteAdapterBase):
 
                 # Read and stack bands
                 band_arrays = []
+                quality_mask = np.ones((self.patch_size, self.patch_size), dtype=bool)
                 for band_name in S2_BANDS:
                     asset_key = S2_ASSET_KEYS[band_name]
                     href = item.assets[asset_key].href
 
                     with rasterio.open(href) as src:
                         # Compute window from bbox
-                        window = from_bounds(
-                            bbox.west, bbox.south, bbox.east, bbox.north,
-                            transform=src.transform,
-                        )
-
-                        # Read with resampling to target size
-                        band_data = src.read(
-                            1,
-                            window=window,
-                            out_shape=(self.patch_size, self.patch_size),
-                            resampling=Resampling.bilinear,
-                        ).astype(np.float32)
+                        band_data, valid = read_aligned_band(src, bbox, self.patch_size)
+                        quality_mask &= valid
 
                         # Scale to [0, 1]
-                        band_data = band_data / self.scale_factor
+                        raster_meta = item.assets[asset_key].extra_fields.get("raster:bands", [{}])[0]
+                        scale = raster_meta.get("scale", 1.0 / self.scale_factor)
+                        offset = raster_meta.get("offset", 0.0)
+                        band_data = band_data * scale + offset
                         band_data = np.clip(band_data, 0.0, 1.0)
 
                         band_arrays.append(band_data)
@@ -265,25 +259,24 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 patch = np.stack(band_arrays, axis=0)
 
                 # Read SCL for cloud masking
-                quality_mask = None
                 if "SCL" in item.assets:
                     scl_href = item.assets["SCL"].href
                     with rasterio.open(scl_href) as src:
-                        window = from_bounds(
-                            bbox.west, bbox.south, bbox.east, bbox.north,
-                            transform=src.transform,
-                        )
-                        scl = src.read(
-                            1,
-                            window=window,
-                            out_shape=(self.patch_size, self.patch_size),
-                            resampling=Resampling.nearest,
-                        )
+                        scl, scl_valid = read_aligned_band(src, bbox, self.patch_size, categorical=True)
                         # True = valid pixel
-                        quality_mask = ~np.isin(scl, list(SCL_INVALID))
+                        quality_mask &= scl_valid & ~np.isin(scl, list(SCL_INVALID))
+
+                else:
+                    raise ValueError("Sentinel-2 scene lacks SCL quality data")
+
+                if not quality_mask.any():
+                    raise ValueError("Scene has no valid pixels in the requested region")
+                patch[:, ~quality_mask] = 0
 
                 # Save to cache
-                self.save_patch_to_cache(cache_path, patch, scene, bbox, quality_mask)
+                self.save_patch_to_cache(cache_path, patch, scene, bbox, quality_mask,
+                                         preprocessing_version=PREPROCESSING_VERSION,
+                                         data_units="surface_reflectance_0_1")
                 paths.append(cache_path)
 
             except Exception as e:
