@@ -239,7 +239,13 @@ class ForestMindModel(nn.Module):
         # Exclude padded observations from the encoder as well as attention;
         # otherwise padding can contaminate BatchNorm statistics in proxy CNNs.
         flat_valid = valid.reshape(-1)
-        encoded = self.foundation(combined_flat[flat_valid])
+        if hasattr(self.foundation, "encode_modalities"):
+            encoded = self.foundation.encode_modalities(
+                combined_flat[flat_valid, :12], combined_flat[flat_valid, 12:],
+                optical_mask.reshape(-1)[flat_valid], sar_mask.reshape(-1)[flat_valid],
+            )
+        else:
+            encoded = self.foundation(combined_flat[flat_valid])
         embeddings_flat = encoded.new_zeros(B * T, self.foundation.embedding_dim)
         embeddings_flat[flat_valid] = encoded
         embeddings = embeddings_flat.view(B, T, -1)  # (B, T, D)
@@ -296,6 +302,7 @@ class ForestMindModel(nn.Module):
         traj = outputs["trajectory"]
 
         result = {
+            "health_state_index": health["state"][0].item(),
             "health_state": health_states[health["state"][0].item()],
             "health_score": round(health["score"][0].item(), 1),
             "health_confidence": round(health["probs"][0].max().item() * 100, 1),
@@ -312,6 +319,8 @@ class ForestMindModel(nn.Module):
                 "horizons": [f"{days} days" for days in self.trajectory_head.horizon_days],
                 "health_scores": [round(v, 1) for v in (traj["score_100"][0]).tolist()],
             },
+            "driver_strengths": attr["strength"][0].tolist(),
+            "probabilities_calibrated": False,
         }
 
         if "uncertainty" in traj:
