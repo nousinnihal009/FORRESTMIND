@@ -28,7 +28,7 @@ import numpy as np
 from forestmind.utils.geo import BoundingBox
 
 logger = logging.getLogger(__name__)
-PREPROCESSING_VERSION = "forestmind-grid-v2"
+PREPROCESSING_VERSION = "forestmind-grid-v3"
 
 
 # ─── Data Structures ──────────────────────────────────────────────────────────
@@ -101,6 +101,10 @@ class SatelliteAdapterBase(ABC):
         timeout_seconds: float = 30.0,
     ):
         self.cache_dir = Path(cache_dir)
+        if not isinstance(patch_size, int) or isinstance(patch_size, bool) or patch_size < 1:
+            raise ValueError("patch_size must be a positive integer")
+        if not np.isfinite(resolution) or resolution <= 0:
+            raise ValueError("resolution must be positive and finite")
         self.patch_size = patch_size
         self.resolution = resolution
         if not np.isfinite(timeout_seconds) or timeout_seconds <= 0:
