@@ -12,6 +12,7 @@ import torch
 import yaml
 
 from forestmind.data.dataset import create_dataloaders
+from forestmind.data.synthetic import SyntheticForestGenerator
 from forestmind.models.forestmind_model import ForestMindModel
 from forestmind.training.evaluation import (
     evaluate_checkpoint, sha256_file, tensor_mapping_hash, write_evaluation_report,
@@ -193,3 +194,98 @@ def test_cli_writes_a_real_tiny_checkpoint_report(checkpoint_fixture, tmp_path):
     assert "VALIDATION SPLIT" in completed.stdout
     assert "SYNTHETIC DATA" in completed.stdout
     assert "45 days" in completed.stdout and "120 days" in completed.stdout
+
+
+def test_override_cannot_relabel_trained_horizons(checkpoint_fixture, tmp_path):
+    checkpoint, config = checkpoint_fixture
+    changed = deepcopy(config)
+    changed["heads"]["trajectory"]["horizons"] = [30, 180]
+    override = tmp_path / "wrong-horizons.yaml"
+    override.write_text(yaml.safe_dump(changed), encoding="utf-8")
+    with pytest.raises(ValueError, match="cannot relabel predictions"):
+        evaluate_checkpoint(checkpoint, config_path=override)
+
+
+def test_report_redacts_credentials_and_signed_url_queries(checkpoint_fixture, tmp_path):
+    checkpoint, config = checkpoint_fixture
+    changed = deepcopy(config)
+    changed["connection"] = {
+        "api_key": "private-api-value", "nested": [{"client_secret": "private-client-value"}],
+        "endpoint": "https://private-user:private-password@example.invalid/assets?signature=private-query#private-fragment",
+        "num_tokens": 16,
+    }
+    override = tmp_path / "credentials.yaml"
+    override.write_text(yaml.safe_dump(changed), encoding="utf-8")
+    report = evaluate_checkpoint(checkpoint, config_path=override)
+    output = write_evaluation_report(report, tmp_path / "shareable.json")
+    serialized = output.read_text(encoding="utf-8")
+    assert "private-" not in serialized
+    safe = report["config"]["effective"]["connection"]
+    assert safe["api_key"] == "[REDACTED]"
+    assert safe["nested"][0]["client_secret"] == "[REDACTED]"
+    assert safe["endpoint"] == "https://example.invalid/assets"
+    assert safe["num_tokens"] == 16
+    # Recording a report must never mutate the usable caller configuration.
+    assert yaml.safe_load(override.read_text(encoding="utf-8")) == changed
+    assert report["config"]["file_sha256"] == sha256_file(override)
+
+
+def _disk_override(config, directory, *, trajectories, synthetic=True):
+    changed = deepcopy(config)
+    source = directory / "sequences"
+    for index, split in enumerate(("train", "val", "test")):
+        split_dir = source / split
+        split_dir.mkdir(parents=True)
+        sample = SyntheticForestGenerator(patch_size=16, time_steps=3, seed=index + 1).generate_sample(
+            horizons_days=[45, 120]
+        )
+        sample["trajectory"] = np.asarray(trajectories, dtype=np.float32)
+        sample["location_id"] = split
+        np.savez_compressed(split_dir / "sample.npz", **sample)
+    changed["data"]["source"] = str(source)
+    changed["data"]["trajectory_target_scale"] = "percent"
+    if synthetic is not None:
+        changed["data"]["synthetic"] = synthetic
+    override = directory / "disk.yaml"
+    override.write_text(yaml.safe_dump(changed), encoding="utf-8")
+    return override
+
+
+def test_disk_percent_targets_have_explicit_scale_and_hashed_source(checkpoint_fixture, tmp_path):
+    checkpoint, config = checkpoint_fixture
+    override = _disk_override(config, tmp_path, trajectories=[0.5, 80])
+    report = evaluate_checkpoint(checkpoint, config_path=override)
+    assert report["dataset"]["synthetic"] is True
+    assert report["dataset"]["synthetic_provenance"] == "user_declared"
+    assert report["dataset"]["trajectory_target_original_scale"] == "percent"
+    assert report["label_schema"]["health_states"] == ["healthy", "stressed", "degraded", "severely_degraded", "cleared"]
+    example = report["examples"][0]
+    assert example["trajectory_target_original"] == [0.5, 80.0]
+    assert example["targets"]["trajectory"] == pytest.approx([0.005, 0.8])
+    source = report["dataset"]["source_manifest"][0]
+    assert source["sha256"] == sha256_file(source["path"])
+    assert source["bytes"] == Path(source["path"]).stat().st_size
+    assert example["source_ref"] == source
+    with pytest.raises(ValueError, match="must not overwrite"):
+        write_evaluation_report(report, source["path"])
+    with pytest.raises(ValueError, match="must not overwrite"):
+        write_evaluation_report(report, override)
+
+
+def test_disk_file_does_not_imply_real_data(checkpoint_fixture, tmp_path):
+    checkpoint, config = checkpoint_fixture
+    override = _disk_override(config, tmp_path, trajectories=[20, 80], synthetic=None)
+    report = evaluate_checkpoint(checkpoint, config_path=override)
+    assert report["dataset"]["synthetic"] is None
+    assert report["dataset"]["synthetic_provenance"] == "unknown"
+
+
+@pytest.mark.parametrize("trajectories, message", [
+    ([float("nan"), 80], "Non-finite.*targets.trajectory"),
+    ([101, 80], "Normalized trajectory labels must lie"),
+])
+def test_invalid_disk_targets_stop_evaluation(checkpoint_fixture, tmp_path, trajectories, message):
+    checkpoint, config = checkpoint_fixture
+    override = _disk_override(config, tmp_path, trajectories=trajectories)
+    with pytest.raises(ValueError, match=message):
+        evaluate_checkpoint(checkpoint, config_path=override)
