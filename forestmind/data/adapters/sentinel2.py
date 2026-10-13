@@ -76,6 +76,36 @@ PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 S2_COLLECTION = "sentinel-2-l2a"
 
 
+def reflectance_scaling(asset_metadata: dict, properties: dict,
+                        scale_factor: float = S2_SCALE_FACTOR) -> dict:
+    """Resolve DN conversion without mixing old and new processing baselines.
+
+    Explicit raster scale/offset take precedence. Planetary Computer currently
+    omits them, so its native L2A assets need the baseline >=04.00 DN correction.
+    Use the processing baseline, not acquisition date: old acquisitions can be
+    reprocessed. Reference: Microsoft's PlanetaryComputerExamples notebook
+    datasets/sentinel-2-l2a/baseline-change.ipynb and ESA's L2A BOA_ADD_OFFSET.
+    """
+    bands = asset_metadata.get("raster:bands") or [{}]
+    metadata = bands[0]
+    if "scale" in metadata and "offset" in metadata:
+        scale, offset = float(metadata["scale"]), float(metadata["offset"])
+        source = "stac-raster-scale-offset"
+    else:
+        try:
+            baseline = float(properties["s2:processing_baseline"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Sentinel-2 needs raster scale/offset or a processing baseline") from error
+        if not np.isfinite(baseline) or baseline < 0:
+            raise ValueError("Sentinel-2 processing baseline must be finite and nonnegative")
+        scale = float(metadata.get("scale", 1.0 / scale_factor))
+        offset = float(metadata.get("offset", -1000.0 / scale_factor if baseline >= 4.0 else 0.0))
+        source = "planetary-computer-processing-baseline"
+    if not np.isfinite(scale) or scale <= 0 or not np.isfinite(offset):
+        raise ValueError("Sentinel-2 reflectance scale/offset must be finite, with positive scale")
+    return {"scale": scale, "offset": offset, "source": source}
+
+
 class Sentinel2Adapter(SatelliteAdapterBase):
     """Adapter for Sentinel-2 Level-2A data from Planetary Computer.
 
@@ -99,6 +129,8 @@ class Sentinel2Adapter(SatelliteAdapterBase):
     ):
         super().__init__(cache_dir=cache_dir, patch_size=patch_size, resolution=resolution,
                          timeout_seconds=timeout_seconds)
+        if not np.isfinite(scale_factor) or scale_factor <= 0:
+            raise ValueError("scale_factor must be positive and finite")
         self.scale_factor = scale_factor
 
     @property
@@ -239,11 +271,10 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                         quality_mask &= valid
 
                         # Scale to [0, 1]
-                        raster_meta = item.assets[asset_key].extra_fields.get("raster:bands", [{}])[0]
-                        scale = raster_meta.get("scale", 1.0 / self.scale_factor)
-                        offset = raster_meta.get("offset", 0.0)
-                        scaling[band_name] = {"scale": scale, "offset": offset}
-                        band_data = band_data * scale + offset
+                        conversion = reflectance_scaling(item.assets[asset_key].extra_fields,
+                                                         item.properties, self.scale_factor)
+                        scaling[band_name] = conversion
+                        band_data = band_data * conversion["scale"] + conversion["offset"]
                         band_data = np.clip(band_data, 0.0, 1.0)
 
                         band_arrays.append(band_data)
