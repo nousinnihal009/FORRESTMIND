@@ -27,7 +27,9 @@ Requires:
 from __future__ import annotations
 
 import argparse
+from datetime import date
 import logging
+import math
 import sys
 import time
 from pathlib import Path
@@ -38,6 +40,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from forestmind.utils.geo import BoundingBox
+from forestmind.data.adapters.network import public_error
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,7 +64,7 @@ SENSOR_ALIASES = {
 }
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Download satellite data for ForestMind",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -103,10 +106,30 @@ def parse_args() -> argparse.Namespace:
         help="Target patch size in pixels",
     )
     parser.add_argument(
+        "--timeout", type=float, default=30.0,
+        help="Timeout in seconds per catalog/signing/raster HTTP request (no retries)",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Search only, don't download",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
+
+
+class PartialDownloadError(RuntimeError):
+    """Preserve successful patches while marking incomplete downloads as failed."""
+
+    def __init__(self, completed: int, failures: list[dict]):
+        self.completed = completed
+        super().__init__(f"{len(failures)} scene(s) failed; {completed} usable patches retained. "
+                         f"First error: {failures[0]['reason']}")
+
+
+def checked_download(adapter, scenes, bbox) -> int:
+    paths = adapter.download(scenes, bbox)
+    if adapter.download_failures:
+        raise PartialDownloadError(len(paths), adapter.download_failures)
+    return len(paths)
 
 
 def load_config(config_path: str) -> dict:
@@ -142,6 +165,7 @@ def download_sentinel2(
     max_scenes: int,
     dry_run: bool,
     config: dict | None = None,
+    timeout_seconds: float = 30.0,
 ) -> int:
     """Download Sentinel-2 data."""
     from forestmind.data.adapters.sentinel2 import Sentinel2Adapter
@@ -153,6 +177,7 @@ def download_sentinel2(
         cache_dir=cache_dir,
         patch_size=patch_size,
         resolution=resolution,
+        timeout_seconds=timeout_seconds,
     )
 
     logger.info(f"🛰️  Searching Sentinel-2 L2A: {start_date} → {end_date}")
@@ -166,9 +191,9 @@ def download_sentinel2(
             logger.info(f"   ... and {len(scenes) - 10} more")
         return len(scenes)
 
-    paths = adapter.download(scenes, bbox)
-    logger.info(f"   ✓ Downloaded {len(paths)} patches → {cache_dir}/sentinel2/")
-    return len(paths)
+    count = checked_download(adapter, scenes, bbox)
+    logger.info(f"   Downloaded {count} patches → {cache_dir}/sentinel2/")
+    return count
 
 
 def download_sentinel1(
@@ -180,6 +205,7 @@ def download_sentinel1(
     max_scenes: int,
     dry_run: bool,
     config: dict | None = None,
+    timeout_seconds: float = 30.0,
 ) -> int:
     """Download Sentinel-1 SAR data."""
     from forestmind.data.adapters.sentinel1 import Sentinel1Adapter
@@ -191,6 +217,7 @@ def download_sentinel1(
         cache_dir=cache_dir,
         patch_size=patch_size,
         orbit_direction=orbit,
+        timeout_seconds=timeout_seconds,
     )
 
     logger.info(f"📡 Searching Sentinel-1 GRD: {start_date} → {end_date}")
@@ -205,9 +232,9 @@ def download_sentinel1(
             logger.info(f"   ... and {len(scenes) - 10} more")
         return len(scenes)
 
-    paths = adapter.download(scenes, bbox)
-    logger.info(f"   ✓ Downloaded {len(paths)} patches → {cache_dir}/sentinel1/")
-    return len(paths)
+    count = checked_download(adapter, scenes, bbox)
+    logger.info(f"   Downloaded {count} patches → {cache_dir}/sentinel1/")
+    return count
 
 
 def download_landsat(
@@ -220,6 +247,7 @@ def download_landsat(
     max_scenes: int,
     dry_run: bool,
     config: dict | None = None,
+    timeout_seconds: float = 30.0,
 ) -> int:
     """Download Landsat data."""
     from forestmind.data.adapters.landsat import LandsatAdapter
@@ -233,6 +261,7 @@ def download_landsat(
         patch_size=patch_size,
         resolution=resolution,
         platforms=platforms,
+        timeout_seconds=timeout_seconds,
     )
 
     logger.info(f"🌎 Searching Landsat: {start_date} → {end_date}")
@@ -247,12 +276,12 @@ def download_landsat(
             logger.info(f"   ... and {len(scenes) - 10} more")
         return len(scenes)
 
-    paths = adapter.download(scenes, bbox)
-    logger.info(f"   ✓ Downloaded {len(paths)} patches → {cache_dir}/landsat/")
-    return len(paths)
+    count = checked_download(adapter, scenes, bbox)
+    logger.info(f"   Downloaded {count} patches → {cache_dir}/landsat/")
+    return count
 
 
-def main():
+def main(argv: list[str] | None = None) -> int:
     if sys.platform == "win32":
         try:
             sys.stdout.reconfigure(encoding="utf-8")
@@ -260,28 +289,44 @@ def main():
         except Exception:
             pass
 
-    args = parse_args()
+    args = parse_args(argv)
 
     # Load config if provided
     config = None
-    if args.config:
-        config = load_config(args.config)
-        logger.info(f"Loaded config: {args.config}")
-
-    # Determine region
-    if args.region:
-        parts = [float(x) for x in args.region.split(",")]
-        if len(parts) != 4:
-            logger.error("Region must be: west,south,east,north")
-            sys.exit(1)
-        bbox = BoundingBox(west=parts[0], south=parts[1], east=parts[2], north=parts[3])
-        start_date = args.start
-        end_date = args.end
-    elif config:
-        bbox, start_date, end_date = get_region_from_config(config)
-    else:
-        logger.error("Specify --region or --config")
-        sys.exit(1)
+    try:
+        if args.config:
+            config = load_config(args.config)
+            if not isinstance(config, dict):
+                raise ValueError("Config must contain a YAML mapping")
+            logger.info(f"Loaded config: {args.config}")
+        if args.region:
+            parts = [float(x) for x in args.region.split(",")]
+            if len(parts) != 4:
+                raise ValueError("Region must be: west,south,east,north")
+            bbox = BoundingBox(*parts)
+            start_date, end_date = args.start, args.end
+        elif config:
+            bbox, start_date, end_date = get_region_from_config(config)
+        else:
+            raise ValueError("Specify --region or --config")
+        if not all(math.isfinite(v) for v in (bbox.west, bbox.south, bbox.east, bbox.north)):
+            raise ValueError("Region bounds must be finite")
+        if not (-180 <= bbox.west < bbox.east <= 180 and -90 <= bbox.south < bbox.north <= 90):
+            raise ValueError("Region requires ordered longitude/latitude bounds in WGS84")
+        start_date, end_date = str(start_date), str(end_date)
+        if date.fromisoformat(start_date) > date.fromisoformat(end_date):
+            raise ValueError("Start date must not follow end date")
+        if args.max_scenes < 1 or args.patch_size < 1:
+            raise ValueError("max-scenes and patch-size must be positive")
+        if not math.isfinite(args.max_cloud) or not 0 <= args.max_cloud <= 100:
+            raise ValueError("max-cloud must be between 0 and 100")
+        if not math.isfinite(args.timeout) or args.timeout <= 0:
+            raise ValueError("timeout must be positive and finite")
+        sensor_list = list(dict.fromkeys(SENSOR_ALIASES[s.strip().lower()]
+                                        for s in args.sensors.split(",")))
+    except (ValueError, TypeError, KeyError, AttributeError, OSError, yaml.YAMLError) as error:
+        logger.error(f"Invalid download request: {public_error(error)}")
+        return 2
 
     logger.info(f"Region: ({bbox.west:.2f}, {bbox.south:.2f}) → ({bbox.east:.2f}, {bbox.north:.2f})")
     logger.info(f"  Area: ~{bbox.approx_area_km2():.0f} km²")
@@ -291,12 +336,9 @@ def main():
     if args.dry_run:
         logger.info("  🔍 DRY RUN — search only, no downloads")
 
-    # Parse sensors
-    sensor_list = [SENSOR_ALIASES.get(s.strip().lower(), s.strip().lower())
-                   for s in args.sensors.split(",")]
-
     start_time = time.time()
     total_downloaded = 0
+    failed = False
 
     # Download each sensor
     for sensor in sensor_list:
@@ -304,29 +346,34 @@ def main():
             if sensor == "sentinel2":
                 n = download_sentinel2(
                     bbox, start_date, end_date, args.cache_dir, args.patch_size,
-                    args.max_cloud, args.max_scenes, args.dry_run, config,
+                    args.max_cloud, args.max_scenes, args.dry_run, config, args.timeout,
                 )
             elif sensor == "sentinel1":
                 n = download_sentinel1(
                     bbox, start_date, end_date, args.cache_dir, args.patch_size,
-                    args.max_scenes, args.dry_run, config,
+                    args.max_scenes, args.dry_run, config, args.timeout,
                 )
             elif sensor == "landsat":
                 n = download_landsat(
                     bbox, start_date, end_date, args.cache_dir, args.patch_size,
-                    args.max_cloud, args.max_scenes, args.dry_run, config,
+                    args.max_cloud, args.max_scenes, args.dry_run, config, args.timeout,
                 )
-            else:
-                logger.warning(f"Unknown sensor: {sensor}")
-                continue
-
             total_downloaded += n
+            if n == 0 and not args.dry_run:
+                failed = True
+                logger.error(f"No usable patches downloaded for {sensor}")
 
+        except PartialDownloadError as error:
+            failed = True
+            total_downloaded += error.completed
+            logger.error(f"Incomplete download for {sensor}: {public_error(error)}")
         except ImportError as e:
-            logger.error(f"Missing dependencies for {sensor}: {e}")
+            failed = True
+            logger.error(f"Missing dependencies for {sensor}: {public_error(e)}")
             logger.error("Install with: pip install forestmind[real-data]")
         except Exception as e:
-            logger.error(f"Failed to download {sensor}: {e}")
+            failed = True
+            logger.error(f"Failed to download {sensor}: {public_error(e)}")
 
     elapsed = time.time() - start_time
     action = "found" if args.dry_run else "downloaded"
@@ -334,7 +381,8 @@ def main():
     logger.info(f"  Total {action}: {total_downloaded} patches")
     logger.info(f"  Time: {elapsed:.1f}s")
     logger.info(f"{'='*50}")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
