@@ -34,6 +34,7 @@ from forestmind.data.adapters.base import (
     PREPROCESSING_VERSION,
 )
 from forestmind.data.adapters.raster import read_aligned_band
+from forestmind.data.adapters.network import AssetSigner, open_catalog, open_raster, public_error
 
 logger = logging.getLogger(__name__)
 
@@ -96,8 +97,10 @@ class LandsatAdapter(SatelliteAdapterBase):
         patch_size: int = 128,
         resolution: float = 30.0,
         platforms: Optional[list[str]] = None,
+        timeout_seconds: float = 30.0,
     ):
-        super().__init__(cache_dir=cache_dir, patch_size=patch_size, resolution=resolution)
+        super().__init__(cache_dir=cache_dir, patch_size=patch_size, resolution=resolution,
+                         timeout_seconds=timeout_seconds)
         self.platforms = platforms or ["landsat-8", "landsat-9"]
 
     @property
@@ -132,24 +135,12 @@ class LandsatAdapter(SatelliteAdapterBase):
         Returns:
             List of SceneMetadata sorted by datetime ascending.
         """
-        try:
-            import planetary_computer as pc
-            import pystac_client
-        except ImportError:
-            raise ImportError(
-                "Landsat adapter requires 'pystac-client' and 'planetary-computer'. "
-                "Install with: pip install pystac-client planetary-computer"
-            )
-
         if isinstance(start_date, datetime):
             start_date = start_date.strftime("%Y-%m-%d")
         if isinstance(end_date, datetime):
             end_date = end_date.strftime("%Y-%m-%d")
 
-        catalog = pystac_client.Client.open(
-            PC_STAC_URL,
-            modifier=pc.sign_inplace,
-        )
+        catalog = open_catalog(PC_STAC_URL, self.timeout_seconds)
 
         # Build query
         query = {
@@ -164,6 +155,7 @@ class LandsatAdapter(SatelliteAdapterBase):
             datetime=f"{start_date}/{end_date}",
             query=query,
             max_items=max_results,
+            limit=min(max_results, 100),
             sortby=[{"field": "datetime", "direction": "asc"}],
         )
 
@@ -231,7 +223,6 @@ class LandsatAdapter(SatelliteAdapterBase):
             )
 
         try:
-            import planetary_computer as pc
             import pystac
         except ImportError:
             raise ImportError(
@@ -240,11 +231,13 @@ class LandsatAdapter(SatelliteAdapterBase):
             )
 
         paths = []
+        self.download_failures = []
+        signer = AssetSigner(self.timeout_seconds)
 
         for scene in scenes:
             cache_path = self.cache_path_for_scene(scene, bbox)
 
-            if cache_path.exists():
+            if self.is_cached(scene, bbox):
                 logger.debug(f"[landsat] Cached: {scene.scene_id}")
                 paths.append(cache_path)
                 continue
@@ -253,15 +246,14 @@ class LandsatAdapter(SatelliteAdapterBase):
 
             try:
                 item = pystac.Item.from_dict(scene.stac_item)
-                item = pc.sign(item)
 
                 band_arrays = []
                 quality_mask = np.ones((self.patch_size, self.patch_size), dtype=bool)
                 for band_name in LANDSAT_BANDS:
                     asset_key = LANDSAT_ASSET_KEYS[band_name]
-                    href = item.assets[asset_key].href
+                    href = signer.sign(item.assets[asset_key].href)
 
-                    with rasterio.open(href) as src:
+                    with open_raster(href, self.timeout_seconds) as src:
                         band_data, valid = read_aligned_band(src, bbox, self.patch_size)
                         quality_mask &= valid
 
@@ -277,8 +269,8 @@ class LandsatAdapter(SatelliteAdapterBase):
                 # Read QA_PIXEL for cloud masking
                 qa_key = LANDSAT_ASSET_KEYS["QA"]
                 if qa_key in item.assets:
-                    qa_href = item.assets[qa_key].href
-                    with rasterio.open(qa_href) as src:
+                    qa_href = signer.sign(item.assets[qa_key].href)
+                    with open_raster(qa_href, self.timeout_seconds) as src:
                         qa, qa_valid = read_aligned_band(src, bbox, self.patch_size, categorical=True)
                         qa = qa.astype(np.uint16)
                         # True = valid pixel (no cloud/shadow bits set)
@@ -294,11 +286,16 @@ class LandsatAdapter(SatelliteAdapterBase):
                 # Save to cache
                 self.save_patch_to_cache(cache_path, patch, scene, bbox, quality_mask,
                                          preprocessing_version=PREPROCESSING_VERSION,
-                                         data_units="surface_reflectance_0_1")
+                                         data_units="surface_reflectance_0_1",
+                                         processing_metadata={"scale": LANDSAT_SCALE, "offset": LANDSAT_OFFSET,
+                                                              "clip_range": [0.0, 1.0], "invalid_qa_bits": list(range(6)),
+                                                              "resampling": "bilinear; nearest for QA_PIXEL"})
                 paths.append(cache_path)
 
             except Exception as e:
-                logger.error(f"[landsat] Failed to download {scene.scene_id}: {e}")
+                reason = public_error(e)
+                self.download_failures.append({"scene_id": scene.scene_id, "reason": reason})
+                logger.error(f"[landsat] Failed to download {scene.scene_id}: {reason}")
                 continue
 
         return paths
