@@ -8,6 +8,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from forestmind.inference.schemas import InferenceReport
+
 
 Number = Annotated[float, Field(strict=True, allow_inf_nan=False)]
 Index = Annotated[Number, Field(ge=-1, le=1)]
