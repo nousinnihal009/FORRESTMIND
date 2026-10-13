@@ -248,7 +248,7 @@ def test_cache_geometry_and_version_are_explicit(tmp_path):
                                 preprocessing_version=PREPROCESSING_VERSION,
                                 data_units="surface_reflectance_0_1")
     with np.load(path, allow_pickle=False) as record:
-        assert str(record["preprocessing_version"]) == "forestmind-grid-v2"
+        assert str(record["preprocessing_version"]) == "forestmind-grid-v3"
         assert str(record["grid_crs"]) == "EPSG:4326"
         np.testing.assert_equal(record["grid_transform"], [0.0625, 0, 1, 0, -0.0625, 4])
         assert str(record["provider"]) == "microsoft-planetary-computer"
