@@ -24,7 +24,7 @@ SENSORS = {
 }
 BANDS = {"sentinel2": ("B08", "B04", "B11", "B12"),
          "landsat": ("B5", "B4", "B6", "B7")}
-REQUIRED_PREPROCESSING_VERSION = "forestmind-grid-v2"
+REQUIRED_PREPROCESSING_VERSION = "forestmind-grid-v3"
 
 
 @dataclass(frozen=True)
@@ -69,7 +69,7 @@ def _load_acquisition(path: Path, requested: str, target_bbox=None) -> dict | No
             version = _text_scalar(cache, "preprocessing_version", "legacy-unversioned")
             if version != REQUIRED_PREPROCESSING_VERSION:
                 raise ValueError("Legacy or unverified preprocessing: regenerate acquisitions with the current "
-                                 "download_data.py adapters (required version: forestmind-grid-v2)")
+                                 f"download_data.py adapters (required version: {REQUIRED_PREPROCESSING_VERSION})")
             if _text_scalar(cache, "data_units") != "surface_reflectance_0_1":
                 raise ValueError("Expected surface_reflectance_0_1 optical units; raw DN or normalized model inputs are not supported")
             if _text_scalar(cache, "grid_crs") != "EPSG:4326":
