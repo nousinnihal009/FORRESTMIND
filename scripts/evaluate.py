@@ -1,141 +1,84 @@
-"""
-Evaluate a trained ForestMind model.
+"""Evaluate a ForestMind checkpoint and optionally save an auditable JSON report.
 
 Usage:
-    python scripts/evaluate.py --checkpoint checkpoints/best_model.pt [--config configs/default.yaml]
+    python scripts/evaluate.py --checkpoint checkpoints/best_model.pt --split test --output artifacts/evaluation.json
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from pathlib import Path
-
-import yaml
-import torch
+import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from forestmind.data.dataset import create_dataloaders
-from forestmind.models.forestmind_model import ForestMindModel
-from forestmind.training.losses import ForestMindLoss
-from forestmind.training.metrics import ForestMindMetrics
-from forestmind.training.trainer import _get_device
+from forestmind.training.evaluation import evaluate_checkpoint, write_evaluation_report
+
+
+DRIVER_NAMES = [
+    "Agriculture", "Cattle Pasture", "Mining", "Logging",
+    "Road Construction", "Wildfire", "Drought", "Urban Expansion",
+]
 
 
 def setup_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s", datefmt="%H:%M:%S")
 
 
-def main():
+def main(argv: list[str] | None = None) -> int:
     if sys.platform == "win32":
-        try:
-            sys.stdout.reconfigure(encoding="utf-8")
-            sys.stderr.reconfigure(encoding="utf-8")
-        except Exception:
-            pass
-
-    parser = argparse.ArgumentParser(description="Evaluate ForestMind")
-    parser.add_argument("--checkpoint", type=str, required=True, help="Model checkpoint path")
-    parser.add_argument("--config", type=str, default=None, help="Optional evaluation config override")
-    parser.add_argument("--split", type=str, default="test", choices=["val", "test"], help="Split to evaluate")
-    args = parser.parse_args()
-
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser(description="Evaluate ForestMind with reproducible input provenance")
+    parser.add_argument("--checkpoint", required=True, help="Model checkpoint path (safe weights-only loading)")
+    parser.add_argument("--config", default=None, help="Optional evaluation config override")
+    parser.add_argument("--split", default="test", choices=["val", "test"], help="Explicit split to evaluate")
+    parser.add_argument("--output", type=Path, help="Save metrics, provenance and every example's raw predictions as JSON")
+    args = parser.parse_args(argv)
     setup_logging()
-    logger = logging.getLogger("evaluate")
-
-    # Load checkpoint
-    logger.info(f"Loading checkpoint: {args.checkpoint}")
-    checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-    config = checkpoint.get("config")
-    if args.config:
-        with open(args.config, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-    if config is None:
-        parser.error("Checkpoint has no config; provide --config")
-    device = _get_device(config)
-
-    # Create data
-    data_cfg = config.get("data", {})
-    _, val_loader, test_loader = create_dataloaders(
-        config,
-        batch_size=data_cfg.get("batch_size", 4),
-        num_workers=data_cfg.get("num_workers", 0),
-    )
-    eval_loader = test_loader if args.split == "test" else val_loader
-
-    # Create and load model
-    model = ForestMindModel(config)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model = model.to(device)
-    model.eval()
-
-    # Evaluate
-    criterion = ForestMindLoss(config.get("training", {}).get("loss_weights", {}))
-    metrics = ForestMindMetrics()
-
-    total_loss = 0.0
-    num_batches = 0
-
-    logger.info(f"Evaluating on {args.split} split ({len(eval_loader.dataset)} samples)...")
-
-    with torch.no_grad():
-        for batch in eval_loader:
-            inputs = {
-                "optical": batch["optical"].to(device),
-                "sar": batch["sar"].to(device),
-                "timestamps": batch["timestamps"].to(device),
-            }
-            if "label_valid" in batch and not torch.as_tensor(batch["label_valid"]).all():
-                raise ValueError("Evaluation requires observed labels")
-            for key in ("observation_mask", "optical_mask", "sar_mask", "quality_mask",
-                        "climate_context", "activity_context"):
-                if key in batch:
-                    inputs[key] = batch[key].to(device)
-            targets = {
-                "health_state": batch["health_state"].to(device),
-                "health_score": batch["health_score"].to(device),
-                "drivers": batch["drivers"].to(device),
-                "driver_strengths": batch["driver_strengths"].to(device),
-                "trajectory": batch["trajectory"].to(device),
-            }
-
-            outputs = model(**inputs)
-            losses = criterion(outputs, targets)
-            batch_size = batch["optical"].shape[0]
-            total_loss += losses["total"].item() * batch_size
-            num_batches += batch_size
-
-            metrics.update(outputs, targets)
-
-    # Report
-    result = metrics.compute()
-    avg_loss = total_loss / max(1, num_batches)
-
+    try:
+        report = evaluate_checkpoint(args.checkpoint, split=args.split, config_path=args.config)
+        if args.output:
+            saved = write_evaluation_report(report, args.output)
+    except (OSError, ValueError, KeyError, RuntimeError) as exc:
+        logging.getLogger("evaluate").error("Evaluation failed: %s", exc)
+        return 2
+    result = report["metrics"]
     print("\n" + "=" * 60)
-    print(f"  ForestMind Evaluation -- {args.split} split")
-    print(f"  Checkpoint: {args.checkpoint}")
-    print(f"  Epoch: {checkpoint.get('epoch', '?')}")
+    print(f"  ForestMind Evaluation -- {report['dataset']['split']} split")
+    print(f"  Checkpoint: {report['checkpoint']['path']}")
+    print(f"  SHA256: {report['checkpoint']['sha256']}")
+    print(f"  Epoch: {report['checkpoint']['epoch']}")
+    print(f"  Samples: {report['counts']['samples']}; batches: {report['counts']['batches']}")
     print("=" * 60)
-    print(f"\n  Average Loss: {avg_loss:.4f}\n")
-    print(metrics.summary_str(result))
+    if report["synthetic_warning"]:
+        print(report["synthetic_warning"])
+    if args.split == "val":
+        print("VALIDATION SPLIT: development metrics, not held-out test performance.")
+    print("Uncalibrated outputs; no ecological tipping or causal attribution claim.")
+    print(f"\n  Average Loss:        {report['losses']['total']:.4f}")
+    for label, key in (
+        ("Health Accuracy", "health_accuracy"), ("Health F1 (macro)", "health_f1_macro"),
+        ("Health MAE (0-100)", "health_mae"), ("Attribution F1", "attribution_f1"),
+        ("Attribution Precision", "attribution_precision"), ("Attribution Recall", "attribution_recall"),
+        ("Trajectory MAE (0-1)", "trajectory_mae"), ("Trajectory RMSE (0-1)", "trajectory_rmse"),
+        ("Aggregate Score", "aggregate_score"),
+    ):
+        print(f"  {label:23s}: {result[key]:.4f}")
+    print("  Per-horizon MAE (0-1):")
+    for horizon in report["per_horizon"]:
+        print(f"    {horizon['horizon_days']:>5d} days: {horizon['mae']:.4f} (n={horizon['n']})")
+    print("  Per-driver F1:")
+    for index, f1 in enumerate(result["attribution_per_driver_f1"]):
+        name = DRIVER_NAMES[index] if index < len(DRIVER_NAMES) else f"Driver {index}"
+        print(f"    {name:20s}: {f1:.3f}")
+    if args.output:
+        print(f"\n  JSON report: {saved}")
     print()
-
-    # Per-driver attribution F1
-    driver_names = [
-        "Agriculture", "Cattle Pasture", "Mining", "Logging",
-        "Road Construction", "Wildfire", "Drought", "Urban Expansion",
-    ]
-    if result.attribution_per_driver_f1:
-        print("  Per-driver F1:")
-        for name, f1 in zip(driver_names, result.attribution_per_driver_f1):
-            print(f"    {name:20s}: {f1:.3f}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
