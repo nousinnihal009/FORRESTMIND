@@ -1,6 +1,7 @@
 """Offline contracts for real-data scaling, bounded requests and CLI failures."""
 
 from datetime import datetime, timedelta, timezone
+import logging
 import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -8,7 +9,7 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from forestmind.data.adapters.network import AssetSigner, open_catalog, public_error
+from forestmind.data.adapters.network import AssetSigner, _RedactAccessQueries, open_catalog, public_error
 from forestmind.data.adapters.sentinel2 import Sentinel2Adapter, reflectance_scaling
 from scripts import download_data
 
@@ -73,6 +74,13 @@ def test_partial_download_raises_and_retains_completed_count():
         download_data.checked_download(adapter, ["scene"], "bbox")
     assert error.value.completed == 1
     assert "timed out" in str(error.value)
+
+
+def test_gdal_signed_filename_diagnostics_are_redacted():
+    record = logging.LogRecord("rasterio._err", logging.INFO, "", 1, "Cannot read %s", 
+                               ("band.tif?st=today&sig=secret",), None)
+    assert _RedactAccessQueries().filter(record)
+    assert record.getMessage() == "Cannot read band.tif?[redacted]"
 
 
 REQUEST = ["--region=-55.10,-3.50,-55.08,-3.48", "--sensors", "s2", "--max-scenes", "1"]
