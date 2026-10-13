@@ -18,7 +18,8 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -97,10 +98,15 @@ class SatelliteAdapterBase(ABC):
         cache_dir: str | Path = "data/real",
         patch_size: int = 128,
         resolution: float = 10.0,
+        timeout_seconds: float = 30.0,
     ):
         self.cache_dir = Path(cache_dir)
         self.patch_size = patch_size
         self.resolution = resolution
+        if not np.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive and finite")
+        self.timeout_seconds = float(timeout_seconds)
+        self.download_failures: list[dict[str, str]] = []
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     # ─── Abstract Methods ─────────────────────────────────────────────────
@@ -245,7 +251,20 @@ class SatelliteAdapterBase(ABC):
 
     def is_cached(self, scene: SceneMetadata, bbox: BoundingBox) -> bool:
         """Check if a scene is already in the local cache."""
-        return self.cache_path_for_scene(scene, bbox).exists()
+        path = self.cache_path_for_scene(scene, bbox)
+        if not path.is_file():
+            return False
+        try:
+            with np.load(path, allow_pickle=False) as record:
+                return (
+                    str(record["preprocessing_version"]) == PREPROCESSING_VERSION
+                    and record["data"].shape == (self.num_bands, self.patch_size, self.patch_size)
+                    and record["quality_mask"].shape == (self.patch_size, self.patch_size)
+                    and bool(record["quality_mask"].any())
+                    and "processing_metadata_json" in record.files
+                )
+        except (OSError, ValueError, KeyError):
+            return False
 
     def save_patch_to_cache(
         self,
@@ -256,12 +275,17 @@ class SatelliteAdapterBase(ABC):
         quality_mask: np.ndarray | None = None,
         preprocessing_version: str | None = None,
         data_units: str = "unknown",
+        processing_metadata: dict | None = None,
     ) -> None:
         """Save preprocessed data to the cache."""
+        acquisition = scene.datetime
+        if acquisition.tzinfo is None:
+            acquisition = acquisition.replace(tzinfo=timezone.utc)
+        acquisition = acquisition.astimezone(timezone.utc)
         save_dict = {
             "data": data,
-            "timestamp": scene.datetime.timestamp(),
-            "datetime_iso": scene.datetime.isoformat(),
+            "timestamp": acquisition.timestamp(),
+            "datetime_iso": acquisition.isoformat(),
             "sensor": scene.sensor,
             "band_names": self.band_names,
             "bbox_west": bbox.west,
@@ -274,6 +298,11 @@ class SatelliteAdapterBase(ABC):
             "provider": "microsoft-planetary-computer" if preprocessing_version else "unknown",
             "data_units": data_units,
             "collection": (scene.stac_item or {}).get("collection", "unrecorded"),
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "processing_metadata_json": json.dumps(processing_metadata or {}, sort_keys=True, allow_nan=False),
+            "source_metadata_sha256": hashlib.sha256(
+                json.dumps(scene.stac_item or {}, sort_keys=True, default=str).encode()
+            ).hexdigest(),
         }
         if preprocessing_version == PREPROCESSING_VERSION:
             dx = (bbox.east - bbox.west) / data.shape[-1]
@@ -286,8 +315,16 @@ class SatelliteAdapterBase(ABC):
             })
         if quality_mask is not None:
             save_dict["quality_mask"] = quality_mask
+            save_dict["valid_pixel_fraction"] = float(np.mean(quality_mask))
 
-        np.savez_compressed(path, **save_dict)
+        # An interrupted write must not leave an apparently reusable cache.
+        with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".npz", delete=False) as handle:
+            temporary = Path(handle.name)
+        try:
+            np.savez_compressed(temporary, **save_dict)
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def load_patch_from_cache(self, path: Path) -> PatchData:
         """Load a PatchData from a cached .npz file."""
