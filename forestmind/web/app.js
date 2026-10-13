@@ -128,6 +128,7 @@ async function selectRegion(id) {
     state.region=region;
     $('#detail-title').textContent=region.name;
     $('#detail-meta').textContent=`${region.country || 'Unspecified'} · ${numeric(region.area_km2)} km² · ${isDemo(region)?'Synthetic observations':'User-provided observations'} · Updated ${dateLabel(region.latest_date)}`;
+    if($('#scenario-region').value!==id)invalidateScenario();
     $('#scenario-region').value=id;
     renderMap();renderDetail();
   }catch(error){if(request===state.request){state.region=null;$('#detail-body').innerHTML='<p class="observations-empty">Could not load this region. Retry the connection above.</p>';reportError(error);}}
