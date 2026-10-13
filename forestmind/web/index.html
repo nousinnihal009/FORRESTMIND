@@ -49,6 +49,16 @@
     </main>
   </div>
   <dialog id="import-dialog"><form id="import-form"><div class="dialog-heading"><div><div class="eyebrow">BRING YOUR OWN EVIDENCE</div><h2>Import a monitoring region</h2></div><button type="button" class="icon-button" id="close-import" aria-label="Close import">×</button></div><p class="dialog-description">Use a WGS84 Polygon and dated observations. Upload a JSON file or paste its contents. Index fields accept null for missing observations.</p><label class="file-drop" for="import-file"><span data-icon="upload"></span><strong>Choose a JSON file</strong><span id="file-name">Prepared region observations · maximum 2 MB</span><input type="file" id="import-file" accept=".json,application/json"></label><label class="field-label" for="import-json">Region JSON</label><textarea id="import-json" rows="10" spellcheck="false" required placeholder='{"name":"My forest region","geometry":{"type":"Polygon","coordinates":[…]},"observations":[…]}'></textarea><div id="import-error" class="form-error" role="alert" hidden></div><div class="dialog-footer"><button type="button" id="fill-template" class="button secondary">Use example template</button><button type="submit" class="button primary" id="submit-import">Import & analyze <span>↗</span></button></div></form></dialog>
+  <dialog id="model-import-dialog">
+    <form id="model-import-form">
+      <div class="dialog-heading"><div><div class="eyebrow">FROM MODEL TO EVIDENCE</div><h2>Import a model run</h2></div><button type="button" class="icon-button" id="close-model-import" aria-label="Close model import">×</button></div>
+      <p class="dialog-description">Attach a ForestMind inference report to <strong id="model-import-region"></strong>. The report records its checkpoint, inputs, and observation cutoff. Imported predictions remain unverified research outputs.</p>
+      <label class="file-drop" for="model-import-file"><span data-icon="upload"></span><strong>Choose an inference report</strong><span id="model-file-name">JSON report · maximum 2 MB</span><input type="file" id="model-import-file" accept=".json,application/json"></label>
+      <label class="field-label" for="model-import-json">Inference report JSON</label><textarea id="model-import-json" rows="9" spellcheck="false" required></textarea>
+      <div id="model-import-error" class="form-error" role="alert" hidden></div>
+      <div class="dialog-footer"><span class="chart-caveat">Observation-based analyses stay available in their own tabs.</span><button type="submit" class="button primary" id="submit-model-import">Save model run <span>↗</span></button></div>
+    </form>
+  </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>
