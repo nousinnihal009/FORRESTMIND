@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import platform
 import random
+from urllib.parse import urlsplit, urlunsplit
 
 import numpy as np
 import torch
@@ -20,6 +21,7 @@ import yaml
 
 from forestmind import __version__
 from forestmind.data.dataset import create_dataloaders
+from forestmind.data.synthetic import DRIVER_CLASSES, HEALTH_STATES
 from forestmind.models.forestmind_model import ForestMindModel
 from forestmind.training.losses import ForestMindLoss
 from forestmind.training.metrics import ForestMindMetrics
@@ -43,6 +45,31 @@ def sha256_file(path: str | Path) -> str:
 def _json_hash(value) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _report_config(value):
+    """Keep useful settings without exporting common credentials or signed URLs."""
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            sensitive = normalized in {"token", "auth", "cookie", "cookies", "key"} or any(
+                marker in normalized for marker in (
+                    "secret", "password", "credential", "api_key", "apikey", "authorization",
+                    "access_key", "private_key", "access_token", "refresh_token", "auth_token",
+                    "session_token", "hf_token", "hub_token",
+                )
+            )
+            result[key] = "[REDACTED]" if sensitive else _report_config(item)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_report_config(item) for item in value]
+    if isinstance(value, str) and "://" in value:
+        parsed = urlsplit(value)
+        if parsed.scheme in {"http", "https", "s3", "gs", "az"}:
+            # Every query field is dropped, including arbitrary signed-URL keys.
+            return urlunsplit((parsed.scheme, parsed.netloc.rsplit("@", 1)[-1], parsed.path, "", ""))
+    return value
 
 
 def tensor_mapping_hash(values: dict[str, torch.Tensor]) -> str:
@@ -139,6 +166,10 @@ def evaluate_checkpoint(
     if (not horizons or any(type(day) is not int or day <= 0 for day in horizons)
             or list(horizons) != sorted(set(horizons))):
         raise ValueError("Configured trajectory horizons must be positive, strictly increasing integers")
+    if isinstance(checkpoint_config, dict):
+        trained_horizons = checkpoint_config.get("heads", {}).get("trajectory", {}).get("horizons", DEFAULT_HORIZONS)
+        if list(horizons) != list(trained_horizons):
+            raise ValueError("Evaluation horizons must match the checkpoint's trained trajectory horizons; an override cannot relabel predictions")
     classes = heads.get("health", {}).get("num_classes", 5)
     driver_count = heads.get("attribution", {}).get("num_drivers", 8)
     if classes != 5:
@@ -168,6 +199,7 @@ def evaluate_checkpoint(
             if missing:
                 raise ValueError(f"Evaluation targets missing: {', '.join(missing)}")
             inputs = {name: batch[name].to(device) for name in INPUT_KEYS if name in batch}
+            _finite_tensors(inputs, "inputs")
             original_targets = {name: batch[name].to(device) for name in TARGET_KEYS}
             targets = dict(original_targets)
             if trajectory_scale == "percent":
@@ -216,17 +248,16 @@ def evaluate_checkpoint(
     if synthetic is not None and not isinstance(synthetic, bool):
         raise ValueError("data.synthetic must be a boolean when declared for a disk dataset")
     repo_root = Path(__file__).resolve().parents[2]
-    implementation_paths = ["forestmind/training/evaluation.py", "forestmind/training/metrics.py",
-                            "forestmind/training/losses.py", "forestmind/data/dataset.py",
-                            "forestmind/data/transforms.py", "forestmind/data/synthetic.py",
-                            "forestmind/models/forestmind_model.py"]
+    implementation_paths = sorted(path.relative_to(repo_root).as_posix()
+                                  for path in (repo_root / "forestmind").rglob("*.py"))
     report = {
         "schema_version": 1, "kind": "forestmind_checkpoint_evaluation",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "checkpoint": {"path": str(checkpoint_path), "sha256": checkpoint_hash,
                        "epoch": checkpoint.get("epoch"),
                        "training_status": checkpoint.get("training_status", "not independently verified")},
-        "config": {"effective": config, "sha256": config_hash,
+        "config": {"effective": _report_config(config), "sha256": config_hash,
+                   "snapshot_redaction": "Common credential fields and URL userinfo, queries and fragments are removed; sha256 identifies the original effective configuration before redaction",
                    "source": str(Path(config_path).resolve()) if config_path else "checkpoint",
                    "file_sha256": sha256_file(config_path) if config_path else None,
                    "checkpoint_config_sha256": _json_hash(checkpoint_config) if checkpoint_config is not None else None},
@@ -243,6 +274,10 @@ def evaluate_checkpoint(
             "split_isolation": "Explicit synthetic split seeds or dataset split directories; independence from checkpoint training is not independently verified",
         },
         "counts": {"samples": sample_count, "batches": batches},
+        "label_schema": {"health_states": HEALTH_STATES,
+                         "drivers": DRIVER_CLASSES if driver_count == len(DRIVER_CLASSES) else [f"driver_{index}" for index in range(driver_count)],
+                         "horizon_days": list(horizons),
+                         "mapping_provenance": "Canonical ForestMind class order; external labels must follow this order"},
         "metrics": result,
         "metric_units": {"health_mae": "score points [0, 100]", "trajectory_mae": "unit score [0, 1]",
                          "trajectory_rmse": "unit score [0, 1]", "trajectory_per_horizon_mae": "unit score [0, 1]",
