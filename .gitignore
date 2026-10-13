@@ -17,6 +17,8 @@ ENV/
 # Data and Checkpoints
 checkpoints/
 data/synthetic/
+data/real/
+data/real-pilot/
 data/*.db
 data/*.db-shm
 data/*.db-wal
