@@ -99,7 +99,7 @@ def reflectance_scaling(asset_metadata: dict, properties: dict,
         if not np.isfinite(baseline) or baseline < 0:
             raise ValueError("Sentinel-2 processing baseline must be finite and nonnegative")
         scale = float(metadata.get("scale", 1.0 / scale_factor))
-        offset = float(metadata.get("offset", -1000.0 / scale_factor if baseline >= 4.0 else 0.0))
+        offset = float(metadata.get("offset", -1000.0 * scale if baseline >= 4.0 else 0.0))
         source = "planetary-computer-processing-baseline"
     if not np.isfinite(scale) or scale <= 0 or not np.isfinite(offset):
         raise ValueError("Sentinel-2 reflectance scale/offset must be finite, with positive scale")
