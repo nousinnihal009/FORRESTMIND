@@ -6,6 +6,8 @@ The application and research code are working foundations. Completion of the pro
 
 The local application supports observation imports, baseline analyses, alerts, sensitivity scenarios, historical backtests and persisted model reports. The research path supports satellite caches, explicit masked sequences, checkpoint inference, supervised training and auditable evaluation outputs. The training demonstration remains synthetic. Current hardware has CPU-only PyTorch and no CUDA device.
 
+A real Sentinel-2 acquisition from Earth Search now passes through all twelve optical bands, SCL cloud masking, aligned caching, observation preparation and dashboard import. Its July 29, 2024 observation also produces a masked inference-input sequence. This establishes the ingestion path; extending it to a sufficiently long, quality-checked history remains part of the monitoring milestone.
+
 ## Remaining milestones and acceptance evidence
 
 | Milestone | Work required | Evidence needed to advance |
