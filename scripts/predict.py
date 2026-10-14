@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
+import pickle
 import sys
+import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from forestmind.inference.predict import predict_checkpoint, write_inference_report
+from forestmind.inference.predict import predict_checkpoint, report_destination, write_inference_report
 
 
 def main(argv=None) -> int:
@@ -24,13 +26,12 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
-        if args.output.resolve() in {args.input.resolve(), args.checkpoint.resolve()}:
-            raise ValueError("Output must not overwrite the checkpoint or input sequence")
+        report_destination(args.output, protected_paths=(args.input, args.checkpoint))
         report = predict_checkpoint(args.checkpoint, args.input, region_id=args.region_id,
                                     observed_through=args.observed_through,
                                     synthetic_input=args.synthetic_input, device=args.device)
         output = write_inference_report(report, args.output, protected_paths=(args.checkpoint, args.input))
-    except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError, pickle.UnpicklingError, zipfile.BadZipFile, EOFError) as exc:
         logging.error("Inference failed: %s", exc)
         return 2
     print(f"Saved uncalibrated model report: {output}")
