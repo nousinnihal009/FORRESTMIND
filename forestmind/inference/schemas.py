@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import math
 from typing import Annotated, Literal
 
@@ -170,6 +170,6 @@ class InferenceReport(ReportModel):
     def timing(self):
         if self.input.observed_start and self.input.observed_start > self.observed_through:
             raise ValueError("Input start date cannot follow observed_through")
-        if self.observed_through > datetime.fromisoformat(self.created_at).date().isoformat():
+        if self.observed_through > datetime.fromisoformat(self.created_at).astimezone(timezone.utc).date().isoformat():
             raise ValueError("Observed data cannot follow report creation")
         return self
