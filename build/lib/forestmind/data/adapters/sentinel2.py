@@ -33,6 +33,7 @@ from forestmind.data.adapters.base import (
     PREPROCESSING_VERSION,
 )
 from forestmind.data.adapters.raster import read_aligned_band
+from forestmind.data.adapters.network import AssetSigner, open_catalog, open_raster, public_error
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,36 @@ PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 S2_COLLECTION = "sentinel-2-l2a"
 
 
+def reflectance_scaling(asset_metadata: dict, properties: dict,
+                        scale_factor: float = S2_SCALE_FACTOR) -> dict:
+    """Resolve DN conversion without mixing old and new processing baselines.
+
+    Explicit raster scale/offset take precedence. Planetary Computer currently
+    omits them, so its native L2A assets need the baseline >=04.00 DN correction.
+    Use the processing baseline, not acquisition date: old acquisitions can be
+    reprocessed. Reference: Microsoft's PlanetaryComputerExamples notebook
+    datasets/sentinel-2-l2a/baseline-change.ipynb and ESA's L2A BOA_ADD_OFFSET.
+    """
+    bands = asset_metadata.get("raster:bands") or [{}]
+    metadata = bands[0]
+    if "scale" in metadata and "offset" in metadata:
+        scale, offset = float(metadata["scale"]), float(metadata["offset"])
+        source = "stac-raster-scale-offset"
+    else:
+        try:
+            baseline = float(properties["s2:processing_baseline"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Sentinel-2 needs raster scale/offset or a processing baseline") from error
+        if not np.isfinite(baseline) or baseline < 0:
+            raise ValueError("Sentinel-2 processing baseline must be finite and nonnegative")
+        scale = float(metadata.get("scale", 1.0 / scale_factor))
+        offset = float(metadata.get("offset", -1000.0 * scale if baseline >= 4.0 else 0.0))
+        source = "planetary-computer-processing-baseline"
+    if not np.isfinite(scale) or scale <= 0 or not np.isfinite(offset):
+        raise ValueError("Sentinel-2 reflectance scale/offset must be finite, with positive scale")
+    return {"scale": scale, "offset": offset, "source": source}
+
+
 class Sentinel2Adapter(SatelliteAdapterBase):
     """Adapter for Sentinel-2 Level-2A data from Planetary Computer.
 
@@ -94,8 +125,12 @@ class Sentinel2Adapter(SatelliteAdapterBase):
         patch_size: int = 128,
         resolution: float = 10.0,
         scale_factor: float = S2_SCALE_FACTOR,
+        timeout_seconds: float = 30.0,
     ):
-        super().__init__(cache_dir=cache_dir, patch_size=patch_size, resolution=resolution)
+        super().__init__(cache_dir=cache_dir, patch_size=patch_size, resolution=resolution,
+                         timeout_seconds=timeout_seconds)
+        if not np.isfinite(scale_factor) or scale_factor <= 0:
+            raise ValueError("scale_factor must be positive and finite")
         self.scale_factor = scale_factor
 
     @property
@@ -130,24 +165,12 @@ class Sentinel2Adapter(SatelliteAdapterBase):
         Returns:
             List of SceneMetadata sorted by datetime ascending.
         """
-        try:
-            import planetary_computer as pc
-            import pystac_client
-        except ImportError:
-            raise ImportError(
-                "Sentinel-2 adapter requires 'pystac-client' and 'planetary-computer'. "
-                "Install with: pip install pystac-client planetary-computer"
-            )
-
         if isinstance(start_date, datetime):
             start_date = start_date.strftime("%Y-%m-%d")
         if isinstance(end_date, datetime):
             end_date = end_date.strftime("%Y-%m-%d")
 
-        catalog = pystac_client.Client.open(
-            PC_STAC_URL,
-            modifier=pc.sign_inplace,
-        )
+        catalog = open_catalog(PC_STAC_URL, self.timeout_seconds)
 
         search = catalog.search(
             collections=[S2_COLLECTION],
@@ -155,6 +178,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
             datetime=f"{start_date}/{end_date}",
             query={"eo:cloud_cover": {"lt": max_cloud_cover}},
             max_items=max_results,
+            limit=min(max_results, 100),
             sortby=[{"field": "datetime", "direction": "asc"}],
         )
 
@@ -209,7 +233,6 @@ class Sentinel2Adapter(SatelliteAdapterBase):
             )
 
         try:
-            import planetary_computer as pc
             import pystac
         except ImportError:
             raise ImportError(
@@ -218,11 +241,13 @@ class Sentinel2Adapter(SatelliteAdapterBase):
             )
 
         paths = []
+        self.download_failures = []
+        signer = AssetSigner(self.timeout_seconds)
 
         for scene in scenes:
             cache_path = self.cache_path_for_scene(scene, bbox)
 
-            if cache_path.exists():
+            if self.is_cached(scene, bbox):
                 logger.debug(f"[sentinel2] Cached: {scene.scene_id}")
                 paths.append(cache_path)
                 continue
@@ -232,24 +257,24 @@ class Sentinel2Adapter(SatelliteAdapterBase):
             try:
                 # Reconstruct STAC item for asset signing
                 item = pystac.Item.from_dict(scene.stac_item)
-                item = pc.sign(item)
 
                 # Read and stack bands
                 band_arrays = []
+                scaling = {}
                 quality_mask = np.ones((self.patch_size, self.patch_size), dtype=bool)
                 for band_name in S2_BANDS:
                     asset_key = S2_ASSET_KEYS[band_name]
-                    href = item.assets[asset_key].href
+                    href = signer.sign(item.assets[asset_key].href)
 
-                    with rasterio.open(href) as src:
+                    with open_raster(href, self.timeout_seconds) as src:
                         band_data, valid = read_aligned_band(src, bbox, self.patch_size)
                         quality_mask &= valid
 
                         # Scale to [0, 1]
-                        raster_meta = item.assets[asset_key].extra_fields.get("raster:bands", [{}])[0]
-                        scale = raster_meta.get("scale", 1.0 / self.scale_factor)
-                        offset = raster_meta.get("offset", 0.0)
-                        band_data = band_data * scale + offset
+                        conversion = reflectance_scaling(item.assets[asset_key].extra_fields,
+                                                         item.properties, self.scale_factor)
+                        scaling[band_name] = conversion
+                        band_data = band_data * conversion["scale"] + conversion["offset"]
                         band_data = np.clip(band_data, 0.0, 1.0)
 
                         band_arrays.append(band_data)
@@ -259,8 +284,8 @@ class Sentinel2Adapter(SatelliteAdapterBase):
 
                 # Read SCL for cloud masking
                 if "SCL" in item.assets:
-                    scl_href = item.assets["SCL"].href
-                    with rasterio.open(scl_href) as src:
+                    scl_href = signer.sign(item.assets["SCL"].href)
+                    with open_raster(scl_href, self.timeout_seconds) as src:
                         scl, scl_valid = read_aligned_band(src, bbox, self.patch_size, categorical=True)
                         # True = valid pixel
                         quality_mask &= scl_valid & ~np.isin(scl, list(SCL_INVALID))
@@ -275,11 +300,20 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 # Save to cache
                 self.save_patch_to_cache(cache_path, patch, scene, bbox, quality_mask,
                                          preprocessing_version=PREPROCESSING_VERSION,
-                                         data_units="surface_reflectance_0_1")
+                                         data_units="surface_reflectance_0_1",
+                                         processing_metadata={
+                                             "band_scaling": scaling,
+                                             "processing_baseline": item.properties.get("s2:processing_baseline"),
+                                             "clip_range": [0.0, 1.0],
+                                             "invalid_scl_classes": sorted(SCL_INVALID),
+                                             "resampling": "bilinear; nearest for SCL",
+                                         })
                 paths.append(cache_path)
 
             except Exception as e:
-                logger.error(f"[sentinel2] Failed to download {scene.scene_id}: {e}")
+                reason = public_error(e)
+                self.download_failures.append({"scene_id": scene.scene_id, "reason": reason})
+                logger.error(f"[sentinel2] Failed to download {scene.scene_id}: {reason}")
                 continue
 
         return paths
