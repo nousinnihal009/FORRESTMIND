@@ -236,11 +236,19 @@ def predict_checkpoint(checkpoint_path: str | Path, input_path: str | Path, *,
     return InferenceReport.model_validate(report).model_dump(mode="json", exclude_none=False)
 
 
+def report_destination(output: str | Path, *, protected_paths=()) -> Path:
+    """Resolve output while protecting source files, including existing hardlinks."""
+    output = Path(output).resolve()
+    for path in protected_paths:
+        protected = Path(path).resolve()
+        if output == protected or (output.exists() and protected.exists() and output.samefile(protected)):
+            raise ValueError("Inference report output must not overwrite the checkpoint or input sequence")
+    return output
+
+
 def write_inference_report(report: dict, output: str | Path, *, protected_paths=()) -> Path:
     """Save strict JSON without overwriting checkpoint or sequence input paths."""
-    output = Path(output).resolve()
-    if output in {Path(path).resolve() for path in protected_paths}:
-        raise ValueError("Inference report output must not overwrite the checkpoint or input sequence")
+    output = report_destination(output, protected_paths=protected_paths)
     validated = InferenceReport.model_validate(report).model_dump(mode="json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(validated, indent=2, allow_nan=False) + "\n", encoding="utf-8")
