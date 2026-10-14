@@ -68,7 +68,7 @@ def test_asset_signing_is_bounded_cached_and_not_logged(monkeypatch):
     assert signer.sign("https://public.example/band.tif") == "https://public.example/band.tif"
 
 
-def test_raster_reads_use_bounded_serial_ranges_and_clean_up(monkeypatch):
+def test_raster_reads_have_bounded_timeouts_and_clean_up(monkeypatch):
     environment, opened = {}, []
     source = object()
     @contextmanager
@@ -88,7 +88,6 @@ def test_raster_reads_use_bounded_serial_ranges_and_clean_up(monkeypatch):
             assert len(error_logger.filters) == len(previous_filters) + 1
             raise RuntimeError("read failed")
     assert opened == ["https://public.example/band.tif"]
-    assert environment["GDAL_HTTP_MULTIRANGE"] == "SERIAL"
     assert environment["GDAL_HTTP_TIMEOUT"] == "7"
     assert environment["GDAL_HTTP_CONNECTTIMEOUT"] == "7"
     assert environment["GDAL_HTTP_MAX_RETRY"] == "0"
@@ -109,6 +108,16 @@ def test_gdal_signed_filename_diagnostics_are_redacted():
                                ("band.tif?st=today&sig=secret",), None)
     assert _RedactAccessQueries().filter(record)
     assert record.getMessage() == "Cannot read band.tif?[redacted]"
+
+
+def test_gdal_truncated_signed_filename_tail_is_discarded():
+    record = logging.LogRecord("rasterio._err", logging.INFO, "", 1,
+                               "GDAL signalled an error: err_no=1, msg='%s, band 1: IReadBlock failed at X offset 0, Y offset 2: TIFFReadEncodedTile() failed.'",
+                               ("private-signature-tail%3D",), None)
+    assert _RedactAccessQueries().filter(record)
+    assert record.getMessage().startswith("[raster source] band 1: IReadBlock failed")
+    assert "private-signature" not in record.getMessage()
+    assert "X offset 0, Y offset 2" in record.getMessage()
 
 
 REQUEST = ["--region=-55.10,-3.50,-55.08,-3.48", "--sensors", "s2", "--max-scenes", "1"]
