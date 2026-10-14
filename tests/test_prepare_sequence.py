@@ -115,3 +115,19 @@ def test_sequence_serialization_is_pickle_free_and_hashes_match(tmp_path):
 def test_invalid_sequence_selection_fails(tmp_path, kwargs):
     with pytest.raises(ValueError):
         prepare_sequence(tmp_path, through="2024-03-31", **kwargs)
+
+
+def test_sequence_writer_preserves_source_cache_and_existing_provenance(tmp_path):
+    source = cache(tmp_path, "a", "2024-01-02T10:00:00+00:00")
+    original = source.read_bytes()
+    prepared = prepare_sequence(tmp_path, through="2024-03-31")
+    with pytest.raises(ValueError, match="already exists"):
+        write_sequence(prepared, source)
+    assert source.read_bytes() == original
+    output = tmp_path / "sequence.npz"
+    sidecar = output.with_suffix(".provenance.json")
+    sidecar.write_text("existing provenance", encoding="utf-8")
+    with pytest.raises(ValueError, match="already exists"):
+        write_sequence(prepared, output)
+    assert not output.exists()
+    assert sidecar.read_text() == "existing provenance"
