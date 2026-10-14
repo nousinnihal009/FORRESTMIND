@@ -140,7 +140,7 @@ class ForestMindDataset(Dataset):
                 time_steps=self.config.get("time_steps", 12),
                 seed=np.random.SeedSequence([self.seed, idx]),
             )
-            sample = generator.generate_sample()
+            sample = generator.generate_sample(horizons_days=self.config.get("horizon_days"))
         elif self.samples is not None:
             # Return a copy to avoid in-place transform issues
             sample = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in self.samples[idx].items()}
@@ -348,7 +348,10 @@ def create_dataloaders(
     Returns:
         Tuple of (train_loader, val_loader, test_loader).
     """
-    data_cfg = config.get("data", config)
+    data_cfg = dict(config.get("data", config))
+    horizons = config.get("heads", {}).get("trajectory", {}).get("horizons")
+    if horizons is not None:
+        data_cfg["horizon_days"] = list(horizons)
 
     normalization = data_cfg.get("normalization")
     foundation_cfg = config.get("foundation", {})
