@@ -133,8 +133,10 @@ def write_sequence(prepared: PreparedSequence, output: str | Path) -> tuple[Path
     destination = Path(output)
     if destination.suffix.lower() != ".npz":
         raise ValueError("Sequence output must use the .npz extension")
-    destination.parent.mkdir(parents=True, exist_ok=True)
     sidecar = destination.with_suffix(".provenance.json")
+    if destination.exists() or sidecar.exists():
+        raise ValueError("Output or provenance sidecar already exists; choose new paths to preserve source artifacts")
+    destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=destination.parent, suffix=".npz", delete=False) as stream:
         temporary = Path(stream.name)
     try:
