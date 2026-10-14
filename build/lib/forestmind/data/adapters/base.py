@@ -244,9 +244,11 @@ class SatelliteAdapterBase(ABC):
 
     def cache_path_for_scene(self, scene: SceneMetadata, bbox: BoundingBox) -> Path:
         """Generate a deterministic cache path for a scene + bbox pair."""
+        provider = scene.extra.get("provider", "microsoft-planetary-computer")
+        collection = (scene.stac_item or {}).get("collection", "unrecorded")
         bbox_hash = hashlib.md5(
             f"{bbox.west:.6f}_{bbox.south:.6f}_{bbox.east:.6f}_{bbox.north:.6f}"
-            f"_{self.patch_size}_{PREPROCESSING_VERSION}".encode()
+            f"_{self.patch_size}_{PREPROCESSING_VERSION}_{provider}_{collection}".encode()
         ).hexdigest()[:8]
         filename = f"{scene.scene_id}_{bbox_hash}.npz"
         sensor_dir = self.cache_dir / self.sensor_name
@@ -266,6 +268,8 @@ class SatelliteAdapterBase(ABC):
                     and record["quality_mask"].shape == (self.patch_size, self.patch_size)
                     and bool(record["quality_mask"].any())
                     and "processing_metadata_json" in record.files
+                    and str(record["provider"]) == scene.extra.get("provider", "microsoft-planetary-computer")
+                    and str(record["collection"]) == (scene.stac_item or {}).get("collection", "unrecorded")
                 )
         except (OSError, ValueError, KeyError):
             return False
@@ -299,7 +303,7 @@ class SatelliteAdapterBase(ABC):
             "cloud_cover": scene.cloud_cover if scene.cloud_cover is not None else -1.0,
             "scene_id": scene.scene_id,
             "preprocessing_version": preprocessing_version or "unverified",
-            "provider": "microsoft-planetary-computer" if preprocessing_version else "unknown",
+            "provider": scene.extra.get("provider", "microsoft-planetary-computer") if preprocessing_version else "unknown",
             "data_units": data_units,
             "collection": (scene.stac_item or {}).get("collection", "unrecorded"),
             "retrieved_at": datetime.now(timezone.utc).isoformat(),
