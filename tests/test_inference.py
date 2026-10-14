@@ -183,6 +183,26 @@ def test_cli_saves_report_without_modifying_sources(checkpoint, sequence, tmp_pa
         write_inference_report(result, checkpoint, protected_paths=[checkpoint])
 
 
+def test_hardlink_report_output_cannot_replace_a_source(checkpoint, sequence, tmp_path, monkeypatch):
+    from scripts import predict
+    output = tmp_path / "checkpoint-alias.json"
+    output.hardlink_to(checkpoint)
+    before = checkpoint.read_bytes()
+    monkeypatch.setattr(predict, "predict_checkpoint", lambda *a, **kw: pytest.fail("Reject output before inference"))
+    assert predict.main(["--checkpoint", str(checkpoint), "--input", str(sequence), "--region-id", "xingu",
+                         "--observed-through", "2025-06-01", "--synthetic-input", "--output", str(output)]) == 2
+    with pytest.raises(ValueError, match="overwrite"):
+        write_inference_report(example_report(), output, protected_paths=[checkpoint])
+    assert checkpoint.read_bytes() == before
+
+
+def test_report_cutoff_uses_utc_creation_day():
+    report = example_report()
+    report["created_at"] = "2025-06-01T00:30:00+14:00"  # Still May 31 in UTC.
+    with pytest.raises(ValueError, match="cannot follow report creation"):
+        InferenceReport.model_validate(report)
+
+
 @pytest.mark.parametrize("mutate", [
     lambda r: r.update(calibration="calibrated"),
     lambda r: r.update(schema_version=True),
