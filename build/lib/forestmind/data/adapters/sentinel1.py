@@ -33,6 +33,7 @@ from forestmind.data.adapters.base import (
     PREPROCESSING_VERSION,
 )
 from forestmind.data.adapters.raster import read_aligned_band
+from forestmind.data.adapters.network import AssetSigner, open_catalog, open_raster, public_error
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +70,10 @@ class Sentinel1Adapter(SatelliteAdapterBase):
         patch_size: int = 128,
         resolution: float = 10.0,
         orbit_direction: Optional[str] = None,
+        timeout_seconds: float = 30.0,
     ):
-        super().__init__(cache_dir=cache_dir, patch_size=patch_size, resolution=resolution)
+        super().__init__(cache_dir=cache_dir, patch_size=patch_size, resolution=resolution,
+                         timeout_seconds=timeout_seconds)
         self.orbit_direction = orbit_direction
 
     @property
@@ -105,24 +108,12 @@ class Sentinel1Adapter(SatelliteAdapterBase):
         Returns:
             List of SceneMetadata sorted by datetime ascending.
         """
-        try:
-            import planetary_computer as pc
-            import pystac_client
-        except ImportError:
-            raise ImportError(
-                "Sentinel-1 adapter requires 'pystac-client' and 'planetary-computer'. "
-                "Install with: pip install pystac-client planetary-computer"
-            )
-
         if isinstance(start_date, datetime):
             start_date = start_date.strftime("%Y-%m-%d")
         if isinstance(end_date, datetime):
             end_date = end_date.strftime("%Y-%m-%d")
 
-        catalog = pystac_client.Client.open(
-            PC_STAC_URL,
-            modifier=pc.sign_inplace,
-        )
+        catalog = open_catalog(PC_STAC_URL, self.timeout_seconds)
 
         # Build query filters
         query = {
@@ -137,6 +128,7 @@ class Sentinel1Adapter(SatelliteAdapterBase):
             datetime=f"{start_date}/{end_date}",
             query=query,
             max_items=max_results,
+            limit=min(max_results, 100),
             sortby=[{"field": "datetime", "direction": "asc"}],
         )
 
@@ -198,7 +190,6 @@ class Sentinel1Adapter(SatelliteAdapterBase):
             )
 
         try:
-            import planetary_computer as pc
             import pystac
         except ImportError:
             raise ImportError(
@@ -207,11 +198,13 @@ class Sentinel1Adapter(SatelliteAdapterBase):
             )
 
         paths = []
+        self.download_failures = []
+        signer = AssetSigner(self.timeout_seconds)
 
         for scene in scenes:
             cache_path = self.cache_path_for_scene(scene, bbox)
 
-            if cache_path.exists():
+            if self.is_cached(scene, bbox):
                 logger.debug(f"[sentinel1] Cached: {scene.scene_id}")
                 paths.append(cache_path)
                 continue
@@ -220,14 +213,13 @@ class Sentinel1Adapter(SatelliteAdapterBase):
 
             try:
                 item = pystac.Item.from_dict(scene.stac_item)
-                item = pc.sign(item)
 
                 band_arrays = []
                 quality_mask = np.ones((self.patch_size, self.patch_size), dtype=bool)
                 for pol in ["vv", "vh"]:
-                    href = item.assets[pol].href
+                    href = signer.sign(item.assets[pol].href)
 
-                    with rasterio.open(href) as src:
+                    with open_raster(href, self.timeout_seconds) as src:
                         band_data, valid = read_aligned_band(src, bbox, self.patch_size)
                         quality_mask &= valid
 
@@ -255,11 +247,15 @@ class Sentinel1Adapter(SatelliteAdapterBase):
                 # Save to cache
                 self.save_patch_to_cache(cache_path, patch, scene, bbox, quality_mask,
                                          preprocessing_version=PREPROCESSING_VERSION,
-                                         data_units="backscatter_db_scaled_minus25_0")
+                                         data_units="backscatter_db_scaled_minus25_0",
+                                         processing_metadata={"db_range": [S1_DB_MIN, S1_DB_MAX],
+                                                              "resampling": "bilinear"})
                 paths.append(cache_path)
 
             except Exception as e:
-                logger.error(f"[sentinel1] Failed to download {scene.scene_id}: {e}")
+                reason = public_error(e)
+                self.download_failures.append({"scene_id": scene.scene_id, "reason": reason})
+                logger.error(f"[sentinel1] Failed to download {scene.scene_id}: {reason}")
                 continue
 
         return paths
