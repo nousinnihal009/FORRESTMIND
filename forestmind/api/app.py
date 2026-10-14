@@ -15,6 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from forestmind import __version__
 from forestmind.api.schemas import AnalysisRequest, ImportRegion, InferenceReport, ScenarioRequest, geometry_metadata
 from forestmind.api.store import Store
 from forestmind.monitoring.analysis import DISCLAIMER, METHOD, analyze_region, sensitivity_scenario
@@ -40,7 +41,7 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
         for region, observations in demo_regions():
             if store.region(region["id"]) is None:
                 store.put_region(region, observations, analyze_region(region, observations))
-    app = FastAPI(title="ForestMind local monitoring", version="0.3.0", description=(
+    app = FastAPI(title="ForestMind local monitoring", version=__version__, description=(
         "Local, single-user observation screening and explicitly synthetic demonstrations. "
         "There is no authentication. Bind to localhost. " + DISCLAIMER
     ))
