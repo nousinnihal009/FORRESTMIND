@@ -3,7 +3,7 @@
 Download real satellite data for ForestMind.
 
 CLI tool to fetch, preprocess, and cache satellite imagery from
-Microsoft Planetary Computer for a specified study region and time range.
+Microsoft Planetary Computer or Earth Search for a study region and time range.
 
 Usage:
   # Download Sentinel-2 for a region defined in config
@@ -76,6 +76,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--sensors", type=str, default="s2,s1",
         help="Comma-separated sensors to download (s2, s1, landsat)",
+    )
+    parser.add_argument(
+        "--provider", choices=["planetary-computer", "earth-search"], default="planetary-computer",
+        help="Public catalog; Earth Search currently supports Sentinel-2 only (use --sensors s2)",
     )
     parser.add_argument(
         "--region", type=str, default=None,
@@ -166,6 +170,7 @@ def download_sentinel2(
     dry_run: bool,
     config: dict | None = None,
     timeout_seconds: float = 30.0,
+    provider: str = "planetary-computer",
 ) -> int:
     """Download Sentinel-2 data."""
     from forestmind.data.adapters.sentinel2 import Sentinel2Adapter
@@ -178,6 +183,7 @@ def download_sentinel2(
         patch_size=patch_size,
         resolution=resolution,
         timeout_seconds=timeout_seconds,
+        provider=provider,
     )
 
     logger.info(f"🛰️  Searching Sentinel-2 L2A: {start_date} → {end_date}")
@@ -324,6 +330,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("timeout must be positive and finite")
         sensor_list = list(dict.fromkeys(SENSOR_ALIASES[s.strip().lower()]
                                         for s in args.sensors.split(",")))
+        if args.provider == "earth-search" and sensor_list != ["sentinel2"]:
+            raise ValueError("Earth Search currently supports Sentinel-2 only; specify --sensors s2")
     except (ValueError, TypeError, KeyError, AttributeError, OSError, yaml.YAMLError) as error:
         logger.error(f"Invalid download request: {public_error(error)}")
         return 2
@@ -347,6 +355,7 @@ def main(argv: list[str] | None = None) -> int:
                 n = download_sentinel2(
                     bbox, start_date, end_date, args.cache_dir, args.patch_size,
                     args.max_cloud, args.max_scenes, args.dry_run, config, args.timeout,
+                    provider=args.provider,
                 )
             elif sensor == "sentinel1":
                 n = download_sentinel1(
