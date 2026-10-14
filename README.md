@@ -81,6 +81,15 @@ python scripts/prepare_observations.py --cache-dir data/real --sensor sentinel2 
 
 Import `data/my-region.json`. Keep `data/my-region.provenance.json`: it records acquisition timestamps, cache hashes, provider metadata and aggregation quality counts. Monthly indices use valid pixel samples only. Empty months and auxiliary climate/fire/cover data are never invented.
 
+For Sentinel-2, an explicit alternate provider is available through [Element 84 Earth Search](https://github.com/Element84/earth-search). This small pilot command requests one scene from its `sentinel-2-c1-l2a` collection:
+
+```powershell
+python scripts/download_data.py --provider earth-search --sensors s2 --region=-55.10,-3.50,-55.08,-3.48 --start 2024-07-01 --end 2024-07-31 --max-cloud 25 --max-scenes 1 --patch-size 64 --timeout 30 --cache-dir data/real-pilot/earth-search
+python scripts/prepare_observations.py --cache-dir data/real-pilot/earth-search --sensor sentinel2 --name "Tapajos real Sentinel-2 pilot" --country Brazil --region=-55.10,-3.50,-55.08,-3.48 --output artifacts/real-pilot-region.json
+```
+
+The default provider remains `planetary-computer`; failures never silently switch providers. Earth Search currently supports Sentinel-2 only. It requires explicit per-band reflectance scaling metadata and uses all twelve optical bands plus SCL cloud masking. Provider and collection identities are retained in the cache and provenance. The scene cap applies to the provider's returned subset, which is then sorted locally; it does not guarantee the earliest acquisitions. A one-scene pilot establishes data plumbing, not a history sufficient for forecasting.
+
 The bridge requires current, explicitly georeferenced cache metadata; regenerate legacy caches. Bands are reprojected to the same WGS84 AOI grid. **Output resolution is AOI extent divided by patch size**, not an assumed 10 m resolution. A large bbox squeezed into 128 pixels is a coarse sample. Choose appropriate spatial units and inspect source quality.
 
 Downloads require provider availability and the optional raster/STAC stack. Network requests have bounded timeouts (`--timeout`, in seconds); failed or partial downloads return a nonzero exit status. Numerical tests validate local grid alignment and data contracts; they do not prove all remote collections are accessible or establish ecological validity.
