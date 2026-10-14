@@ -24,6 +24,9 @@ class Store:
                     id TEXT PRIMARY KEY, region_id TEXT NOT NULL REFERENCES regions(id), payload TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS scenarios (
                     id TEXT PRIMARY KEY, region_id TEXT NOT NULL REFERENCES regions(id), payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS model_runs (
+                    id TEXT PRIMARY KEY, region_id TEXT NOT NULL REFERENCES regions(id), payload TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS model_runs_region ON model_runs(region_id);
             """)
 
     @contextmanager
@@ -108,3 +111,19 @@ class Store:
         with self.connection() as connection:
             return [{**json.loads(row["payload"]), "region_id": row["region_id"]}
                     for row in connection.execute("SELECT region_id,payload FROM alerts ORDER BY rowid")]
+
+    def save_model_run(self, region_id: str, run: dict):
+        with self.connection() as connection:
+            connection.execute("INSERT INTO model_runs (id,region_id,payload) VALUES (?,?,?)",
+                               (run["id"], region_id, self._json(run)))
+
+    def list_model_runs(self, region_id: str) -> list[dict]:
+        with self.connection() as connection:
+            return [json.loads(row["payload"]) for row in connection.execute(
+                "SELECT payload FROM model_runs WHERE region_id=? ORDER BY rowid DESC", (region_id,))]
+
+    def model_run(self, region_id: str, run_id: str) -> dict | None:
+        with self.connection() as connection:
+            row = connection.execute("SELECT payload FROM model_runs WHERE region_id=? AND id=?",
+                                     (region_id, run_id)).fetchone()
+        return json.loads(row["payload"]) if row else None
