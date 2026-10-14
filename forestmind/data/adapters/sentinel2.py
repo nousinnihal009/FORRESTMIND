@@ -302,6 +302,11 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 if self.provider == "earth-search":
                     if scene_collection != self.collection:
                         raise ValueError("Earth Search scene must declare its C1 collection")
+                    scl_asset = item.assets.get(self.asset_keys["SCL"])
+                    if scl_asset is None:
+                        raise ValueError("Sentinel-2 scene lacks SCL quality data")
+                    if "data" not in (scl_asset.roles or []) or not scl_asset.href.startswith("https://"):
+                        raise ValueError("Earth Search SCL requires a public HTTPS data asset")
                     for band_name in S2_BANDS:
                         asset = item.assets[self.asset_keys[band_name]]
                         eo_bands = asset.extra_fields.get("eo:bands", [])
