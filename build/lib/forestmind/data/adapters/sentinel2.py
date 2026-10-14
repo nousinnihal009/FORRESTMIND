@@ -2,7 +2,7 @@
 Sentinel-2 Level-2A data adapter for ForestMind.
 
 Downloads and preprocesses Sentinel-2 L2A surface reflectance data
-from the Microsoft Planetary Computer STAC API.
+from Microsoft Planetary Computer or Element 84 Earth Search.
 
 Sentinel-2 provides:
   - 13 spectral bands (we use 12, excluding B10/cirrus)
@@ -63,6 +63,15 @@ S2_ASSET_KEYS = {
     "SCL": "SCL",  # Scene Classification Layer for cloud masking
 }
 
+# Earth Search C1 asset names verified against its EO band metadata. B8A is
+# narrow NIR (nir08); B09 is the reflectance band nir09, not the WVP product.
+EARTH_SEARCH_ASSET_KEYS = {
+    "B01": "coastal", "B02": "blue", "B03": "green", "B04": "red",
+    "B05": "rededge1", "B06": "rededge2", "B07": "rededge3", "B08": "nir",
+    "B8A": "nir08", "B09": "nir09", "B11": "swir16", "B12": "swir22",
+    "SCL": "scl",
+}
+
 # SCL values to mask as invalid (clouds, shadows, etc.)
 SCL_INVALID = {0, 1, 3, 8, 9, 10, 11}
 # 0=No data, 1=Saturated, 3=Cloud shadow, 8=Med cloud, 9=High cloud,
@@ -74,10 +83,13 @@ S2_SCALE_FACTOR = 10000.0
 # Planetary Computer STAC catalog URL
 PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 S2_COLLECTION = "sentinel-2-l2a"
+EARTH_SEARCH_STAC_URL = "https://earth-search.aws.element84.com/v1"
+EARTH_SEARCH_COLLECTION = "sentinel-2-c1-l2a"
 
 
 def reflectance_scaling(asset_metadata: dict, properties: dict,
-                        scale_factor: float = S2_SCALE_FACTOR) -> dict:
+                        scale_factor: float = S2_SCALE_FACTOR,
+                        require_explicit: bool = False) -> dict:
     """Resolve DN conversion without mixing old and new processing baselines.
 
     Explicit raster scale/offset take precedence. Planetary Computer currently
@@ -92,6 +104,8 @@ def reflectance_scaling(asset_metadata: dict, properties: dict,
         scale, offset = float(metadata["scale"]), float(metadata["offset"])
         source = "stac-raster-scale-offset"
     else:
+        if require_explicit:
+            raise ValueError("Earth Search reflectance requires explicit raster:bands scale and offset")
         try:
             baseline = float(properties["s2:processing_baseline"])
         except (KeyError, TypeError, ValueError) as error:
@@ -107,7 +121,7 @@ def reflectance_scaling(asset_metadata: dict, properties: dict,
 
 
 class Sentinel2Adapter(SatelliteAdapterBase):
-    """Adapter for Sentinel-2 Level-2A data from Planetary Computer.
+    """Adapter for Sentinel-2 Level-2A data from an explicitly selected provider.
 
     Downloads, cloud-masks, and preprocesses Sentinel-2 L2A surface
     reflectance data into ForestMind-compatible 12-band patches.
@@ -117,6 +131,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
         patch_size: Target spatial size in pixels.
         resolution: Nominal source resolution; final grid follows bbox / patch_size.
         scale_factor: Reflectance scale factor for L2A products.
+        provider: planetary-computer (default) or earth-search; no automatic fallback.
     """
 
     def __init__(
@@ -126,12 +141,20 @@ class Sentinel2Adapter(SatelliteAdapterBase):
         resolution: float = 10.0,
         scale_factor: float = S2_SCALE_FACTOR,
         timeout_seconds: float = 30.0,
+        provider: str = "planetary-computer",
     ):
+        if provider not in {"planetary-computer", "earth-search"}:
+            raise ValueError("provider must be planetary-computer or earth-search")
         super().__init__(cache_dir=cache_dir, patch_size=patch_size, resolution=resolution,
                          timeout_seconds=timeout_seconds)
         if not np.isfinite(scale_factor) or scale_factor <= 0:
             raise ValueError("scale_factor must be positive and finite")
         self.scale_factor = scale_factor
+        self.provider = provider
+        self.catalog_url = EARTH_SEARCH_STAC_URL if provider == "earth-search" else PC_STAC_URL
+        self.collection = EARTH_SEARCH_COLLECTION if provider == "earth-search" else S2_COLLECTION
+        self.provider_name = "element84-earth-search" if provider == "earth-search" else "microsoft-planetary-computer"
+        self.asset_keys = EARTH_SEARCH_ASSET_KEYS if provider == "earth-search" else S2_ASSET_KEYS
 
     @property
     def sensor_name(self) -> str:
@@ -153,7 +176,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
         max_cloud_cover: float = 30.0,
         max_results: int = 100,
     ) -> list[SceneMetadata]:
-        """Search Planetary Computer for Sentinel-2 L2A scenes.
+        """Search the selected catalog for Sentinel-2 L2A scenes.
 
         Args:
             bbox: Geographic bounding box (WGS84).
@@ -170,17 +193,21 @@ class Sentinel2Adapter(SatelliteAdapterBase):
         if isinstance(end_date, datetime):
             end_date = end_date.strftime("%Y-%m-%d")
 
-        catalog = open_catalog(PC_STAC_URL, self.timeout_seconds)
+        catalog = open_catalog(self.catalog_url, self.timeout_seconds)
 
-        search = catalog.search(
-            collections=[S2_COLLECTION],
+        search_options = dict(
+            collections=[self.collection],
             bbox=[bbox.west, bbox.south, bbox.east, bbox.north],
             datetime=f"{start_date}/{end_date}",
             query={"eo:cloud_cover": {"lt": max_cloud_cover}},
             max_items=max_results,
             limit=min(max_results, 100),
-            sortby=[{"field": "datetime", "direction": "asc"}],
         )
+        # Earth Search C1 rejects a datetime sort. Sort returned candidates
+        # locally; max_results bounds the provider's returned subset.
+        if self.provider == "planetary-computer":
+            search_options["sortby"] = [{"field": "datetime", "direction": "asc"}]
+        search = catalog.search(**search_options)
 
         scenes = []
         for item in search.items():
@@ -197,10 +224,11 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 bbox=scene_bbox,
                 cloud_cover=item.properties.get("eo:cloud_cover"),
                 stac_item=item.to_dict(),
+                extra={"provider": self.provider_name, "catalog_url": self.catalog_url},
             ))
 
         logger.info(f"[sentinel2] Found {len(scenes)} scenes (cloud ≤ {max_cloud_cover}%)")
-        return scenes
+        return sorted(scenes, key=lambda scene: scene.datetime)
 
     def download(
         self,
@@ -236,8 +264,8 @@ class Sentinel2Adapter(SatelliteAdapterBase):
             import pystac
         except ImportError:
             raise ImportError(
-                "Sentinel-2 adapter requires 'planetary-computer'. "
-                "Install with: pip install planetary-computer"
+                    "Sentinel-2 adapter requires 'pystac'. "
+                    "Install with: pip install pystac"
             )
 
         paths = []
@@ -245,6 +273,17 @@ class Sentinel2Adapter(SatelliteAdapterBase):
         signer = AssetSigner(self.timeout_seconds)
 
         for scene in scenes:
+            # A scene from another provider must never be silently processed
+            # using this provider's keys or scaling assumptions.
+            scene_provider = scene.extra.get("provider", self.provider_name)
+            scene_collection = (scene.stac_item or {}).get("collection")
+            if scene_provider != self.provider_name or (
+                scene_collection is not None and scene_collection != self.collection
+            ):
+                self.download_failures.append({"scene_id": scene.scene_id,
+                                               "reason": "Scene does not match selected Sentinel-2 provider/collection"})
+                continue
+            scene.extra["provider"] = self.provider_name
             cache_path = self.cache_path_for_scene(scene, bbox)
 
             if self.is_cached(scene, bbox):
@@ -258,12 +297,31 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 # Reconstruct STAC item for asset signing
                 item = pystac.Item.from_dict(scene.stac_item)
 
+                # Validate the complete Earth Search contract before any COG
+                # read. Do not apply Planetary Computer baseline heuristics.
+                if self.provider == "earth-search":
+                    if scene_collection != self.collection:
+                        raise ValueError("Earth Search scene must declare its C1 collection")
+                    scl_asset = item.assets.get(self.asset_keys["SCL"])
+                    if scl_asset is None:
+                        raise ValueError("Sentinel-2 scene lacks SCL quality data")
+                    if "data" not in (scl_asset.roles or []) or not scl_asset.href.startswith("https://"):
+                        raise ValueError("Earth Search SCL requires a public HTTPS data asset")
+                    for band_name in S2_BANDS:
+                        asset = item.assets[self.asset_keys[band_name]]
+                        eo_bands = asset.extra_fields.get("eo:bands", [])
+                        if len(eo_bands) != 1 or eo_bands[0].get("name") != band_name:
+                            raise ValueError(f"Earth Search asset metadata does not identify {band_name}")
+                        if "data" not in (asset.roles or []) or not asset.href.startswith("https://"):
+                            raise ValueError(f"Earth Search {band_name} requires a public HTTPS data asset")
+                        reflectance_scaling(asset.extra_fields, item.properties, require_explicit=True)
+
                 # Read and stack bands
                 band_arrays = []
                 scaling = {}
                 quality_mask = np.ones((self.patch_size, self.patch_size), dtype=bool)
                 for band_name in S2_BANDS:
-                    asset_key = S2_ASSET_KEYS[band_name]
+                    asset_key = self.asset_keys[band_name]
                     href = signer.sign(item.assets[asset_key].href)
 
                     with open_raster(href, self.timeout_seconds) as src:
@@ -272,7 +330,8 @@ class Sentinel2Adapter(SatelliteAdapterBase):
 
                         # Scale to [0, 1]
                         conversion = reflectance_scaling(item.assets[asset_key].extra_fields,
-                                                         item.properties, self.scale_factor)
+                                                         item.properties, self.scale_factor,
+                                                         require_explicit=self.provider == "earth-search")
                         scaling[band_name] = conversion
                         band_data = band_data * conversion["scale"] + conversion["offset"]
                         band_data = np.clip(band_data, 0.0, 1.0)
@@ -283,8 +342,9 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 patch = np.stack(band_arrays, axis=0)
 
                 # Read SCL for cloud masking
-                if "SCL" in item.assets:
-                    scl_href = signer.sign(item.assets["SCL"].href)
+                scl_key = self.asset_keys["SCL"]
+                if scl_key in item.assets:
+                    scl_href = signer.sign(item.assets[scl_key].href)
                     with open_raster(scl_href, self.timeout_seconds) as src:
                         scl, scl_valid = read_aligned_band(src, bbox, self.patch_size, categorical=True)
                         # True = valid pixel
@@ -307,6 +367,8 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                                              "clip_range": [0.0, 1.0],
                                              "invalid_scl_classes": sorted(SCL_INVALID),
                                              "resampling": "bilinear; nearest for SCL",
+                                             "catalog_url": self.catalog_url,
+                                             "asset_keys": self.asset_keys,
                                          })
                 paths.append(cache_path)
 
