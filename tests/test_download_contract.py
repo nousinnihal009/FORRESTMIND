@@ -1,6 +1,7 @@
 """Offline contracts for real-data scaling, bounded requests and CLI failures."""
 
 from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
 import logging
 import sys
 from types import SimpleNamespace
@@ -9,7 +10,7 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from forestmind.data.adapters.network import AssetSigner, _RedactAccessQueries, open_catalog, public_error
+from forestmind.data.adapters.network import AssetSigner, _RedactAccessQueries, open_catalog, open_raster, public_error
 from forestmind.data.adapters.sentinel2 import Sentinel2Adapter, reflectance_scaling
 from scripts import download_data
 
@@ -65,6 +66,33 @@ def test_asset_signing_is_bounded_cached_and_not_logged(monkeypatch):
         "https://planetarycomputer.microsoft.com/api/sas/v1/token/account/container", timeout=(7, 7))
     assert "private-token" not in public_error(RuntimeError(f"Cannot read '{first}'"))
     assert signer.sign("https://public.example/band.tif") == "https://public.example/band.tif"
+
+
+def test_raster_reads_use_bounded_serial_ranges_and_clean_up(monkeypatch):
+    environment, opened = {}, []
+    source = object()
+    @contextmanager
+    def env(**options):
+        environment.update(options)
+        yield
+    @contextmanager
+    def raster_open(href):
+        opened.append(href)
+        yield source
+    monkeypatch.setitem(sys.modules, "rasterio", SimpleNamespace(Env=env, open=raster_open))
+    error_logger = logging.getLogger("rasterio._err")
+    previous_filters = list(error_logger.filters)
+    with pytest.raises(RuntimeError, match="read failed"):
+        with open_raster("https://public.example/band.tif", 7) as actual:
+            assert actual is source
+            assert len(error_logger.filters) == len(previous_filters) + 1
+            raise RuntimeError("read failed")
+    assert opened == ["https://public.example/band.tif"]
+    assert environment["GDAL_HTTP_MULTIRANGE"] == "SERIAL"
+    assert environment["GDAL_HTTP_TIMEOUT"] == "7"
+    assert environment["GDAL_HTTP_CONNECTTIMEOUT"] == "7"
+    assert environment["GDAL_HTTP_MAX_RETRY"] == "0"
+    assert error_logger.filters == previous_filters
 
 
 def test_partial_download_raises_and_retains_completed_count():
