@@ -15,7 +15,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from forestmind.api.schemas import AnalysisRequest, ImportRegion, ScenarioRequest, geometry_metadata
+from forestmind import __version__
+from forestmind.api.schemas import AnalysisRequest, ImportRegion, InferenceReport, ScenarioRequest, geometry_metadata
 from forestmind.api.store import Store
 from forestmind.monitoring.analysis import DISCLAIMER, METHOD, analyze_region, sensitivity_scenario
 from forestmind.monitoring.demo import demo_regions
@@ -40,7 +41,7 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
         for region, observations in demo_regions():
             if store.region(region["id"]) is None:
                 store.put_region(region, observations, analyze_region(region, observations))
-    app = FastAPI(title="ForestMind local monitoring", version="0.3.0", description=(
+    app = FastAPI(title="ForestMind local monitoring", version=__version__, description=(
         "Local, single-user observation screening and explicitly synthetic demonstrations. "
         "There is no authentication. Bind to localhost. " + DISCLAIMER
     ))
@@ -169,6 +170,29 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
     @app.get("/api/v1/alerts")
     def get_alerts():
         return {"alerts": store.list_alerts()}
+
+    @app.post("/api/v1/regions/{region_id}/model-runs", status_code=201)
+    def import_model_run(region_id: str, payload: InferenceReport):
+        require_analysis(region_id)
+        if payload.region_id != region_id:
+            raise HTTPException(422, "Report region_id must match the selected monitoring region")
+        run = {"id": "model-" + uuid4().hex[:12], "imported_at": now(),
+               "verification": "user_provided_unverified", "report": payload.model_dump(mode="json")}
+        store.save_model_run(region_id, run)
+        return run
+
+    @app.get("/api/v1/regions/{region_id}/model-runs")
+    def get_model_runs(region_id: str):
+        require_analysis(region_id)
+        return {"runs": store.list_model_runs(region_id)}
+
+    @app.get("/api/v1/regions/{region_id}/model-runs/{run_id}")
+    def get_model_run(region_id: str, run_id: str):
+        require_analysis(region_id)
+        run = store.model_run(region_id, run_id)
+        if run is None:
+            raise HTTPException(404, "Model run not found for this region")
+        return run
 
     def execute_analysis(job: dict, saved: tuple[dict, list[dict]]):
         job.update({"status": "running", "started_at": now()})
