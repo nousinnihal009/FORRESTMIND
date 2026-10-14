@@ -126,7 +126,8 @@ def test_all_bands_scale_once_cloud_mask_and_provenance_survive(tmp_path, monkey
     assert len(calls) == 13  # Valid matching cache prevents further network requests.
 
 
-@pytest.mark.parametrize("problem", ["band_name", "missing_scale", "private_asset", "missing_collection"])
+@pytest.mark.parametrize("problem", ["band_name", "missing_scale", "private_asset", "missing_collection",
+                                    "missing_scl", "private_scl"])
 def test_earth_search_invalid_metadata_fails_before_any_raster_read(tmp_path, monkeypatch, problem):
     item, source = fake_item(), scene()
     if problem == "band_name":
@@ -135,6 +136,10 @@ def test_earth_search_invalid_metadata_fails_before_any_raster_read(tmp_path, mo
         item.assets["red"].extra_fields["raster:bands"][0].pop("scale")
     elif problem == "private_asset":
         item.assets["red"].href = "s3://private/band.tif"
+    elif problem == "missing_scl":
+        item.assets.pop("scl")
+    elif problem == "private_scl":
+        item.assets["scl"].href = "s3://private/scl.tif"
     else:
         source.stac_item = {}
     calls = stub_download(monkeypatch, item)
