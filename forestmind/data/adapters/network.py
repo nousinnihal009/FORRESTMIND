@@ -64,6 +64,10 @@ def open_raster(href: str, timeout_seconds: float = 30.0):
         with rasterio.Env(
             GDAL_HTTP_CONNECTTIMEOUT=str(min(10., timeout_seconds)),
             GDAL_HTTP_TIMEOUT=str(timeout_seconds), GDAL_HTTP_MAX_RETRY="0",
+            # Range requests run sequentially: concurrent COG ranges can be
+            # truncated by intermediary transports even when single ranges work.
+            # https://gdal.org/en/stable/user/configoptions.html
+            GDAL_HTTP_MULTIRANGE="SERIAL",
             GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",
             CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif,.tiff,.jp2",
         ):
