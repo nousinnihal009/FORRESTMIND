@@ -84,6 +84,27 @@ def test_named_band_order_not_channel_positions_controls_indices(tmp_path):
     assert row["nbr"] == pytest.approx(5 / 7, abs=1e-6)
 
 
+def test_explicit_selection_excludes_rejected_cached_candidates(tmp_path):
+    accepted = save_cache(tmp_path / "sentinel2", "accepted")
+    save_cache(tmp_path / "sentinel2", "rejected", mask=[[0, 0], [0, 0]])
+    prepared = prepare(tmp_path, source_paths=[accepted])
+    assert prepared.payload["observations"][0]["valid_fraction"] == 1.0
+    assert prepared.provenance["monthly_aggregation"][0]["acquisition_count"] == 1
+    assert prepared.provenance["acquisitions"][0]["scene_id"] == "accepted"
+    assert not Path(prepared.provenance["acquisitions"][0]["cache_file"]).is_absolute()
+
+
+def test_explicit_selection_rejects_outside_duplicate_and_nonmatching_files(tmp_path):
+    cache = tmp_path / "selected"
+    accepted = save_cache(cache, "accepted")
+    outside = save_cache(tmp_path / "outside", "outside")
+    for selection in ([], [outside], [accepted, accepted], [cache / "missing.npz"]):
+        with pytest.raises(ValueError):
+            prepare(cache, source_paths=selection)
+    with pytest.raises(ValueError, match="does not match"):
+        prepare(cache, source_paths=[accepted], bbox=(-60, -10, -59, -9))
+
+
 def test_missing_quality_data_is_never_promoted_to_clear_sky(tmp_path):
     save_cache(tmp_path, omit=["quality_mask"])
     with pytest.raises(ValueError, match="explicit cloud/quality mask"):
