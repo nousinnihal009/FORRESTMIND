@@ -144,12 +144,15 @@ def prepare_cached_observations(
     name: str,
     country: str = "Unspecified",
     bbox: tuple[float, float, float, float] | None = None,
+    source_paths: list[str | Path] | None = None,
 ) -> PreparedImport:
     """Return a strict API payload and a detailed provenance sidecar manifest.
 
     One sensor family and one exact cached AOI are selected. Monthly values are
     valid-pixel-sample-weighted means, and coverage is the mean valid fraction
     across acquisitions, not a union of spatial coverage. No interpolation occurs.
+    source_paths restricts aggregation to explicitly accepted files in this cache;
+    other cached candidates are excluded rather than accidentally averaged in.
     """
     if sensor not in SENSORS:
         raise ValueError(f"Unsupported optical sensor {sensor!r}; choose sentinel2 or landsat")
@@ -159,11 +162,32 @@ def prepare_cached_observations(
     directory = root / family if (root / family).is_dir() else root
     if not directory.is_dir():
         raise ValueError(f"Cache directory does not exist: {directory}")
+    if source_paths is None:
+        paths = sorted(directory.rglob("*.npz"))
+    else:
+        if not source_paths:
+            raise ValueError("source_paths must contain at least one accepted acquisition")
+        selected_directory = directory.resolve()
+        paths = []
+        seen_paths = set()
+        for candidate in source_paths:
+            path = Path(candidate).resolve()
+            if not path.is_relative_to(selected_directory) or not path.is_file() or path.suffix.lower() != ".npz":
+                raise ValueError("Every selected acquisition must be an existing NPZ inside the selected cache directory")
+            if path in seen_paths:
+                raise ValueError("Duplicate selected acquisition path")
+            seen_paths.add(path)
+            paths.append(path)
+        paths.sort()
+        # Keep provenance relative paths consistent when selection is absolute.
+        root = root.resolve()
     target_bbox = validate_bbox(bbox) if bbox is not None else None
     records = []
-    for path in sorted(directory.rglob("*.npz")):
+    for path in paths:
         record = _load_acquisition(path, requested, target_bbox)
         if record is None:
+            if source_paths is not None:
+                raise ValueError(f"Selected acquisition {path.name} does not match the requested sensor and AOI")
             continue
         records.append(record)
     if not records:
