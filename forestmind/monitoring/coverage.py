@@ -12,6 +12,9 @@ from forestmind.api.schemas import ImportRegion
 from forestmind.monitoring.analysis import forecast_summary, indicator_score, resilience_summary
 
 
+MAX_REPORT_MONTHS = 1200
+
+
 def _bound(value: str | None, default: str, name: str) -> date:
     if value is None:
         return date.fromisoformat(default)
@@ -31,7 +34,8 @@ def assess_history(payload: dict, start: str | None = None, end: str | None = No
 
     Bounds default to the first and last source observation dates. Explicit
     bounds may extend past the source span; rows outside them are excluded.
-    Months intersecting a partial-month window are included, but only actual
+    Windows are limited to 1200 calendar months, with an explicit error rather
+    than truncation. Months intersecting a partial-month window are included, but only actual
     observation dates inside the window count toward coverage. A low-coverage
     row takes precedence over missing indices in the mutually exclusive counts.
 
@@ -46,6 +50,10 @@ def assess_history(payload: dict, start: str | None = None, end: str | None = No
     last = _bound(end, source_rows[-1]["date"], "end")
     if last < first:
         raise ValueError("end must be on or after start")
+    first_month = (first.year - 1) * 12 + first.month - 1
+    last_month = (last.year - 1) * 12 + last.month - 1
+    if last_month - first_month + 1 > MAX_REPORT_MONTHS:
+        raise ValueError(f"Requested window must span at most {MAX_REPORT_MONTHS} calendar months")
     start_text, end_text = first.isoformat(), last.isoformat()
     rows = [
         {**row, "health_score": indicator_score(row)}
@@ -55,8 +63,6 @@ def assess_history(payload: dict, start: str | None = None, end: str | None = No
     months = []
     longest = trailing = 0
     # Integer month offsets avoid advancing datetime.date beyond year 9999.
-    first_month = (first.year - 1) * 12 + first.month - 1
-    last_month = (last.year - 1) * 12 + last.month - 1
     for offset in range(first_month, last_month + 1):
         year, month = divmod(offset, 12)
         key = f"{year + 1:04d}-{month + 1:02d}"
