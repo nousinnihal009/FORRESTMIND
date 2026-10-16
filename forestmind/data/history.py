@@ -412,7 +412,8 @@ def _validate_report(report: dict, plan: dict, request: HistoryRequest, root: Pa
                 raise ValueError("Progress attempt does not belong to its frozen candidate plan")
             if attempt["stage"] == "resume_validation":
                 _report_fields(attempt, common | {"finished_at", "reason"})
-                if attempt["status"] not in {"invalidated", "rejected"} or active is None or active["scene_id"] != attempt["scene_id"]:
+                if (attempt["status"] not in {"invalidated", "rejected"} or active is None
+                        or active["scene_id"] != attempt["scene_id"] or index <= active["run_index"]):
                     raise ValueError("Invalid resume-validation audit status or accepted scene")
                 active = None
             elif attempt["stage"] == "acquisition":
@@ -435,8 +436,15 @@ def _validate_report(report: dict, plan: dict, request: HistoryRequest, root: Pa
                 if status == "accepted":
                     if "valid_fraction" not in attempt or "cache_sha256" not in attempt or "reason" in attempt:
                         raise ValueError("Accepted acquisition lacks its result")
+                    fraction = attempt["valid_fraction"]
+                    if (isinstance(fraction, bool) or not isinstance(fraction, (float, int))
+                            or not request.min_valid_fraction <= fraction <= 1
+                            or not isinstance(attempt["cache_sha256"], str)
+                            or not re.fullmatch(r"[0-9a-f]{64}", attempt["cache_sha256"])):
+                        raise ValueError("Invalid accepted acquisition result")
                     active = attempt
-                elif "valid_fraction" in attempt or "cache_sha256" in attempt or (status != "running" and "reason" not in attempt):
+                elif ("valid_fraction" in attempt or "cache_sha256" in attempt
+                      or (status != "running" and "reason" not in attempt) or (status == "running" and "reason" in attempt)):
                     raise ValueError("Invalid acquisition result fields")
             else:
                 raise ValueError("Invalid progress attempt stage")
@@ -464,7 +472,8 @@ def _validate_report(report: dict, plan: dict, request: HistoryRequest, root: Pa
             paths.append(accepted["path"])
     if running_attempts > 1 or counted != [[run["attempts"], run["downloads"]] for run in runs]:
         raise ValueError("Progress report run counters disagree with acquisition attempts")
-    if paths != report["accepted_cache_paths"] or (report["status"] == "complete") != (len(paths) == len(months)) and report["status"] != "running":
+    if (paths != report["accepted_cache_paths"]
+            or (report["status"] != "running" and (report["status"] == "complete") != (len(paths) == len(months)))):
         raise ValueError("Progress report completion or accepted cache list disagrees with months")
 
 
