@@ -26,6 +26,8 @@ from forestmind.data.adapters.sentinel2 import Sentinel2Adapter, S2_BANDS
 from forestmind.monitoring.ingest import _load_acquisition, validate_bbox
 
 SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
+MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_MONTHS = 120
 PROVIDERS = {"earth-search": "element84-earth-search",
              "planetary-computer": "microsoft-planetary-computer"}
@@ -134,7 +136,7 @@ def _sanitize(value):
             if parsed.port:
                 host += f":{parsed.port}"
             return urlunsplit((parsed.scheme, host, parsed.path, "", ""))
-        return re.sub(r"https?://[^\s\"'<>]+", unsigned, value)
+        return re.sub(r"https?://[^\s\"'<>]+", unsigned, value, flags=re.I)
     return value
 
 
@@ -185,14 +187,16 @@ def _json_path(path: str | Path) -> Path:
 
 
 def _atomic_json(path: Path, value: dict) -> None:
+    encoded = (json.dumps(value, indent=2, allow_nan=False) + "\n").encode("utf-8")
+    if len(encoded) > MAX_JSON_BYTES:
+        raise ValueError("History JSON exceeds the 32 MiB input/output limit")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+        with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent,
                                          suffix=".tmp", delete=False) as handle:
             temporary = Path(handle.name)
-            json.dump(value, handle, indent=2, allow_nan=False)
-            handle.write("\n")
+            handle.write(encoded)
         temporary.replace(path)
     finally:
         if temporary is not None:
@@ -200,7 +204,7 @@ def _atomic_json(path: Path, value: dict) -> None:
 
 
 def _read_json(path: Path) -> dict:
-    if path.stat().st_size > 32 * 1024 * 1024:
+    if path.stat().st_size > MAX_JSON_BYTES:
         raise ValueError("History JSON exceeds the 32 MiB input limit")
     def invalid(value):
         raise ValueError(f"Non-finite JSON value: {value}")
@@ -320,6 +324,150 @@ def _inspect_cache(path: Path, candidate: dict, request: HistoryRequest) -> dict
             "valid_samples": record["valid_samples"], "total_samples": record["total_samples"]}
 
 
+def _report_fields(value, required: set[str], optional: set[str] = frozenset()) -> None:
+    if not isinstance(value, dict) or not required <= value.keys() or value.keys() - required - optional:
+        raise ValueError("Invalid progress report structure")
+
+
+def _report_time(value) -> None:
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ValueError("Progress report timestamps must be UTC") from None
+
+
+def _report_integer(value, minimum=0, maximum=None) -> None:
+    if type(value) is not int or value < minimum or (maximum is not None and value > maximum):
+        raise ValueError("Invalid progress report counter or run index")
+
+
+def _validate_report(report: dict, plan: dict, request: HistoryRequest, root: Path) -> None:
+    """Check an intact local checkpoint; its digest is not source authentication."""
+    if report.get("report_sha256") != _digest({k: v for k, v in report.items() if k != "report_sha256"}):
+        raise ValueError("Progress report hash mismatch; restore the intact original report")
+    _report_fields(report, {"kind", "schema_version", "plan_sha256", "cache_dir", "created_at",
+                            "updated_at", "months", "runs", "status", "accepted_cache_paths", "report_sha256"})
+    if (report["kind"] != "forestmind_history_report" or report["schema_version"] != REPORT_SCHEMA_VERSION
+            or report["plan_sha256"] != plan["plan_sha256"] or not isinstance(report["cache_dir"], str)
+            or Path(report["cache_dir"]).resolve() != root):
+        raise ValueError("Progress report does not match the frozen plan and cache directory")
+    if report["status"] not in {"running", "complete", "incomplete"}:
+        raise ValueError("Invalid progress report status")
+    _report_time(report["created_at"])
+    _report_time(report["updated_at"])
+    runs, months = report["runs"], report["months"]
+    if not isinstance(runs, list) or not runs or not isinstance(months, list) or len(months) != len(plan["months"]):
+        raise ValueError("Invalid progress report runs or months")
+    for index, run in enumerate(runs):
+        _report_fields(run, {"run_index", "started_at", "attempt_limit", "download_limit", "attempts", "downloads", "status"},
+                       {"finished_at", "stop_reason"})
+        for key in ("run_index", "attempt_limit", "download_limit", "attempts", "downloads"):
+            _report_integer(run[key])
+        if (run["run_index"] != index or run["attempt_limit"] != request.max_attempts
+                or run["download_limit"] != request.max_downloads or run["attempts"] > run["attempt_limit"]
+                or run["downloads"] > min(run["download_limit"], run["attempts"])):
+            raise ValueError("Progress report run counters exceed or differ from frozen limits")
+        _report_time(run["started_at"])
+        if run["status"] == "running":
+            if index != len(runs) - 1 or report["status"] != "running" or "finished_at" in run or "stop_reason" in run:
+                raise ValueError("Invalid running progress report state")
+        elif run["status"] in {"complete", "incomplete", "interrupted"}:
+            if "finished_at" not in run or "stop_reason" not in run:
+                raise ValueError("Finished progress report run lacks completion metadata")
+            _report_time(run["finished_at"])
+            reasons = {"complete": {"complete"}, "incomplete": {"budget_exhausted", "candidates_exhausted"},
+                       "interrupted": {"interrupted"}}
+            if run["stop_reason"] not in reasons[run["status"]]:
+                raise ValueError("Progress report run status and stop reason disagree")
+        else:
+            raise ValueError("Invalid progress report run status")
+    if runs[-1]["status"] != report["status"]:
+        raise ValueError("Progress report status differs from its latest run")
+    counted = [[0, 0] for _ in runs]
+    running_attempts = 0
+    paths = []
+    for planned, row in zip(plan["months"], months):
+        _report_fields(row, {"month", "accepted", "attempts", "status"}, {"reason"})
+        if row["month"] != planned["month"] or not isinstance(row["attempts"], list):
+            raise ValueError("Progress report month identity or attempts mismatch")
+        expected_status = "accepted" if row["accepted"] is not None else "pending" if report["status"] == "running" else "missing"
+        if row["status"] != expected_status or ("reason" in row and not isinstance(row["reason"], str)):
+            raise ValueError("Invalid progress report month status")
+        candidates = {item["scene_id"]: item for item in planned["candidates"]}
+        active = None
+        previous_run = -1
+        for attempt in row["attempts"]:
+            common = {"scene_id", "candidate_sha256", "run_index", "stage", "status"}
+            if not isinstance(attempt, dict) or not common <= attempt.keys():
+                raise ValueError("Invalid progress attempt structure")
+            index = attempt["run_index"]
+            _report_integer(index, maximum=len(runs) - 1)
+            if index < previous_run:
+                raise ValueError("Progress attempts are not in run order")
+            previous_run = index
+            candidate = candidates.get(attempt["scene_id"])
+            if candidate is None or attempt["candidate_sha256"] != candidate["candidate_sha256"]:
+                raise ValueError("Progress attempt does not belong to its frozen candidate plan")
+            if attempt["stage"] == "resume_validation":
+                _report_fields(attempt, common | {"finished_at", "reason"})
+                if attempt["status"] not in {"invalidated", "rejected"} or active is None or active["scene_id"] != attempt["scene_id"]:
+                    raise ValueError("Invalid resume-validation audit status or accepted scene")
+                active = None
+            elif attempt["stage"] == "acquisition":
+                _report_fields(attempt, common | {"started_at", "download_attempted"},
+                               {"finished_at", "reason", "valid_fraction", "cache_sha256"})
+                if active is not None or type(attempt["download_attempted"]) is not bool:
+                    raise ValueError("Invalid acquisition after acceptance or download flag")
+                _report_time(attempt["started_at"])
+                counted[index][0] += 1
+                counted[index][1] += int(attempt["download_attempted"])
+                status = attempt["status"]
+                if status == "running":
+                    running_attempts += 1
+                    if runs[index]["status"] != "running" or attempt is not row["attempts"][-1] or "finished_at" in attempt:
+                        raise ValueError("Invalid running acquisition state")
+                elif status not in {"accepted", "rejected", "failed", "interrupted"}:
+                    raise ValueError("Invalid progress acquisition status")
+                elif "finished_at" not in attempt:
+                    raise ValueError("Finished acquisition lacks a timestamp")
+                if status == "accepted":
+                    if "valid_fraction" not in attempt or "cache_sha256" not in attempt or "reason" in attempt:
+                        raise ValueError("Accepted acquisition lacks its result")
+                    active = attempt
+                elif "valid_fraction" in attempt or "cache_sha256" in attempt or (status != "running" and "reason" not in attempt):
+                    raise ValueError("Invalid acquisition result fields")
+            else:
+                raise ValueError("Invalid progress attempt stage")
+            if "finished_at" in attempt:
+                _report_time(attempt["finished_at"])
+            if "reason" in attempt and not isinstance(attempt["reason"], str):
+                raise ValueError("Invalid progress attempt reason")
+        accepted = row["accepted"]
+        if (accepted is None) != (active is None):
+            raise ValueError("Accepted cache differs from progress attempt history")
+        if accepted is not None:
+            _report_fields(accepted, {"scene_id", "candidate_sha256", "path", "sha256", "datetime", "valid_fraction", "valid_samples", "total_samples"})
+            candidate = candidates.get(accepted["scene_id"])
+            fraction = accepted["valid_fraction"]
+            _report_integer(accepted["total_samples"], minimum=1)
+            _report_integer(accepted["valid_samples"], minimum=1, maximum=accepted["total_samples"])
+            if (candidate is None or accepted["scene_id"] != active["scene_id"]
+                    or accepted["candidate_sha256"] != candidate["candidate_sha256"] or accepted["datetime"] != candidate["datetime"]
+                    or not isinstance(accepted["path"], str) or not Path(accepted["path"]).is_absolute()
+                    or not isinstance(accepted["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", accepted["sha256"])
+                    or isinstance(fraction, bool) or not isinstance(fraction, (float, int))
+                    or not request.min_valid_fraction <= fraction <= 1 or fraction != accepted["valid_samples"] / accepted["total_samples"]
+                    or active["cache_sha256"] != accepted["sha256"] or active["valid_fraction"] != fraction):
+                raise ValueError("Invalid accepted cache metadata or acquisition link")
+            paths.append(accepted["path"])
+    if running_attempts > 1 or counted != [[run["attempts"], run["downloads"]] for run in runs]:
+        raise ValueError("Progress report run counters disagree with acquisition attempts")
+    if paths != report["accepted_cache_paths"] or (report["status"] == "complete") != (len(paths) == len(months)) and report["status"] != "running":
+        raise ValueError("Progress report completion or accepted cache list disagrees with months")
+
+
 def execute_history_plan(plan_path: str | Path, report_path: str | Path, cache_dir: str | Path,
                          *, resume: bool = False, adapter_factory=None) -> dict:
     """Execute bounded attempts, checkpointing before and after every acquisition.
@@ -341,25 +489,31 @@ def execute_history_plan(plan_path: str | Path, report_path: str | Path, cache_d
         raise ValueError("--resume requires an existing progress report")
     if resume:
         report = _read_json(report_path)
-        if (report.get("kind") != "forestmind_history_report" or report.get("schema_version") != SCHEMA_VERSION
-                or report.get("plan_sha256") != plan["plan_sha256"] or Path(report.get("cache_dir", "")).resolve() != root):
-            raise ValueError("Progress report does not match the frozen plan and cache directory")
-        if [row["month"] for row in report["months"]] != [row["month"] for row in plan["months"]]:
-            raise ValueError("Progress report month identity mismatch")
+        try:
+            _validate_report(report, plan, request, root)
+        except (KeyError, TypeError, OverflowError):
+            raise ValueError("Invalid progress report structure") from None
     else:
-        report = {"kind": "forestmind_history_report", "schema_version": SCHEMA_VERSION,
+        report = {"kind": "forestmind_history_report", "schema_version": REPORT_SCHEMA_VERSION,
                   "plan_sha256": plan["plan_sha256"], "cache_dir": str(root), "created_at": _now(),
                   "months": [{"month": row["month"], "accepted": None, "attempts": []} for row in plan["months"]],
                   "runs": []}
     adapter = _adapter(request, root, adapter_factory)
-    run = {"started_at": _now(), "attempt_limit": request.max_attempts,
-           "download_limit": request.max_downloads, "attempts": 0, "downloads": 0}
+    if report["runs"] and report["runs"][-1]["status"] == "running":
+        report["runs"][-1].update(status="interrupted", finished_at=_now(), stop_reason="interrupted")
+    run = {"run_index": len(report["runs"]), "started_at": _now(), "attempt_limit": request.max_attempts,
+           "download_limit": request.max_downloads, "attempts": 0, "downloads": 0, "status": "running"}
     report["runs"].append(run)
     report["status"] = "running"
 
     def save():
         report["updated_at"] = _now()
         report["accepted_cache_paths"] = [row["accepted"]["path"] for row in report["months"] if row["accepted"]]
+        for row in report["months"]:
+            row["status"] = "accepted" if row["accepted"] else "pending" if report["status"] == "running" else "missing"
+            if row["status"] != "missing":
+                row.pop("reason", None)
+        report["report_sha256"] = _digest({key: value for key, value in report.items() if key != "report_sha256"})
         _atomic_json(report_path, report)
 
     # Revalidate every prior success before spending any new download budget.
@@ -391,7 +545,8 @@ def execute_history_plan(plan_path: str | Path, report_path: str | Path, cache_d
             row["accepted"] = None
             row["attempts"].append({"scene_id": candidate["scene_id"], "candidate_sha256": candidate["candidate_sha256"],
                                     "status": "invalidated" if not expected.exists() else "rejected",
-                                    "stage": "resume_validation", "finished_at": _now(), "reason": _sanitize(public_error(error))})
+                                    "run_index": run["run_index"], "stage": "resume_validation",
+                                    "finished_at": _now(), "reason": _sanitize(public_error(error))})
     save()
     budget_hit = False
     for planned, row in zip(plan["months"], report["months"]):
@@ -414,6 +569,7 @@ def execute_history_plan(plan_path: str | Path, report_path: str | Path, cache_d
                 budget_hit = True
                 continue
             attempt = {"scene_id": candidate["scene_id"], "candidate_sha256": candidate["candidate_sha256"],
+                       "run_index": run["run_index"], "stage": "acquisition",
                        "started_at": _now(), "status": "running", "download_attempted": needs_download}
             row["attempts"].append(attempt)
             run["attempts"] += 1
@@ -432,7 +588,8 @@ def execute_history_plan(plan_path: str | Path, report_path: str | Path, cache_d
             except Exception as error:
                 attempt.update(status="rejected" if expected.exists() else "failed", reason=_sanitize(public_error(error)))
             finally:
-                attempt["finished_at"] = _now()
+                if attempt["status"] != "running":
+                    attempt["finished_at"] = _now()
                 save()
             if row["accepted"]:
                 break
@@ -445,6 +602,7 @@ def execute_history_plan(plan_path: str | Path, report_path: str | Path, cache_d
         else:
             row.pop("reason", None)
     report["status"] = "complete" if all(row["accepted"] for row in report["months"]) else "incomplete"
+    run["status"] = report["status"]
     run["finished_at"] = _now()
     run["stop_reason"] = "complete" if report["status"] == "complete" else "budget_exhausted" if budget_hit else "candidates_exhausted"
     save()
