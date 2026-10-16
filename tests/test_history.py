@@ -12,6 +12,7 @@ from forestmind.data.adapters.sentinel2 import Sentinel2Adapter
 from forestmind.data.history import (
     HistoryRequest, create_history_plan, execute_history_plan, load_history_plan, month_windows,
 )
+import forestmind.data.history as history
 from scripts.build_history import main
 
 
@@ -139,6 +140,40 @@ def test_plan_is_deterministic_bounded_and_strips_credentials(tmp_path):
     assert state["downloads"] == []
 
 
+@pytest.mark.parametrize("scheme", ["HTTPS", "hTtPs", "HTTP", "hTtP"])
+def test_signed_urls_are_sanitized_regardless_of_scheme_case(tmp_path, scheme):
+    selected = scene("signed")
+    selected.stac_item["assets"]["red"]["href"] = f"{scheme}://user:password@example.test:8443/B04.tif?sig=secret#fragment"
+    _, factory = fixture({"2024-01": [selected]})
+    path = tmp_path / "plan.json"
+    plan = create_history_plan(request(end="2024-01-31"), path, adapter_factory=factory)
+    href = plan["months"][0]["candidates"][0]["stac_item"]["assets"]["red"]["href"]
+    assert href == f"{scheme.lower()}://example.test:8443/B04.tif"
+    assert all(secret not in path.read_text() for secret in ("user", "password", "secret", "fragment"))
+    assert load_history_plan(path)[0] == plan
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_atomic_json_enforces_readable_size_before_mutating_destination(tmp_path, monkeypatch, existing):
+    path = tmp_path / "nested" / "report.json"
+    if existing:
+        path.parent.mkdir()
+        path.write_bytes(b"preserve existing report")
+    monkeypatch.setattr(history, "MAX_JSON_BYTES", 64)
+    with pytest.raises(ValueError, match="limit"):
+        history._atomic_json(path, {"multibyte": "\u00e9" * 50})
+    if existing:
+        assert path.read_bytes() == b"preserve existing report"
+        assert list(path.parent.iterdir()) == [path]
+    else:
+        assert not path.parent.exists()
+    history._atomic_json(path, {"small": "ok"})
+    assert history._read_json(path) == {"small": "ok"}
+    path.write_bytes(b" " * 65)
+    with pytest.raises(ValueError, match="limit"):
+        history._read_json(path)
+
+
 def test_invalid_out_of_window_or_provider_candidates_are_recorded_and_excluded(tmp_path):
     wrong_provider = scene("wrong-provider")
     wrong_provider.extra["provider"] = "microsoft-planetary-computer"
@@ -208,6 +243,12 @@ def test_missing_accepted_cache_is_not_trusted_and_is_downloaded_again(tmp_path)
     resumed = execute_history_plan(plan_path, report_path, cache, resume=True, adapter_factory=factory)
     assert resumed["status"] == "complete" and state["downloads"] == ["jan", "jan"]
     assert [item["status"] for item in resumed["months"][0]["attempts"]] == ["accepted", "invalidated", "accepted"]
+    assert resumed["runs"][1]["attempts"] == 1 and resumed["runs"][1]["downloads"] == 1
+    audit = resumed["months"][0]["attempts"][1]
+    assert audit["stage"] == "resume_validation" and audit["run_index"] == 1
+    assert "download_attempted" not in audit
+    again = execute_history_plan(plan_path, report_path, cache, resume=True, adapter_factory=factory)
+    assert again["runs"][-1]["attempts"] == 0 and state["downloads"] == ["jan", "jan"]
 
 
 def test_altered_accepted_cache_is_rejected_without_overwriting_it(tmp_path):
@@ -232,10 +273,57 @@ def test_interruption_has_durable_attempt_and_resume_retries_it(tmp_path):
     interrupted = json.loads(report_path.read_text())
     assert interrupted["runs"][0]["attempts"] == 1 and interrupted["runs"][0]["downloads"] == 1
     assert interrupted["months"][0]["attempts"][0]["status"] == "running"
+    assert "finished_at" not in interrupted["months"][0]["attempts"][0]
+    assert interrupted["report_sha256"] == history._digest({k: v for k, v in interrupted.items() if k != "report_sha256"})
     state["outcomes"].clear()
     resumed = execute_history_plan(plan_path, report_path, cache, resume=True, adapter_factory=factory)
     assert resumed["status"] == "complete" and state["downloads"] == ["jan", "jan"]
     assert resumed["months"][0]["attempts"][0]["status"] == "interrupted"
+    assert resumed["runs"][0]["status"] == "interrupted" and resumed["runs"][0]["stop_reason"] == "interrupted"
+    assert [attempt["run_index"] for attempt in resumed["months"][0]["attempts"]] == [0, 1]
+    assert execute_history_plan(plan_path, report_path, cache, resume=True, adapter_factory=factory)["status"] == "complete"
+
+
+def test_resume_rejects_changed_report_hash_before_adapter_or_file_mutation(tmp_path):
+    _, report, state, _, plan_path, report_path, cache = plan_and_execute(tmp_path)
+    report["runs"][0]["downloads"] = -100
+    report_path.write_text(json.dumps(report))
+    before = report_path.read_bytes()
+    def forbidden_factory(**kwargs):
+        pytest.fail("Invalid progress must be rejected before constructing an adapter")
+    with pytest.raises(ValueError, match="report hash mismatch"):
+        execute_history_plan(plan_path, report_path, cache, resume=True, adapter_factory=forbidden_factory)
+    assert report_path.read_bytes() == before and state["downloads"] == ["jan", "feb"]
+
+
+@pytest.mark.parametrize("target, key, value", [
+    ("report", "schema_version", 1), ("report", "status", "invented"),
+    ("report", "months", {}), ("report", "runs", []), ("report", "accepted_cache_paths", []),
+    ("run", "downloads", -100), ("run", "downloads", False), ("run", "downloads", 1),
+    ("run", "attempts", 1), ("run", "attempt_limit", 100), ("run", "download_limit", 100),
+    ("run", "run_index", 2), ("run", "status", "imaginary"), ("run", "stop_reason", "budget_exhausted"),
+    ("month", "status", "running"), ("month", "accepted", None), ("month", "attempts", {}),
+    ("attempt", "status", "imaginary"), ("attempt", "status", "invalidated"),
+    ("attempt", "run_index", 99), ("attempt", "run_index", True), ("attempt", "stage", "unknown"),
+    ("attempt", "stage", "resume_validation"), ("attempt", "download_attempted", "false"),
+    ("attempt", "candidate_sha256", "0" * 64), ("attempt", "scene_id", []),
+    ("attempt", "valid_fraction", -1), ("attempt", "cache_sha256", "bad"),
+    ("accepted", "valid_samples", False), ("accepted", "valid_fraction", .7),
+    ("accepted", "path", "relative.npz"), ("accepted", "sha256", "0" * 64),
+])
+def test_resume_rejects_structurally_invalid_reports_even_with_recomputed_digest(tmp_path, target, key, value):
+    _, report, state, _, plan_path, report_path, cache = plan_and_execute(tmp_path)
+    targets = {"report": report, "run": report["runs"][0], "month": report["months"][0],
+               "attempt": report["months"][0]["attempts"][0], "accepted": report["months"][0]["accepted"]}
+    targets[target][key] = value
+    report["report_sha256"] = history._digest({k: v for k, v in report.items() if k != "report_sha256"})
+    report_path.write_text(json.dumps(report))
+    before = report_path.read_bytes()
+    def forbidden_factory(**kwargs):
+        pytest.fail("Malformed progress must be rejected before constructing an adapter")
+    with pytest.raises(ValueError):
+        execute_history_plan(plan_path, report_path, cache, resume=True, adapter_factory=forbidden_factory)
+    assert report_path.read_bytes() == before and state["downloads"] == ["jan", "feb"]
 
 
 def test_cached_scene_reuse_obeys_attempt_limit_without_network(tmp_path):
