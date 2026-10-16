@@ -35,6 +35,7 @@ The frontend is packaged HTML/CSS/JavaScript served by FastAPI; no Node build is
 | Monitoring | Four reproducible demo regions; strict JSON import for dated monthly measurements |
 | Spatial overview | Selectable WGS84 footprints, condition/coverage/alert layers and zoom |
 | Evidence | NDVI/NDMI/NBR history, candidate-driver evidence, coverage and dated alert explanations |
+| History coverage | Monthly quality calendar, explicit gaps, consecutive usable runs, date-window checks and JSON export |
 | Forecasting | 30/180/365-day baseline with uncalibrated residual envelopes; withheld for inadequate histories |
 | Resilience | Descriptive season-adjusted autocorrelation and variance, with validity checks |
 | Backtesting | Persistence, seasonal naive and damped trend at historical cutoffs; auditable per-horizon exports |
@@ -42,6 +43,7 @@ The frontend is packaged HTML/CSS/JavaScript served by FastAPI; no Node build is
 | API/jobs | REST endpoints, SQLite persistence, background jobs and interrupted-job recovery |
 | Export | Region JSON, observation CSV, scenario JSON and backtesting JSON with provenance |
 | Satellite pipeline | Sentinel-2/Sentinel-1/Landsat adapters, common-grid caches and optical-cache import preparation |
+| Repeatable acquisition | Frozen monthly Sentinel-2 candidates, bounded downloads, resumable progress and accepted-only exports |
 | Neural research | Custom ViT, explicit proxy/native pretrained modes, modality masks, temporal model and task heads |
 | Model runs | Validated, persisted inference reports with checkpoint/input hashes, class/driver scores and configured horizons |
 | Reproducible evaluation | JSON metrics, raw predictions and targets, split identity, artifact/code hashes and per-horizon errors |
@@ -95,6 +97,24 @@ The bridge requires current, explicitly georeferenced cache metadata; regenerate
 Downloads require provider availability and the optional raster/STAC stack. Network requests have bounded timeouts (`--timeout`, in seconds); failed or partial downloads return a nonzero exit status. Numerical tests validate local grid alignment and data contracts; they do not prove all remote collections are accessible or establish ecological validity.
 
 Current caches use **`forestmind-grid-v3`**. Sentinel-2 reflectance processing now accounts for the product processing baseline, including the offset needed for baseline 04.00 and later when asset metadata omit scaling. Regenerate v2 caches before preparing observations or inference sequences. See the [provider's baseline-change example](https://github.com/microsoft/PlanetaryComputerExamples/blob/main/datasets/sentinel-2-l2a/baseline-change.ipynb).
+
+### Build a repeatable monthly history
+
+Freeze a monthly acquisition plan before downloading. This example searches twelve months for the same small AOI. Each execution may attempt at most two new downloads and six candidates overall:
+
+```powershell
+python scripts/build_history.py plan --plan artifacts/history-plan.json --provider earth-search --region=-55.10,-3.50,-55.08,-3.48 --start 2024-07-01 --end 2025-06-30 --patch-size 64 --candidates-per-month 3 --search-limit 30 --max-attempts 6 --max-downloads 2 --min-valid-fraction 0.6 --timeout 30
+python scripts/build_history.py execute --plan artifacts/history-plan.json --report artifacts/history-progress.json --cache-dir data/real-pilot/earth-search --output artifacts/history-batch-1.json --name "Tapajos monthly satellite pilot" --country Brazil
+python scripts/build_history.py execute --plan artifacts/history-plan.json --report artifacts/history-progress.json --cache-dir data/real-pilot/earth-search --resume --output artifacts/history-batch-2.json --name "Tapajos monthly satellite pilot" --country Brazil
+```
+
+The plan records the exact UTC month windows, provider, processing settings and unsigned candidate metadata. Candidates are ranked by scene cloud cover, acquisition time and scene ID within the bounded catalog subset. Execution checks actual AOI quality and accepts at most one acquisition per month. This sampling rule differs from compositing every scene in a month; it can introduce sampling bias and requires scientific review for a study.
+
+Download budgets count attempted acquisitions, including failed requests, and reset on each explicit execution. Completed cache files are checked again when resuming; modified or missing files are never silently accepted. Progress is saved atomically around each attempt. Plan/report hashes detect changes to saved artifacts, not source authenticity. A failed or incomplete run returns exit code **2**, retains its progress, and can still export accepted months. Resume continues untried candidates and interrupted attempts; rejected or failed candidates are not silently retried. A new plan is needed to change provider, dates, search bounds or candidate selection.
+
+Use a new output filename on each run; output and provenance files are never overwritten. Keep the plan, progress report, cache and export sidecar together. The export includes only accepted scenes, excluding cloudy or rejected alternatives that remain in the cache. Missing months, SAR, climate context and labels are never filled in. Import the latest batch as a new region snapshot; previous imports remain available for comparison.
+
+In **Data coverage**, set the desired study period to see missing and unusable months, the longest consecutive usable run, and whether observations reach the requested ending month. The default period covers the actual observation span. Readiness means the current software's minimum history requirements are met; it does not establish predictive accuracy or a tipping-point warning.
 
 ## Backtest before interpreting forecasts
 
@@ -175,6 +195,7 @@ This output supports subsequent comparisons and calibration experiments; the com
 | GET | `/api/v1/regions/{id}/drivers` | Candidate-driver evidence |
 | GET | `/api/v1/regions/{id}/alerts` | Dated region alerts |
 | GET | `/api/v1/regions/{id}/evaluation` | Historical baseline comparison |
+| GET | `/api/v1/regions/{id}/coverage?start=YYYY-MM-DD&end=YYYY-MM-DD` | Calendar coverage and method readiness for optional inclusive date bounds |
 | POST | `/api/v1/regions/{id}/model-runs` | Validate and persist a portable inference report |
 | GET | `/api/v1/regions/{id}/model-runs` | Saved neural inference reports for a region |
 | GET | `/api/v1/regions/{id}/model-runs/{run_id}` | One stored report and import provenance |
@@ -189,6 +210,8 @@ This output supports subsequent comparisons and calibration experiments; the com
 ```powershell
 python -m pytest tests -q
 node --check forestmind/web/app.js
+node --check forestmind/web/model-runs.js
+node --check forestmind/web/coverage.js
 ```
 
 Install `[web,dev,real-data]` for optional raster tests; without Rasterio they skip explicitly. Tests cover input validation, SQLite/job recovery, missingness, temporal information boundaries, scenario invariants, reprojection and controlled pretrained-adapter contracts. Mocked encoder tests are not real checkpoint benchmarks.
