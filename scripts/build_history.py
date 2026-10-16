@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import hashlib
 from pathlib import Path
 import sys
@@ -42,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     execution.add_argument("--name", help="Monitoring region name, required with --output")
     execution.add_argument("--country", default="Unspecified")
     args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s", datefmt="%H:%M:%S")
     try:
         if args.command == "plan":
             request = HistoryRequest(provider=args.provider, bbox=validate_bbox(args.region.split(",")),
