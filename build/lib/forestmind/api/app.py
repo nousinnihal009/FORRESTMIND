@@ -19,6 +19,7 @@ from forestmind import __version__
 from forestmind.api.schemas import AnalysisRequest, ImportRegion, InferenceReport, ScenarioRequest, geometry_metadata
 from forestmind.api.store import Store
 from forestmind.monitoring.analysis import DISCLAIMER, METHOD, analyze_region, sensitivity_scenario
+from forestmind.monitoring.coverage import assess_history
 from forestmind.monitoring.demo import demo_regions
 
 
@@ -166,6 +167,22 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
             "synthetic": region["provenance"].get("synthetic", False),
             "geometry": region["geometry"], "observations": observations,
         })
+
+    @app.get("/api/v1/regions/{region_id}/coverage")
+    def history_coverage(region_id: str, start: str | None = Query(None), end: str | None = Query(None)):
+        saved = store.region(region_id)
+        if saved is None:
+            raise HTTPException(404, "Region not found")
+        region, observations = saved
+        try:
+            return assess_history({
+                "name": region["name"], "country": region["country"],
+                "source": region["provenance"]["source"],
+                "synthetic": region["provenance"].get("synthetic", False),
+                "geometry": region["geometry"], "observations": observations,
+            }, start=start, end=end)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
 
     @app.get("/api/v1/alerts")
     def get_alerts():
