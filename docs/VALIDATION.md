@@ -1,6 +1,6 @@
 # Build verification
 
-ForestMind v0.5 verified locally on Windows on 2026-10-16. The first real single-scene pilot was verified during v0.4 on October 14.
+ForestMind v0.5 verified locally on Windows on 2026-10-16, with the final monthly-history artifact and persistence audit on October 17. The first real single-scene pilot was verified during v0.4 on October 14.
 
 ## Completed checks
 
@@ -13,6 +13,7 @@ ForestMind v0.5 verified locally on Windows on 2026-10-16. The first real single
 - Model-run browser flow: imported that report into the Tapajós demo region, verified malformed JSON feedback, reloaded the page and confirmed persistence. Narrow-screen layout had no page overflow, and the browser console had no errors. Screenshot: `artifacts/forestmind-model-runs.jpg`.
 - Real-observation browser flow: imported `artifacts/real-pilot-region.json` as **Tapajos real satellite pilot** (`import-9e78ebc0e30c`). Verified the acquisition date, spectral indices, 100% valid samples and Earth Search source. Forecasts and resilience diagnostics correctly remain unavailable for the one-observation record. No browser console errors. Screenshot: `artifacts/forestmind-real-pilot.jpg`.
 - Coverage browser flow: selected a twelve-month window for the saved single observation and verified one usable month, eleven missing months and no usable run at the requested period end. Checked JSON export, reversed-date feedback and clearing stale results when dates change. At a 390-pixel viewport there was no horizontal page overflow. No browser console errors.
+- Monthly-history browser flow: imported eight actual acquisitions as **Tapajos monthly satellite pilot** (`import-2973ec681f83`). After a server restart, verified persistence and the July 2024–June 2025 coverage window: eight usable months, four missing months, longest usable run of seven and a run of one at the period end. Forecast and resilience results remain unavailable. The final preview had no browser console errors. Screenshot: `artifacts/forestmind-history-coverage.jpg`; API response: `artifacts/history-coverage.json`.
 - Evaluation: `artifacts/quick-test-evaluation.json` contains raw predictions and reference targets for two synthetic test examples, configured horizon errors and reproducibility hashes. These sample metrics are not real-world validation.
 - Packaging: built `artifacts/dist/forestmind-0.5.0-py3-none-any.whl` and verified that it contains the history acquisition and coverage modules, coverage JavaScript, inference runner, sequence preparation and model-results JavaScript. SHA256: `63d599837dbd60df468fc8afca679eae40bcc40b3a00ef1d2509c8c9d0660fc6`.
 
@@ -53,8 +54,37 @@ Prepared observations were NDVI **0.852677**, NDMI **0.291797** and NBR **0.6313
 
 This verifies a real provider → aligned cache → observation preparation → dashboard path and a cache → inference-input path. It does not verify a long monitoring history, field labels or predictive skill. The exact pilot commands are in the README; the full download and preparation evidence is in `artifacts/real-pilot-verification.json`.
 
+### Resumable monthly-history pilot
+
+The monthly planner searched **2024-07-01 through 2025-06-30** for the same small AOI and explicit Earth Search collection. The frozen plan uses a 64 × 64 grid, at most three candidates per month from a bounded search of thirty, a minimum valid-pixel fraction of 0.6, and per-invocation limits of six attempts and two new downloads. Candidate ranking and the scene-cloud filter are recorded in the plan; this is a selected sample, not an exhaustive history of every available acquisition.
+
+Four execution invocations, with `--resume` after the first, each made exactly **two attempts and two downloads**. They produced eight accepted observations. Earlier accepted caches were retained and verified during resume. February–May 2025 had no eligible candidates in the frozen search results, so the final report correctly remains **incomplete** with `candidates_exhausted`; absent months were not filled. This does not establish that no satellite observations exist for those months under other search criteria.
+
+| Actual acquisition date | Valid pixel samples |
+| --- | ---: |
+| 2024-07-17 | 100% |
+| 2024-08-26 | 100% |
+| 2024-09-02 | 100% |
+| 2024-10-12 | 99.707% |
+| 2024-11-29 | 100% |
+| 2024-12-01 | 64.087% |
+| 2025-01-23 | 76.953% |
+| 2025-06-16 | 100% |
+
+The final audit validated the plan and report hashes, all eight accepted cache files, their source identities, processing grids, bands and quality masks. Recomputing observations from the accepted files reproduced `artifacts/history-region.json` exactly and matched the deterministic provenance fields. The earlier July 29 single-scene pilot is excluded from this separate monthly export. A mask passing the software checks is not field verification of cloud-free or ecologically representative measurements.
+
+Saved evidence:
+
+- `artifacts/history-plan.json`: frozen search results, settings and plan hash.
+- `artifacts/history-progress.json`: schema-2 report, four runs, accepted source hashes and missing-month outcomes.
+- `artifacts/history-region.json` and `artifacts/history-region.provenance.json`: eight actual observations and their source audit trail.
+- `artifacts/history-coverage.json`: persisted region's API response for the complete requested year.
+- `artifacts/forestmind-history-coverage.jpg`: final dashboard coverage preview.
+
+The README documents the reproducible `build_history.py plan` and `execute --resume` workflow. This pilot establishes bounded downloads, resume integrity and an honest gap report for real data. It has only seven consecutive usable months and does not meet the current software minimums of twelve for a baseline forecast or thirty-six for descriptive resilience diagnostics.
+
 ## Research limits
 
-These checks establish software behavior, not ecological predictive validity. The four seeded monitoring regions and quick training run use synthetic data; the added real pilot has only one observation. Native pretrained checkpoints and operational deployment were not exercised. The new offline inference command rejects native backbone constructors that would download weights; only local custom/proxy checkpoints are currently supported there. Monitoring scores and scenario outputs remain uncalibrated research indicators. Validation on independent real observations and events, geographic and temporal holdouts, and uncertainty calibration remain necessary before scientific or operational claims.
+These checks establish software behavior, not ecological predictive validity. The four seeded monitoring regions and quick training run use synthetic data. The two imported real pilots contain one observation and eight monthly observations respectively; the monthly pilot has four gaps in its requested year and remains insufficient for forecasts or resilience diagnostics. Native pretrained checkpoints and operational deployment were not exercised. The new offline inference command rejects native backbone constructors that would download weights; only local custom/proxy checkpoints are currently supported there. Monitoring scores and scenario outputs remain uncalibrated research indicators. Validation on independent real observations and events, geographic and temporal holdouts, and uncertainty calibration remain necessary before scientific or operational claims.
 
 See `METHODOLOGY.md`, `RESEARCH_PROTOCOL.md` and `COMPLETION_PLAN.md` for the assumptions and remaining milestones.
