@@ -32,7 +32,8 @@ def _sha256(path: Path) -> str:
 
 
 def prepare_sequence(cache_dir: str | Path, *, through: str, time_steps: int = 12,
-                     bbox=None, min_valid_fraction: float = 0.4) -> PreparedSequence:
+                     bbox=None, min_valid_fraction: float = 0.4,
+                     source_paths: list[str | Path] | None = None) -> PreparedSequence:
     """Select the latest eligible dated acquisitions at one AOI without padding.
 
     This is a sequence of acquisitions, not monthly composites. No labels or
@@ -51,7 +52,15 @@ def prepare_sequence(cache_dir: str | Path, *, through: str, time_steps: int = 1
         raise ValueError(f"Cache directory does not exist: {directory}")
     requested_bbox = validate_bbox(bbox) if bbox is not None else None
     records, skipped = [], []
-    for path in sorted(directory.rglob("*.npz")):
+    if source_paths is None:
+        paths = sorted(directory.rglob("*.npz"))
+    else:
+        paths = [Path(path).resolve() for path in source_paths]
+        if not paths or len(paths) != len(set(paths)):
+            raise ValueError("Accepted source_paths must be nonempty and unique")
+        if any(not path.is_relative_to(root.resolve()) or not path.is_file() or path.suffix.lower() != ".npz" for path in paths):
+            raise ValueError("Accepted sources must be existing NPZ files inside the acquisition cache")
+    for path in sorted(paths):
         record = _load_acquisition(path, "sentinel2", requested_bbox)
         if record is None or record["datetime"].date() > cutoff:
             continue
