@@ -4,7 +4,7 @@ let modelImportRegion = null;
 let modelRequest = 0;
 
 function modelRunHeader(id) {
-  return `<div class="observations-caption"><div><strong>Saved neural predictions</strong><p class="chart-caveat">Checkpoint-specific results, with their input record and observation cutoff.</p></div><button class="button secondary" id="open-model-import">${icon('upload',14)}Import model run</button></div><p class="chart-caveat">Region ID: <code>${esc(id)}</code> · Use this ID when preparing an inference report.</p>`;
+  return `<div class="observations-caption"><div><strong>Saved neural predictions</strong><p class="chart-caveat">Checkpoint-specific results, with their input record and observation cutoff.</p></div><button class="button secondary" id="open-model-import">${icon('upload',14)}Import model run</button></div><p class="chart-caveat">Region ID: <code>${esc(id)}</code> · Automatic eligible inference is available in Connected analysis. Imported reports retain their declared cutoff.</p>`;
 }
 
 function modelProvenance(report) {
@@ -30,7 +30,7 @@ async function renderModelRuns(id, preferredRun) {
     const result = await api('/regions/'+encodeURIComponent(id)+'/model-runs');
     if(request !== modelRequest || state.selected !== id || state.tab !== 'models')return;
     const runs = result.runs || [];
-    $('#detail-body').innerHTML = modelRunHeader(id) + (runs.length ? `<div class="model-picker"><label class="field-label" for="model-run-select">Saved run</label><select id="model-run-select">${runs.map(run=>`<option value="${esc(run.id)}">${esc(run.report.checkpoint.name)} · ${esc(dateLabel(run.report.observed_through))} · ${esc(run.id)}</option>`).join('')}</select></div><div id="model-run-detail"></div>` : '<div class="empty-state model-empty"><span class="large-symbol">↗</span><h3>Connect your trained model</h3><p>Run the prediction command on a prepared satellite sequence, then import its JSON report here. Every saved run retains its model and input fingerprints.</p><p class="chart-caveat">No trained neural model is used by the observation baseline. Model runs appear here once you import them.</p></div>');
+    $('#detail-body').innerHTML = modelRunHeader(id) + (runs.length ? `<div class="model-picker"><label class="field-label" for="model-run-select">Saved run</label><select id="model-run-select">${runs.map(run=>`<option value="${esc(run.id)}">${esc(run.report.checkpoint.name)} · ${esc(dateLabel(run.report.observed_through))} · ${esc(run.id)}</option>`).join('')}</select></div><div id="model-run-detail"></div>` : '<div class="empty-state model-empty"><span class="large-symbol">↗</span><h3>No eligible saved model prediction yet</h3><p>Open Connected analysis to run an eligible installed checkpoint on the selected area’s acquired sequence. It explains missing inputs or unsupported checkpoint scope. Every saved run retains its model and input fingerprints.</p><p class="chart-caveat">No trained neural model is used by the observation baseline. Saved automatic and imported model runs appear here.</p></div>');
     $('#open-model-import').addEventListener('click',()=>openModelImport(id));
     if(runs.length){
       const picker = $('#model-run-select');
