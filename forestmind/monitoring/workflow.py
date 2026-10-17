@@ -269,7 +269,6 @@ class WorkflowService:
                                             observed_through=prepared.provenance["observed_through"], synthetic_input=False)
                 run = {"id": "model-" + uuid4().hex[:12], "imported_at": now(), "verification": "local_registered_execution",
                        "registry_id": model["id"], "report": report}
-                self.store.save_model_run(region_id, run)
                 model_version = {"id": model["id"], "version": model["version"], "sha256": model["sha256"], "target": model["target"]}
                 model_result = {"available": True, "eligibility": eligibility, "run_id": run["id"], "report": report,
                                 "reason": "Executed compatible registered model. Registration records operator-reviewed scope; it does not independently establish scientific validity."}
@@ -301,6 +300,9 @@ class WorkflowService:
         manifest = manifest_for(region, observations, cutoff, model_version)
         manifest["source_manifest_sha256"] = prepared.provenance["source_manifest_sha256"] if prepared else None
         manifest["context_sha256"] = {"climate": digest(climate), "forest_cover": digest(cover) if cover else None}
+        manifest["registry_sha256"] = digest(self.registry)
+        manifest["implementation_sha256"] = {name: file_hash(Path(__file__).with_name(name))
+                                              for name in ("workflow.py", "spatial.py", "climate.py")}
         manifest["id"] = digest({key: value for key, value in manifest.items() if key != "id"})
         result = {"schema_version": 1, "kind": "forestmind_selected_area_analysis", "created_at": now(),
                   "manifest": manifest, "stale": False, "job_id": job_id, "capabilities": capabilities,
@@ -311,7 +313,13 @@ class WorkflowService:
                   "scenarios": {"available": forecast_available, "endpoint": "/api/v1/scenarios", "causal": False},
                   "sequence": prepared.provenance if prepared else {"available": False, "reason": sequence_error}}
         with self.store.connection() as db:
-            db.execute("INSERT OR IGNORE INTO workflow_snapshots VALUES (?,?,?)", (manifest["id"], region_id, self.store._json(result)))
+            existing = db.execute("SELECT payload FROM workflow_snapshots WHERE id=?", (manifest["id"],)).fetchone()
+            if existing:
+                return json.loads(existing["payload"])
+            if model_result["available"]:
+                run["manifest"] = manifest
+                db.execute("INSERT INTO model_runs (id,region_id,payload) VALUES (?,?,?)", (run["id"], region_id, self.store._json(run)))
+            db.execute("INSERT INTO workflow_snapshots VALUES (?,?,?)", (manifest["id"], region_id, self.store._json(result)))
         return result
 
     def job(self, job_id):
