@@ -122,6 +122,12 @@ class AcquisitionService:
             return None
         job = json.loads(row[0])
         if progress:
+            plan_path = self.root / job_id / "plan.json"
+            if plan_path.exists() and job["phase"] in {"planning", "recovered", "retrying_provider"}:
+                try:
+                    job["progress"]["searched_months"] = len(_read_json(plan_path)["months"])
+                except (OSError, ValueError, KeyError):
+                    pass
             report_path = self.root / job_id / "progress.json"
             if report_path.exists():
                 try:
@@ -319,7 +325,9 @@ class AcquisitionService:
                         try:
                             result = operation()
                             if download and not result:
-                                raise OSError("Provider returned no usable cache; inspect the progress report for its failure")
+                                failures = getattr(adapter, "download_failures", [])
+                                reason = failures[0].get("reason") if failures else None
+                                raise OSError(reason or "Provider returned no usable cache")
                             return result
                         except (OSError, TimeoutError, ConnectionError) as error:
                             if attempt == LIMITS["max_auto_retries"]:
@@ -383,7 +391,7 @@ class AcquisitionService:
             job.update(status="running", phase="planning", started_at=job["started_at"] or utcnow(), error=None)
             self._save(db, job)
         try:
-            with restricted_acquisition():
+            with restricted_acquisition(check=lambda: self._check(job["id"])):
                 self._execute(job)
         except AcquisitionStopped:
             fresh = self.job(job["id"], progress=False)
@@ -396,8 +404,13 @@ class AcquisitionService:
             else:
                 # Budget exhausted during a bounded provider retry: retain any
                 # accepted months and make the need for an explicit resume clear.
-                with restricted_acquisition():
-                    self._complete_from_report(fresh, self.root / job["id"], budget_exhausted=True)
+                try:
+                    with restricted_acquisition(check=lambda: self._check(job["id"])):
+                        self._complete_from_report(fresh, self.root / job["id"], budget_exhausted=True)
+                except AcquisitionStopped:
+                    self._finish(self.job(job["id"], progress=False), "cancelled", "Cancelled before saving results")
+                except Exception as error:
+                    self._finish(self.job(job["id"], progress=False), "failed", _sanitize(public_error(error)))
         except Exception as error:
             LOG.warning("Acquisition %s failed: %s", job["id"], _sanitize(public_error(error)))
             self._finish(self.job(job["id"], progress=False), "failed", _sanitize(public_error(error)))
@@ -459,7 +472,11 @@ class AcquisitionService:
         snapshot = {"job_id": job["id"], "created_at": utcnow(), "payload": prepared.payload,
                     "provenance": prepared.provenance, "accepted_cache_paths": accepted,
                     "plan": str(directory / "plan.json"), "report": str(report_path)}
-        _atomic_json(directory / "provenance.json", snapshot)
+        # Immutable files keep an earlier committed snapshot reproducible even
+        # when cancellation interrupts an explicitly resumed batch before commit.
+        snapshot_path = directory / ("provenance-" + _digest(snapshot)[:20] + ".json")
+        snapshot["artifact_path"] = str(snapshot_path)
+        _atomic_json(snapshot_path, snapshot)
         self._check(job["id"])
         self._merge(job, prepared.payload, snapshot, report, budget_exhausted)
         if self.on_complete:
@@ -525,6 +542,7 @@ class AcquisitionService:
                          error=("Some months remain unavailable; inspect coverage and resume remaining candidates or adjust a new plan." if missing else None))
             fresh["progress"]["remaining_area_months"] = missing
             self._save(db, fresh)
+            self._schedule_outcome(db, region_id, None)
             job.update(fresh)
 
     def _finish(self, job, status, error):
@@ -533,7 +551,18 @@ class AcquisitionService:
             fresh = json.loads(db.execute("SELECT payload FROM acquisition_jobs WHERE id=?", (job["id"],)).fetchone()[0])
             fresh.update(status=status, phase=status, error=error, completed_at=utcnow(), progress=job["progress"])
             self._save(db, fresh)
+            if fresh["region_id"]:
+                self._schedule_outcome(db, fresh["region_id"], error if status in {"failed", "partial"} else None)
         LOG.info("Acquisition completed: %s", json.dumps({"job_id": job["id"], "status": status, "region_id": job["region_id"]}))
+
+    def _schedule_outcome(self, db, region_id, error):
+        row = db.execute("SELECT payload FROM acquisition_schedules WHERE region_id=?", (region_id,)).fetchone()
+        if row:
+            schedule = json.loads(row[0])
+            schedule["last_error"] = error
+            if error is None:
+                schedule["last_successful_update"] = utcnow()
+            db.execute("UPDATE acquisition_schedules SET payload=? WHERE region_id=?", (self.store._json(schedule), region_id))
 
     def area(self, region_id):
         if self.store.region(region_id) is None:
@@ -554,6 +583,11 @@ class AcquisitionService:
         request["end"] = values.get("end") or datetime.now(timezone.utc).date().isoformat()
         if values.get("start"):
             request["start"] = values["start"]
+        else:
+            end = date.fromisoformat(request["end"])
+            month_index = end.year * 12 + end.month - LIMITS["max_months"]
+            earliest = date(month_index // 12, month_index % 12 + 1, 1).isoformat()
+            request["start"] = max(request["start"], earliest)
         if values.get("max_downloads") is not None:
             request["max_downloads"] = values["max_downloads"]
         return self.submit(request, region_id=region_id)
