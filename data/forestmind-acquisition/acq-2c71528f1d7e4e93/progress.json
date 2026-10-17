@@ -15,6 +15,17 @@
           "run_index": 0,
           "stage": "acquisition",
           "started_at": "2026-10-17T17:51:17.919152+00:00",
+          "status": "rejected",
+          "download_attempted": true,
+          "reason": "AOI valid fraction 0.430420 is below 0.600000",
+          "finished_at": "2026-10-17T17:51:39.331457+00:00"
+        },
+        {
+          "scene_id": "S2A_T44PKT_20251110T052258_L2A",
+          "candidate_sha256": "f9f5c245e0de2ea036238bf5612b5b1983af0a089851beb21ad96a80a36c4cb2",
+          "run_index": 0,
+          "stage": "acquisition",
+          "started_at": "2026-10-17T17:51:39.336699+00:00",
           "status": "running",
           "download_attempted": true
         }
@@ -94,13 +105,13 @@
       "started_at": "2026-10-17T17:51:17.908819+00:00",
       "attempt_limit": 6,
       "download_limit": 2,
-      "attempts": 1,
-      "downloads": 1,
+      "attempts": 2,
+      "downloads": 2,
       "status": "running"
     }
   ],
   "status": "running",
-  "updated_at": "2026-10-17T17:51:17.919200+00:00",
+  "updated_at": "2026-10-17T17:51:39.336715+00:00",
   "accepted_cache_paths": [],
-  "report_sha256": "a98729694e418fd6ae7cd644cc622a4dfa0a6cd5d62f114e3694dcba8aa8e3af"
+  "report_sha256": "df31f6e4c1bc594d8de7a163389ad8f77115ee60b104ea2355f45c20c3db7934"
 }
