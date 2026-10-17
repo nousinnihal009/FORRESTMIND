@@ -50,7 +50,7 @@ function renderAreaMap() {
 function centerAreaOnPoint(point,label,country='') {
   const lat=Math.max(-84.9,Math.min(84.9,point[1])),lon=Math.max(-179.98,Math.min(179.98,point[0]));
   const dx=Math.min(.2,.01/Math.max(.1,Math.cos(lat*Math.PI/180)));
-  $('#area-name').value=label || 'My monitoring area';$('#area-country').value=country;
+  $('#area-name').value=(label || 'My monitoring area').slice(0,120);$('#area-country').value=country.slice(0,100);
   updateArea([lon-dx,lat-.01,lon+dx,lat+.01],true);
 }
 async function searchPlaces(event) {
@@ -94,7 +94,7 @@ function renderAcquisitionJobs() {
   const jobs=acquisition.jobs;
   $('#job-list').innerHTML=jobs.length?jobs.map(job=>{
     const p=job.progress || {},progress=jobProgress(job),active=['queued','running','retry_wait'].includes(job.status),resume=['partial','failed','cancelled','interrupted'].includes(job.status);
-    const missing=Array.isArray(p.missing_months)?p.missing_months.join(', '):p.missing_months;
+    const gaps=p.remaining_area_months || p.missing_months,missing=Array.isArray(gaps)?gaps.join(', '):gaps;
     return `<article class="acquisition-job"><div class="job-heading"><div><h3>${esc(job.request?.name || job.name || 'Monitoring update')}</h3><p>${esc(job.request?.start || '')} → ${esc(job.request?.end || '')} · ${esc(job.request?.provider || 'Recorded provider')}</p></div>${badge(job.status)}</div><p class="job-phase">${esc(job.phase || job.status)} · ${progress.accepted} / ${progress.requested || '—'} months accepted · ${numeric(p.downloads || 0)} downloads attempted</p><div class="job-progress" role="progressbar" aria-label="Accepted months for ${esc(job.request?.name || job.id)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.ratio.toFixed(0)}"><i style="width:${progress.ratio}%"></i></div>${job.error?`<p class="form-error">${esc(job.error)}</p>`:''}${missing?`<details class="job-gaps"><summary>Missing months remain explicit</summary><p>${esc(missing)}</p></details>`:''}<div class="job-actions">${active?`<button class="button secondary" data-job-cancel="${esc(job.id)}">Cancel</button>`:''}${resume?`<button class="button secondary" data-job-resume="${esc(job.id)}">Resume bounded collection</button>`:''}${job.region_id?`<button class="button primary" data-job-region="${esc(job.region_id)}">Inspect saved observations ↗</button>`:''}<details><summary>Job record</summary><code>${esc(job.id)}</code><p>Updated ${esc(job.updated_at || '')}</p><p>Cancel stops before the next bounded stage; accepted observations are preserved. Resume retains the frozen plan and starts a new download budget.</p><button type="button" class="button secondary" data-job-export="${esc(job.id)}">Export job record</button></details></div></article>`;
   }).join(''):'<p class="observations-empty">No collection jobs yet. Confirm a small area and start a bounded collection above.</p>';
   $$('[data-job-cancel]').forEach(button=>button.addEventListener('click',()=>changeJob(button,'cancel')));
@@ -132,8 +132,14 @@ async function renderMonitoringControls(id) {
 function initializeAreaMap() {
   const map=$('#area-map');
   map.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();map.setPointerCapture(event.pointerId);acquisition.map.drag={start:mapPoint(event),center:[...acquisition.map.center]};});
+  map.addEventListener('pointermove',event=>{
+    const drag=acquisition.map.drag;if(!drag||acquisition.map.mode!=='draw')return;
+    const end=mapPoint(event);let preview=$('#area-draw-preview');
+    if(!preview){preview=document.createElementNS('http://www.w3.org/2000/svg','rect');preview.id='area-draw-preview';preview.setAttribute('fill','#285d4533');preview.setAttribute('stroke','#173e32');preview.setAttribute('stroke-width','2');preview.setAttribute('stroke-dasharray','5 3');map.append(preview);}
+    preview.setAttribute('x',Math.min(drag.start[0],end[0]));preview.setAttribute('y',Math.min(drag.start[1],end[1]));preview.setAttribute('width',Math.abs(end[0]-drag.start[0]));preview.setAttribute('height',Math.abs(end[1]-drag.start[1]));
+  });
   map.addEventListener('pointerup',event=>{
-    const drag=acquisition.map.drag;if(!drag)return;acquisition.map.drag=null;const end=mapPoint(event);
+    const drag=acquisition.map.drag;if(!drag)return;acquisition.map.drag=null;$('#area-draw-preview')?.remove();const end=mapPoint(event);
     if(acquisition.map.mode==='draw'){
       const a=mapCoordinate(drag.start),b=mapCoordinate(end);if(Math.abs(end[0]-drag.start[0])<3||Math.abs(end[1]-drag.start[1])<3){areaError('Drag a rectangle, or enter exact coordinates below.');return;}
       acquisition.place=null;$('#place-selection').textContent='Drawn WGS84 rectangle. Forest cover within this boundary has not been verified.';
@@ -142,7 +148,7 @@ function initializeAreaMap() {
       const center=ForestArea.project(...drag.center,acquisition.map.zoom);acquisition.map.center=ForestArea.unproject(center[0]-(end[0]-drag.start[0]),center[1]-(end[1]-drag.start[1]),acquisition.map.zoom);acquisition.map.center[0]=Math.max(-180,Math.min(180,acquisition.map.center[0]));acquisition.map.center[1]=Math.max(-84,Math.min(84,acquisition.map.center[1]));renderAreaMap();
     }
   });
-  map.addEventListener('pointercancel',()=>{acquisition.map.drag=null;});
+  map.addEventListener('pointercancel',()=>{acquisition.map.drag=null;$('#area-draw-preview')?.remove();});
   map.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','+','-','='].includes(event.key))return;event.preventDefault();if(['+','-','='].includes(event.key)){acquisition.map.zoom=Math.max(1,Math.min(18,acquisition.map.zoom+(event.key==='-'?-1:1)));}else{const center=ForestArea.project(...acquisition.map.center,acquisition.map.zoom);center[0]+=event.key==='ArrowLeft'?-100:event.key==='ArrowRight'?100:0;center[1]+=event.key==='ArrowUp'?-80:event.key==='ArrowDown'?80:0;acquisition.map.center=ForestArea.unproject(...center,acquisition.map.zoom);acquisition.map.center[0]=Math.max(-180,Math.min(180,acquisition.map.center[0]));acquisition.map.center[1]=Math.max(-84,Math.min(84,acquisition.map.center[1]));}renderAreaMap();});
   $('#draw-area').addEventListener('click',()=>{acquisition.map.mode=acquisition.map.mode==='draw'?'pan':'draw';renderAreaMap();});
   $('#area-zoom-in').addEventListener('click',()=>{acquisition.map.zoom=Math.min(18,acquisition.map.zoom+1);renderAreaMap();});
