@@ -15,6 +15,8 @@ def main():
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true", help="Reload on source changes during development")
     args = parser.parse_args()
+    if args.host not in {"127.0.0.1", "localhost", "::1"}:
+        parser.error("Hosted access is disabled: use a loopback host. Multi-user authentication and isolation require a separate deployment gate.")
     try:
         import uvicorn
     except ImportError:
