@@ -64,7 +64,7 @@ def test_real_history_ingestion_budget_resume_dedupe_and_atomic_snapshot(tmp_pat
     assert len(snapshot["accepted_cache_paths"]) == 2
     assert snapshot["payload"]["synthetic"] is False
     assert worker.store.analysis(region_id)["provenance"]["mode"] == "satellite_acquisition"
-    assert worker.store.analysis(region_id)["forecast"]["available"] is False
+    assert worker.store.analysis(region_id)["forecast"]["points"] == []
     assert not worker.run_once()
 
 
@@ -211,3 +211,57 @@ def test_api_validation_status_and_refresh_missing_area(tmp_path):
     assert client.post(f"/api/v1/acquisition/jobs/{job_id}/cancel").json()["status"] == "cancelled"
     assert client.post("/api/v1/regions/missing/refresh").status_code == 404
     assert client.get("/api/v1/acquisition/capabilities").json()["limits"]["concurrency"] == 1
+
+
+def test_partial_catalog_plan_resumes_without_repeating_completed_search(tmp_path):
+    worker, state, factory = service(tmp_path)
+    job = worker.submit(request(max_downloads=2))
+    def cancel_factory(**kwargs):
+        adapter = factory(**kwargs)
+        original = adapter.search
+        def cancel_after_search(*args, **kw):
+            result = original(*args, **kw)
+            worker.cancel(job["id"])
+            return result
+        adapter.search = cancel_after_search
+        return adapter
+    worker.adapter_factory = cancel_factory
+    worker.run_once()
+    assert worker.job(job["id"])["status"] == "cancelled"
+    assert len(state["searches"]) == 1
+    worker.adapter_factory = factory
+    worker.resume(job["id"])
+    worker.run_once()
+    assert worker.job(job["id"])["status"] == "completed"
+    assert len(state["searches"]) == 2
+    assert state["downloads"] == ["jan", "feb"]
+
+
+def test_worker_lease_prevents_duplicate_process_owner_and_shutdown_releases(tmp_path):
+    worker, _, factory = service(tmp_path)
+    worker.start()
+    second = AcquisitionService(Store(tmp_path / "test.db"), adapter_factory=factory)
+    try:
+        with pytest.raises(RuntimeError, match="Another acquisition worker"):
+            second.start()
+    finally:
+        worker.stop()
+    second.start()
+    second.stop()
+    assert not second.thread.is_alive()
+
+
+def test_tampered_plan_does_not_corrupt_saved_observations(tmp_path):
+    worker, _, _ = service(tmp_path)
+    job = worker.submit(request())
+    worker.run_once()
+    result = worker.job(job["id"])
+    before = worker.store.region(result["region_id"])
+    plan_path = worker.root / job["id"] / "plan.json"
+    plan = json.loads(plan_path.read_text())
+    plan["request"]["bbox"][0] = 0
+    plan_path.write_text(json.dumps(plan))
+    worker.resume(job["id"])
+    worker.run_once()
+    assert worker.job(job["id"])["status"] == "failed"
+    assert worker.store.region(result["region_id"]) == before
