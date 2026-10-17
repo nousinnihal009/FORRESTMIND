@@ -11,6 +11,7 @@ import re
 
 
 _restricted = ContextVar("forestmind_restricted_acquisition", default=False)
+_acquisition_check = ContextVar("forestmind_acquisition_check", default=None)
 CATALOG_HOSTS = {"earth-search.aws.element84.com", "planetarycomputer.microsoft.com"}
 ASSET_HOSTS = {"e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com",
                "sentinel-cogs.s3.us-west-2.amazonaws.com", "sentinel-cogs.s3.amazonaws.com",
@@ -27,16 +28,20 @@ def validate_destination(href: str, *, catalog=False) -> str:
 
 
 @contextmanager
-def restricted_acquisition():
+def restricted_acquisition(check=None):
     """Web workers restrict provider destinations; research CLI keeps explicit local inputs."""
     token = _restricted.set(True)
+    check_token = _acquisition_check.set(check)
     try:
         yield
     finally:
         _restricted.reset(token)
+        _acquisition_check.reset(check_token)
 
 
 def open_catalog(url: str, timeout_seconds: float):
+    if _acquisition_check.get():
+        _acquisition_check.get()()
     if _restricted.get():
         validate_destination(url, catalog=True)
     from pystac_client import Client
@@ -87,6 +92,8 @@ class AssetSigner:
 def open_raster(href: str, timeout_seconds: float = 30.0):
     import rasterio
 
+    if _acquisition_check.get():
+        _acquisition_check.get()()
     if _restricted.get():
         validate_destination(href)
 
@@ -104,6 +111,8 @@ def open_raster(href: str, timeout_seconds: float = 30.0):
         ):
             with rasterio.open(href) as source:
                 yield source
+            if _acquisition_check.get():
+                _acquisition_check.get()()
     finally:
         error_logger.removeFilter(token_filter)
 
