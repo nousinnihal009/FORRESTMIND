@@ -84,11 +84,13 @@ def test_refresh_skips_saved_months_and_preserves_original_records(tmp_path):
     after = worker.store.region(region_id)[1]
     assert after[:2] == before and len(after) == 3
     assert state["downloads"] == ["jan", "feb", "mar"]
+    assert len(state["searches"]) == 3  # saved months do not consume catalog requests
     again = worker.refresh(region_id, {"end": "2024-03-31"})
     worker.run_once()
     assert worker.job(again["id"])["status"] == "completed"
     assert worker.store.region(region_id)[1] == after
     assert state["downloads"] == ["jan", "feb", "mar"]
+    assert len(state["searches"]) == 3
 
 
 def test_restart_recovers_claimed_job_and_resumes_frozen_progress(tmp_path):
