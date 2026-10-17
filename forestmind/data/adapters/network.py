@@ -3,13 +3,42 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 import logging
 import re
 
 
+_restricted = ContextVar("forestmind_restricted_acquisition", default=False)
+CATALOG_HOSTS = {"earth-search.aws.element84.com", "planetarycomputer.microsoft.com"}
+ASSET_HOSTS = {"e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com",
+               "sentinel-cogs.s3.us-west-2.amazonaws.com", "sentinel-cogs.s3.amazonaws.com",
+               "sentinel2l2a01.blob.core.windows.net", "sentinel2l2a02.blob.core.windows.net",
+               "sentinel1rtc.blob.core.windows.net", "landsateuwest.blob.core.windows.net"}
+
+
+def validate_destination(href: str, *, catalog=False) -> str:
+    parsed = urlsplit(href)
+    if (parsed.scheme != "https" or parsed.hostname not in (CATALOG_HOSTS if catalog else ASSET_HOSTS)
+            or parsed.username or parsed.password or parsed.port not in (None, 443) or parsed.fragment):
+        raise ValueError("Acquisition destination is outside the documented public provider allowlist")
+    return href
+
+
+@contextmanager
+def restricted_acquisition():
+    """Web workers restrict provider destinations; research CLI keeps explicit local inputs."""
+    token = _restricted.set(True)
+    try:
+        yield
+    finally:
+        _restricted.reset(token)
+
+
 def open_catalog(url: str, timeout_seconds: float):
+    if _restricted.get():
+        validate_destination(url, catalog=True)
     from pystac_client import Client
     from pystac_client.stac_api_io import StacApiIO
 
@@ -33,6 +62,9 @@ class AssetSigner:
     def sign(self, href: str) -> str:
         import requests
 
+        if _restricted.get():
+            validate_destination(href)
+
         parsed = urlsplit(href)
         if not (parsed.hostname or "").endswith(".blob.core.windows.net"):
             return href
@@ -54,6 +86,9 @@ class AssetSigner:
 @contextmanager
 def open_raster(href: str, timeout_seconds: float = 30.0):
     import rasterio
+
+    if _restricted.get():
+        validate_destination(href)
 
     # GDAL may log a signed filename before raising. Redact at its Python
     # logging boundary, not only in the adapter's final exception handler.
