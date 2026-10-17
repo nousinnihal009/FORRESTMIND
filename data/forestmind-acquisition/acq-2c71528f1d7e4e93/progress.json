@@ -1,0 +1,106 @@
+{
+  "kind": "forestmind_history_report",
+  "schema_version": 2,
+  "plan_sha256": "6fe586a155cf02e4a069d0e2a5115fef16ca88c68356ffaea7117c3eae6f3840",
+  "cache_dir": "C:\\CODES\\project_nousin\\FORRESTMIND\\data\\forestmind-acquisition\\acq-2c71528f1d7e4e93\\cache",
+  "created_at": "2026-10-17T17:51:17.908091+00:00",
+  "months": [
+    {
+      "month": "2025-11",
+      "accepted": null,
+      "attempts": [
+        {
+          "scene_id": "S2B_T43PHN_20251103T051329_L2A",
+          "candidate_sha256": "88a7acadb09783988780591add2e3c752b152f7f5f320f220c1ccf1f8c8c97e1",
+          "run_index": 0,
+          "stage": "acquisition",
+          "started_at": "2026-10-17T17:51:17.919152+00:00",
+          "status": "running",
+          "download_attempted": true
+        }
+      ],
+      "status": "pending"
+    },
+    {
+      "month": "2025-12",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    },
+    {
+      "month": "2026-01",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    },
+    {
+      "month": "2026-02",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    },
+    {
+      "month": "2026-03",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    },
+    {
+      "month": "2026-04",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    },
+    {
+      "month": "2026-05",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    },
+    {
+      "month": "2026-06",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    },
+    {
+      "month": "2026-07",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    },
+    {
+      "month": "2026-08",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    },
+    {
+      "month": "2026-09",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    },
+    {
+      "month": "2026-10",
+      "accepted": null,
+      "attempts": [],
+      "status": "pending"
+    }
+  ],
+  "runs": [
+    {
+      "run_index": 0,
+      "started_at": "2026-10-17T17:51:17.908819+00:00",
+      "attempt_limit": 6,
+      "download_limit": 2,
+      "attempts": 1,
+      "downloads": 1,
+      "status": "running"
+    }
+  ],
+  "status": "running",
+  "updated_at": "2026-10-17T17:51:17.919200+00:00",
+  "accepted_cache_paths": [],
+  "report_sha256": "a98729694e418fd6ae7cd644cc622a4dfa0a6cd5d62f114e3694dcba8aa8e3af"
+}
