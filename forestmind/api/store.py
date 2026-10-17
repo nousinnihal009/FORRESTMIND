@@ -35,7 +35,10 @@ class Store:
                     episode TEXT PRIMARY KEY, region_id TEXT NOT NULL REFERENCES regions(id), payload TEXT NOT NULL);
             """)
             connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (?,?)", (1, datetime.now(timezone.utc).isoformat()))
-            connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (?,?)", (2, datetime.now(timezone.utc).isoformat()))
+            added = connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (?,?)", (2, datetime.now(timezone.utc).isoformat())).rowcount
+            if added:
+                for row in connection.execute("SELECT result FROM analyses").fetchall():
+                    self._save_analysis(connection, json.loads(row[0]))
 
     @contextmanager
     def connection(self):
