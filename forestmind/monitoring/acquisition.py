@@ -92,6 +92,7 @@ class AcquisitionService:
         self.wake_event = threading.Event()
         self.thread = None
         self._lease = None
+        self.worker_status = "not_started"
         with store.connection() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS acquisition_jobs (
@@ -135,6 +136,8 @@ class AcquisitionService:
                     job["progress"].update(self._progress(report))
                 except (OSError, ValueError, KeyError):
                     pass
+            job["progress"]["candidate_downloads"] = job["progress"]["downloads"]
+            job["progress"]["downloads"] = job["download_attempts"]
         return job
 
     def jobs(self, region_id=None):
@@ -225,9 +228,12 @@ class AcquisitionService:
             return
         # OS lock is released automatically on a crash; prevents two processes
         # from treating the same running job as recoverable simultaneously.
-        lease = (self.root / "worker.lock").open("a+b")
+        lock_path = self.root / "worker.lock"
+        lease = lock_path.open("a+b")
         lease.seek(0)
-        if lease.read(1) == b"":
+        # Windows denies reads of a locked byte; stat is safe before attempting
+        # the nonblocking lock and does not touch the existing owner's byte.
+        if lock_path.stat().st_size == 0:
             lease.write(b"0")
             lease.flush()
         lease.seek(0)
@@ -241,11 +247,13 @@ class AcquisitionService:
                 fcntl.flock(lease.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             lease.close()
+            self.worker_status = "another_local_worker"
             raise RuntimeError("Another acquisition worker owns this database; run one service process") from None
         self._lease = lease
         self.stop_event.clear()
         self.recover()
         self.thread = threading.Thread(target=self._loop, name="forestmind-acquisition", daemon=True)
+        self.worker_status = "running"
         self.thread.start()
 
     def stop(self):
@@ -269,6 +277,7 @@ class AcquisitionService:
             if self._lease:
                 self._lease.close()
                 self._lease = None
+            self.worker_status = "stopped"
 
     def _check(self, job_id):
         job = self.job(job_id, progress=False)
@@ -429,6 +438,11 @@ class AcquisitionService:
             saved = self.store.region(job["region_id"])
             months = {row["date"][:7] for row in saved[1]} if saved else set()
             selected = [row for row in plan["months"] if row["month"] not in months]
+            already_saved = [row["month"] for row in plan["months"] if row["month"] in months]
+            with self.store.connection() as db:
+                fresh = json.loads(db.execute("SELECT payload FROM acquisition_jobs WHERE id=?", (job["id"],)).fetchone()[0])
+                fresh["progress"]["already_saved_months"] = already_saved
+                self._save(db, fresh)
             # Existing month windows still appear as explicit skipped gaps in the
             # acquisition report; the coverage API reports the combined history.
             for row in plan["months"]:
@@ -638,6 +652,7 @@ class AcquisitionService:
     def capabilities(self):
         return {"provider": "earth-search", "collection": "sentinel-2-c1-l2a", "sensor": "Sentinel-2 optical",
                 "limits": LIMITS, "geometry": "WGS84 rectangle; no antimeridian crossing or polar AOIs",
+                "worker_status": self.worker_status,
                 "attribution": "Copernicus Sentinel data, served by Element 84 Earth Search",
                 "source_url": "https://earth-search.aws.element84.com/v1",
                 "storage_bytes": sum(path.stat().st_size for path in self.root.rglob("*") if path.is_file()),
