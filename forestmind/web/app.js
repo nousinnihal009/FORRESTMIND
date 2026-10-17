@@ -43,11 +43,12 @@ async function api(path, options = {}) {
 }
 function route() {
   let name = location.hash.slice(1) || 'overview';
-  if (!['overview','monitoring','scenarios','methods'].includes(name)) name = 'overview';
+  if (!['overview','explore','monitoring','scenarios','methods'].includes(name)) name = 'overview';
   $$('.view').forEach(el => {el.hidden = el.id !== 'view-' + name;});
   $$('[data-route]').forEach(el => {el.classList.toggle('active', el.dataset.route === name); if (el.dataset.route === name) el.setAttribute('aria-current','page'); else el.removeAttribute('aria-current');});
-  $('#page-name').textContent = {overview:'Overview',monitoring:'Monitoring regions',scenarios:'Scenario lab',methods:'Data & methods'}[name];
+  $('#page-name').textContent = {overview:'Overview',explore:'Find a forest',monitoring:'Monitoring regions',scenarios:'Scenario lab',methods:'Data & methods'}[name];
   if (name === 'monitoring') renderTable();
+  if (name === 'explore' && typeof renderAreaMap === 'function') renderAreaMap();
 }
 async function loadWorkspace(selectId) {
   $('#error-banner').hidden = true;
@@ -64,7 +65,7 @@ async function loadWorkspace(selectId) {
     if (regions.some(r => r.id === previous)) $('#scenario-region').value = previous;
     const id = typeof selectId === 'string' ? selectId : state.selected || regions[0]?.id;
     if (id) await selectRegion(id);
-    else {$('#detail-title').textContent = 'No regions yet'; $('#detail-body').innerHTML = '<p class="observations-empty">Import observations to start monitoring.</p>'; renderMap();}
+    else {$('#detail-title').textContent = 'No regions yet'; $('#detail-body').innerHTML = '<p class="observations-empty"><a class="text-link" href="#explore">Find a forest and collect real observations</a>, or import an existing record to start monitoring.</p>'; renderMap();}
   } catch (error) {reportError(error);}
 }
 function renderMetrics() {
@@ -81,7 +82,7 @@ function renderMetrics() {
 function renderPriorities() {
   if (!state.overview) return;
   const regions = [...state.overview.regions].sort((a,b) => (b.alert_count || 0) - (a.alert_count || 0) || (a.health_score ?? 100) - (b.health_score ?? 100)).slice(0,3);
-  $('#investigations').innerHTML = regions.map((r,i) => `<button class="priority-card ${r.id === state.selected ? 'selected' : ''}" data-region="${esc(r.id)}"><div class="priority-card-top"><h3>${esc(r.name)}</h3>${badge(r.status)}</div><p>${r.alert_count ? `${r.alert_count} signals flagged for review. Inspect the observed changes and competing explanations.` : 'No active alert. Review condition and observation coverage.'}</p><div class="priority-card-bottom"><span>${isDemo(r) ? 'SYNTHETIC OBSERVATIONS' : 'IMPORTED OBSERVATIONS'}</span><span>Investigate ↗</span></div></button>`).join('') || '<p class="no-results">No monitored regions.</p>';
+  $('#investigations').innerHTML = regions.map((r,i) => `<button class="priority-card ${r.id === state.selected ? 'selected' : ''}" data-region="${esc(r.id)}"><div class="priority-card-top"><h3>${esc(r.name)}</h3>${badge(r.status)}</div><p>${r.alert_count ? `${r.alert_count} signals flagged for review. Inspect the observed changes and competing explanations.` : 'No active alert. Review condition and observation coverage.'}</p><div class="priority-card-bottom"><span>${isDemo(r) ? 'SYNTHETIC OBSERVATIONS' : 'OBSERVED RECORD'}</span><span>Investigate ↗</span></div></button>`).join('') || '<p class="no-results">No monitored regions.</p>';
   $$('[data-region]', $('#investigations')).forEach(el => el.addEventListener('click', () => selectRegion(el.dataset.region)));
 }
 function renderMap() {
@@ -118,6 +119,7 @@ function renderMap() {
 async function selectRegion(id) {
   const request=++state.request;
   state.selected=id;
+  if ($('#scenario-region').value !== id) {$('#scenario-region').value=id;invalidateScenario();}
   $('#detail-title').textContent=state.overview?.regions.find(r=>r.id===id)?.name || 'Loading region…';
   $('#run-analysis').disabled=true;$('#export-region').disabled=true;
   $('#detail-body').innerHTML='<div class="chart-skeleton skeleton" aria-label="Loading analysis"></div>';
@@ -170,11 +172,16 @@ function renderDetail() {
     const s=r.resilience;
     $('#detail-body').innerHTML=`<div class="resilience-grid"><div class="signal-card"><small>Lag-1 autocorrelation</small><strong>${numeric(s.ar1,3)}</strong><p>Persistence in the prepared vegetation series. A statistical indicator, not a tipping-point probability.</p></div><div class="signal-card"><small>Residual variance</small><strong>${numeric(s.variance,4)}</strong><p>Variability after preprocessing. Interpretation depends on record quality and length.</p></div><div class="signal-note"><h3>${esc(String(s.status || 'Insufficient evidence').replaceAll('_', ' '))}</h3><p>${esc(Array.isArray(s.evidence)?s.evidence.join(' '):s.evidence || '')}</p><p style="margin-top:10px">${esc(s.trend || '')}</p></div></div><div class="evidence-disclaimer">${esc(s.caveat || 'These exploratory indicators cannot establish an irreversible ecological tipping point.')}</div>`;
   }else if(state.tab==='observations'){
-    $('#detail-body').innerHTML=`<div class="observed-alerts">${(r.alerts||[]).map(a=>`<article class="observation-alert"><div>${badge(a.severity)}<strong>${esc(a.title)}</strong><small>${esc(dateLabel(a.date))}</small></div><p>${esc(a.message)}</p></article>`).join('') || '<p class="chart-caveat">No active alert in the current assessment.</p>'}</div><div class="observations-caption"><strong>The observation record</strong><span>${isDemo(r)?'Synthetic measurements':'User-provided measurements'} · — denotes missing data</span></div><div class="observation-table table-scroll"><table><thead><tr><th>Date</th><th>NDVI</th><th>NDMI</th><th>NBR</th><th>Rainfall anomaly (σ)</th><th>Heat anomaly (°C)</th><th>Valid pixels</th><th>Index / 100</th></tr></thead><tbody>${[...r.observations].reverse().map(o=>`<tr><td>${esc(dateLabel(o.date))}</td><td>${numeric(o.ndvi,3)}</td><td>${numeric(o.ndmi,3)}</td><td>${numeric(o.nbr,3)}</td><td>${numeric(o.precipitation_anomaly,2)}</td><td>${numeric(o.temperature_anomaly,2)}</td><td>${pct(o.valid_fraction)}</td><td>${numeric(o.health_score,1)}</td></tr>`).join('')}</tbody></table></div><div class="detail-foot"><span>${esc(r.provenance?.source)}</span><span>${esc(r.provenance?.geometry_note || '')}</span></div>`;
+    $('#detail-body').innerHTML=`<div class="observed-alerts">${(r.alerts||[]).map(a=>`<article class="observation-alert"><div>${badge(a.severity)}<strong>${esc(a.title)}</strong><small>${esc(dateLabel(a.date))}</small></div><p>${esc(a.message)}</p></article>`).join('') || '<p class="chart-caveat">No active alert in the current assessment.</p>'}</div><div class="observations-caption"><strong>The observation record</strong><span>${isDemo(r)?'Synthetic measurements':r.provenance?.acquisition?'Acquired satellite observations':'Observed / user-provided measurements'} · — denotes missing data</span></div><div class="observation-table table-scroll"><table><thead><tr><th>Date</th><th>NDVI</th><th>NDMI</th><th>NBR</th><th>Rainfall anomaly (σ)</th><th>Heat anomaly (°C)</th><th>Valid pixels</th><th>Index / 100</th></tr></thead><tbody>${[...r.observations].reverse().map(o=>`<tr><td>${esc(dateLabel(o.date))}</td><td>${numeric(o.ndvi,3)}</td><td>${numeric(o.ndmi,3)}</td><td>${numeric(o.nbr,3)}</td><td>${numeric(o.precipitation_anomaly,2)}</td><td>${numeric(o.temperature_anomaly,2)}</td><td>${pct(o.valid_fraction)}</td><td>${numeric(o.health_score,1)}</td></tr>`).join('')}</tbody></table></div><div class="detail-foot"><span>${esc(r.provenance?.source)}</span><span>${esc(r.provenance?.geometry_note || '')}</span></div><div id="alert-lifecycle"></div>`;
+    if(typeof renderAlertLifecycle==='function')renderAlertLifecycle(r);
   }else if(state.tab==='coverage'){
     renderCoverage(r.id);
   }else if(state.tab==='models'){
     renderModelRuns(r.id);
+  }else if(state.tab==='monitor'){
+    renderMonitoringControls(r.id);
+  }else if(state.tab==='workflow'){
+    renderWorkflow(r.id);
   }else{
     renderEvaluation(r.id);
   }
@@ -194,7 +201,7 @@ function renderTable() {
   if(!state.overview)return;
   const query=$('#region-search').value.toLowerCase(),filter=$('#region-filter').value;
   const rows=state.overview.regions.filter(r=>`${r.name} ${r.country}`.toLowerCase().includes(query)&&(filter==='all'||filter==='alerts'&&r.alert_count>0||filter==='imported'&&!isDemo(r)||filter==='demo'&&isDemo(r)));
-  $('#region-table').innerHTML=rows.map(r=>`<tr><td><strong>${esc(r.name)}</strong><small>${esc(r.country)} · ${numeric(r.area_km2)} km²</small></td><td><div class="index-cell"><strong>${numeric(r.health_score,1)}</strong><div class="tiny-track"><i style="width:${Math.max(0,Math.min(100,r.health_score || 0))}%"></i></div></div></td><td>${badge(r.status)}</td><td>${esc(dateLabel(r.latest_date))}</td><td>${isDemo(r)?'Synthetic':'Imported'}<small>${esc(r.quality || 'Coverage recorded')}</small></td><td>${r.alert_count || '—'}</td><td><button class="button secondary" data-inspect="${esc(r.id)}">Inspect ↗</button></td></tr>`).join('') || '<tr><td colspan="7" class="no-results">No regions match these filters.</td></tr>';
+  $('#region-table').innerHTML=rows.map(r=>`<tr><td><strong>${esc(r.name)}</strong><small>${esc(r.country)} · ${numeric(r.area_km2)} km²</small></td><td><div class="index-cell"><strong>${numeric(r.health_score,1)}</strong><div class="tiny-track"><i style="width:${Math.max(0,Math.min(100,r.health_score || 0))}%"></i></div></div></td><td>${badge(r.status)}</td><td>${esc(dateLabel(r.latest_date))}</td><td>${isDemo(r)?'Synthetic':'Observed record'}<small>${esc(r.quality || 'Coverage recorded')}</small></td><td>${r.alert_count || '—'}</td><td><button class="button secondary" data-inspect="${esc(r.id)}">Inspect ↗</button></td></tr>`).join('') || '<tr><td colspan="7" class="no-results">No regions match these filters.</td></tr>';
   $('#table-footer').textContent=`Showing ${rows.length} of ${state.overview.regions.length} regions. Condition values are proxy indices, not calibrated ecological probabilities.`;
   $$('[data-inspect]').forEach(el=>el.addEventListener('click',async()=>{location.hash='overview';await selectRegion(el.dataset.inspect);$('#region-detail').scrollIntoView({behavior:'smooth',block:'start'});}));
 }
@@ -261,7 +268,7 @@ $('#export-region').addEventListener('click',async()=>{if(!state.selected)return
 $('#scenario-form').addEventListener('submit',runScenario);
 $$('input[type="range"]').forEach(el=>el.addEventListener('input',()=>{$('#'+el.id+'-output').textContent=el.value+'%';}));
 function invalidateScenario(){if(state.scenario){state.scenario=null;$('#scenario-results').innerHTML='<div class="empty-state"><h2>Assumptions changed</h2><p>Compare trajectories again to evaluate the selected region with these inputs.</p></div>';}}
-$('#scenario-region').addEventListener('change',invalidateScenario);
+$('#scenario-region').addEventListener('change',()=>{invalidateScenario();selectRegion($('#scenario-region').value);});
 $$('input[type="range"]').forEach(el=>el.addEventListener('input',invalidateScenario));
 $$('.import-trigger').forEach(el=>el.addEventListener('click',openImport));
 $('#close-import').addEventListener('click',()=>$('#import-dialog').close());
