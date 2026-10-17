@@ -303,9 +303,10 @@ class AcquisitionService:
             job["download_attempts"] += 1
             self._save(db, job)
 
-    def _guarded_factory(self, job_id, frozen_months=None):
+    def _guarded_factory(self, job_id, frozen_months=None, skip_months=None):
         service = self
         frozen_months = frozen_months or {}
+        skip_months = skip_months or set()
         def factory(**kwargs):
             adapter = service.adapter_factory(**kwargs)
             class Guard:
@@ -321,6 +322,8 @@ class AcquisitionService:
                     if start[:7] in frozen_months:
                         # Reconstruct precisely the completed frozen candidate set.
                         return [_scene(item) for item in frozen_months[start[:7]]["candidates"]]
+                    if start[:7] in skip_months:
+                        return []
                     return self._retry(lambda: adapter.search(bbox, start, end, **kw), download=False)
 
                 def download(self, *args, **kw):
@@ -368,7 +371,9 @@ class AcquisitionService:
             # requests only previously unfinished windows; then atomically adopts it.
             temporary = directory / "planning-resume.json"
             temporary.unlink(missing_ok=True)
-            plan = create_history_plan(request, temporary, adapter_factory=self._guarded_factory(job["id"], prior))
+            saved = self.store.region(job["region_id"]) if job["region_id"] else None
+            skip = {row["date"][:7] for row in saved[1]} if saved else set()
+            plan = create_history_plan(request, temporary, adapter_factory=self._guarded_factory(job["id"], prior, skip))
             plan["created_at"] = raw["created_at"]
             plan["months"] = [prior.get(row["month"], row) for row in plan["months"]]
             plan["plan_sha256"] = _digest({k: v for k, v in plan.items() if k != "plan_sha256"})
@@ -429,7 +434,9 @@ class AcquisitionService:
         directory = self.root / job["id"]
         directory.mkdir(parents=True, exist_ok=True)
         self._check(job["id"])
-        factory = self._guarded_factory(job["id"])
+        saved = self.store.region(job["region_id"]) if job["region_id"] else None
+        skip = {row["date"][:7] for row in saved[1]} if saved else set()
+        factory = self._guarded_factory(job["id"], skip_months=skip)
         plan = self._plan(job, directory, factory)
         # Refresh uses saved months to drop unnecessary candidate searches from a
         # new plan before any execution. Never alter a plan that has a report.
@@ -470,7 +477,7 @@ class AcquisitionService:
             self._finish(job, "partial", "Download budget exhausted; explicitly resume to authorize another bounded batch")
             return
         report = _read_json(report_path)
-        job["progress"] = self._progress(report)
+        job["progress"].update(self._progress(report))
         accepted = report["accepted_cache_paths"]
         if not accepted:
             self._finish(job, "partial" if budget_exhausted else "failed",
