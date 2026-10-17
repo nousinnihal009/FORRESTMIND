@@ -7,7 +7,16 @@
   "months": [
     {
       "month": "2025-11",
-      "accepted": null,
+      "accepted": {
+        "scene_id": "S2A_T44PKT_20251110T052258_L2A",
+        "candidate_sha256": "f9f5c245e0de2ea036238bf5612b5b1983af0a089851beb21ad96a80a36c4cb2",
+        "path": "C:\\CODES\\project_nousin\\FORRESTMIND\\data\\forestmind-acquisition\\acq-2c71528f1d7e4e93\\cache\\sentinel2\\S2A_T44PKT_20251110T052258_L2A_df0b4b31.npz",
+        "sha256": "219cbfbef9a42adc82ecf254cea0f87a18c8210d1839b2282e8bfeff75324a8e",
+        "datetime": "2025-11-10T05:25:58.540000+00:00",
+        "valid_fraction": 0.959228515625,
+        "valid_samples": 3929,
+        "total_samples": 4096
+      },
       "attempts": [
         {
           "scene_id": "S2B_T43PHN_20251103T051329_L2A",
@@ -26,77 +35,91 @@
           "run_index": 0,
           "stage": "acquisition",
           "started_at": "2026-10-17T17:51:39.336699+00:00",
-          "status": "running",
-          "download_attempted": true
+          "status": "accepted",
+          "download_attempted": true,
+          "valid_fraction": 0.959228515625,
+          "cache_sha256": "219cbfbef9a42adc82ecf254cea0f87a18c8210d1839b2282e8bfeff75324a8e",
+          "finished_at": "2026-10-17T17:51:59.743626+00:00"
         }
       ],
-      "status": "pending"
+      "status": "accepted"
     },
     {
       "month": "2025-12",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No quality-passing acquisition within the available candidates and budgets"
     },
     {
       "month": "2026-01",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No quality-passing acquisition within the available candidates and budgets"
     },
     {
       "month": "2026-02",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No quality-passing acquisition within the available candidates and budgets"
     },
     {
       "month": "2026-03",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No quality-passing acquisition within the available candidates and budgets"
     },
     {
       "month": "2026-04",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No quality-passing acquisition within the available candidates and budgets"
     },
     {
       "month": "2026-05",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No quality-passing acquisition within the available candidates and budgets"
     },
     {
       "month": "2026-06",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No quality-passing acquisition within the available candidates and budgets"
     },
     {
       "month": "2026-07",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No quality-passing acquisition within the available candidates and budgets"
     },
     {
       "month": "2026-08",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No quality-passing acquisition within the available candidates and budgets"
     },
     {
       "month": "2026-09",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No quality-passing acquisition within the available candidates and budgets"
     },
     {
       "month": "2026-10",
       "accepted": null,
       "attempts": [],
-      "status": "pending"
+      "status": "missing",
+      "reason": "No eligible catalog candidates"
     }
   ],
   "runs": [
@@ -107,11 +130,15 @@
       "download_limit": 2,
       "attempts": 2,
       "downloads": 2,
-      "status": "running"
+      "status": "incomplete",
+      "finished_at": "2026-10-17T17:51:59.787071+00:00",
+      "stop_reason": "budget_exhausted"
     }
   ],
-  "status": "running",
-  "updated_at": "2026-10-17T17:51:39.336715+00:00",
-  "accepted_cache_paths": [],
-  "report_sha256": "df31f6e4c1bc594d8de7a163389ad8f77115ee60b104ea2355f45c20c3db7934"
+  "status": "incomplete",
+  "updated_at": "2026-10-17T17:51:59.787082+00:00",
+  "accepted_cache_paths": [
+    "C:\\CODES\\project_nousin\\FORRESTMIND\\data\\forestmind-acquisition\\acq-2c71528f1d7e4e93\\cache\\sentinel2\\S2A_T44PKT_20251110T052258_L2A_df0b4b31.npz"
+  ],
+  "report_sha256": "638bf7dd573c6fc6371169919afbfe7a31c94c902e7180e3f5c4d94c6672295c"
 }
