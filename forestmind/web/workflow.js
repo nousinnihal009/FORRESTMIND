@@ -7,19 +7,27 @@ function workflowCapabilities(items) {
 }
 function renderSpatialEvidence(data) {
   if(!data)return '';
-  const grid=data.grid || data.change_grid || data.ndvi_change_grid || data.cells,values=Array.isArray(grid)&&Array.isArray(grid[0])?grid:null;
+  const grid=data.layers?.ndvi?.values || data.grid || data.change_grid || data.ndvi_change_grid || data.cells,values=Array.isArray(grid)&&Array.isArray(grid[0])?grid:null;
   let image='';
   if(values){
     const h=values.length,w=values[0].length;
     const color=value=>typeof value!=='number'||!Number.isFinite(value)?'#dce2d8':value<-.2?'#a34f32':value<-.05?'#d2aa67':value>.2?'#296947':value>.05?'#87a86c':'#e7eadc';
     image=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Observed spatial index change, north at top. Missing pixels are gray.">${values.flatMap((row,y)=>row.map((value,x)=>`<rect x="${x}" y="${y}" width="1" height="1" fill="${color(value)}"><title>${typeof value==='number'?value.toFixed(3):'Missing or masked'}</title></rect>`)).join('')}</svg><div class="spatial-grid-legend"><span style="--swatch:#a34f32">Larger index decrease</span><span style="--swatch:#e7eadc">Small observed change</span><span style="--swatch:#296947">Larger index increase</span><span style="--swatch:#dce2d8">Missing / masked</span></div>`;
   }
-  return `<section class="spatial-evidence"><h3>Spatial observation evidence</h3><p class="form-help">${esc(data.reason || data.caveat || 'Observed index changes describe sampled pixels. They do not establish land-cover class, forest extent, or a calibrated future risk.')}</p>${image}<details class="model-hashes"><summary>Spatial method, dates, geometry and source details</summary><pre>${esc(JSON.stringify(data,null,2))}</pre></details></section>`;
+  return `<section class="spatial-evidence"><h3>Spatial observation evidence${values?' · NDVI change':''}</h3><p class="form-help">${esc(data.reason || data.caveat || 'Observed index changes describe sampled pixels. They do not establish land-cover class, forest extent, or a calibrated future risk.')}</p>${values?`<p class="form-help">${esc(data.start)} → ${esc(data.end)} · latest minus first · north at top · valid fraction ${pct(data.layers?.ndvi?.valid_fraction)} · mean change ${numeric(data.layers?.ndvi?.mean_delta,3)}</p>`:''}${image}<p class="form-help">${esc((data.limitations || []).join(' '))}</p><details class="model-hashes"><summary>Spatial method, dates, geometry and source details</summary><pre>${esc(JSON.stringify(data,null,2))}</pre></details></section>`;
+}
+function renderClimateContext(data) {
+  if(!data?.available)return '';
+  return `<section class="spatial-evidence"><h3>Climate context · ${esc(data.dataset || data.provider)}</h3><p class="form-help">Reanalysis at the selected area's centroid. Context only: these fields are not automatically treated as trained multimodal model inputs.</p><div class="table-scroll"><table><thead><tr><th>Month</th><th>Temperature (°C)</th><th>Rainfall (mm)</th><th>Reference ET₀ (mm)</th><th>Surface soil moisture (m³/m³)</th><th>Quality</th></tr></thead><tbody>${(data.monthly || []).map(row=>`<tr><td>${esc(row.month)}</td><td>${numeric(row.temperature_2m_mean,2)}</td><td>${numeric(row.precipitation_sum,2)}</td><td>${numeric(row.et0_fao_evapotranspiration,2)}</td><td>${numeric(row.soil_moisture_0_to_7cm_mean,3)}</td><td>${esc(workflowText(row.quality))}</td></tr>`).join('')}</tbody></table></div><p class="form-help">${esc((data.limitations || []).join(' '))}</p></section>`;
+}
+function renderRecoveryEvidence(data) {
+  if(!data?.available)return '';
+  return `<section class="spatial-evidence"><h3>Observed recovery episodes</h3><p class="form-help">${esc(data.reason || '')} Baseline ${esc(data.baseline_start || '')} → ${esc(data.baseline_end || '')}.</p>${data.episodes?.length?`<div class="table-scroll"><table><thead><tr><th>Episode starts</th><th>Status</th><th>Observed recovery date</th><th>Recovery duration (days)</th><th>Minimum anomaly</th></tr></thead><tbody>${data.episodes.map(row=>`<tr><td>${esc(row.start)}</td><td>${esc(row.status)}</td><td>${esc(row.recovered_at || 'Not observed')}</td><td>${numeric(row.recovery_days)}</td><td>${numeric(row.minimum_anomaly,3)}</td></tr>`).join('')}</tbody></table></div>`:''}<p class="form-help">Observed recovery is a retrospective index diagnostic. Missing or unresolved episodes do not have an invented recovery date.</p></section>`;
 }
 function renderWorkflowSections(report) {
   const sections=report.sections || report.results || report;
   const names={observations:'Multimodal observation record',condition:'Observed condition and disturbance',drivers:'Candidate drivers and competing explanations',forecast:'Temporal forecasts',resilience:'Resilience diagnostics',recovery:'Observed recovery',fragmentation:'Fragmentation and connectivity',model:'Checkpoint inference',scenarios:'Five-year hypothetical scenarios',climate:'Climate reanalysis context',alerts:'Prioritized alerts',evaluation:'Historical baseline comparison'};
-  return renderSpatialEvidence(sections.spatial_change || report.spatial_change)+Object.entries(names).filter(([key])=>sections[key]).map(([key,title])=>`<details class="workflow-section model-hashes"><summary>${esc(title)} · saved computation</summary><pre>${esc(JSON.stringify(sections[key],null,2))}</pre></details>`).join('');
+  return renderSpatialEvidence(sections.spatial_change || report.spatial_change)+renderClimateContext(sections.climate)+renderRecoveryEvidence(sections.recovery)+Object.entries(names).filter(([key])=>sections[key]).map(([key,title])=>`<details class="workflow-section model-hashes"><summary>${esc(title)} · saved computation</summary><pre>${esc(JSON.stringify(sections[key],null,2))}</pre></details>`).join('');
 }
 async function renderWorkflow(id) {
   const request=++workflowRequest;
