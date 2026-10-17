@@ -12,9 +12,11 @@
     if (w < -180 || e > 180 || s < -90 || n > 90) return 'Longitude must be −180 to 180 and latitude −90 to 90.';
     if (w >= e) return 'West must be less than east. Areas crossing the antimeridian must be split into separate areas.';
     if (s >= n) return 'South must be less than north.';
+    if (Math.abs(s) > 85 || Math.abs(n) > 85) return 'Polar acquisition is unsupported. Choose an area between 85°S and 85°N.';
+    if (e-w > 1 || n-s > 1) return 'Select a compact rectangle with each side spanning at most 1°.';
     const area = areaKm2(bbox);
     if (area > maxArea) return `This area is ${area.toFixed(2)} km². Select a smaller rectangle (maximum ${maxArea} km²).`;
-    if (area < .001) return 'Choose an area of at least 0.001 km².';
+    if (area < .0001) return 'Choose an area of at least 0.0001 km².';
     return null;
   }
   function project(lon, lat, zoom) {
