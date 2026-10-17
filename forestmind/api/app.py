@@ -21,6 +21,9 @@ from forestmind.api.store import Store
 from forestmind.monitoring.analysis import DISCLAIMER, METHOD, analyze_region, sensitivity_scenario
 from forestmind.monitoring.coverage import assess_history
 from forestmind.monitoring.demo import demo_regions
+from forestmind.api.places import install_places
+from forestmind.api.security import LocalOnlyMiddleware
+from forestmind.monitoring.alerts import install_alerts
 
 
 def now() -> str:
@@ -47,6 +50,9 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
         "There is no authentication. Bind to localhost. " + DISCLAIMER
     ))
     app.state.store = store
+    app.add_middleware(LocalOnlyMiddleware)
+    install_places(app, store)
+    install_alerts(app, store)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request, error: RequestValidationError):
@@ -61,7 +67,7 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
     async def local_response_headers(request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["X-Frame-Options"] = "DENY"
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
