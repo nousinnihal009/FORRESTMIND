@@ -6,9 +6,7 @@ provenance survive restart; existing monthly observations are never overwritten.
 """
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
-import hashlib
 import json
 import logging
 import math
@@ -18,7 +16,7 @@ from uuid import uuid4
 
 from forestmind.api.schemas import Geometry, ImportRegion, geometry_metadata
 from forestmind.data.adapters.base import BoundingBox
-from forestmind.data.adapters.network import public_error
+from forestmind.data.adapters.network import public_error, restricted_acquisition
 from forestmind.data.adapters.sentinel2 import Sentinel2Adapter
 from forestmind.data.history import (HistoryRequest, _atomic_json, _digest, _read_json,
     _sanitize, _scene, create_history_plan, execute_history_plan, load_history_plan, month_windows)
@@ -385,7 +383,8 @@ class AcquisitionService:
             job.update(status="running", phase="planning", started_at=job["started_at"] or utcnow(), error=None)
             self._save(db, job)
         try:
-            self._execute(job)
+            with restricted_acquisition():
+                self._execute(job)
         except AcquisitionStopped:
             fresh = self.job(job["id"], progress=False)
             if fresh["cancel_requested"]:
@@ -397,7 +396,8 @@ class AcquisitionService:
             else:
                 # Budget exhausted during a bounded provider retry: retain any
                 # accepted months and make the need for an explicit resume clear.
-                self._complete_from_report(fresh, self.root / job["id"], budget_exhausted=True)
+                with restricted_acquisition():
+                    self._complete_from_report(fresh, self.root / job["id"], budget_exhausted=True)
         except Exception as error:
             LOG.warning("Acquisition %s failed: %s", job["id"], _sanitize(public_error(error)))
             self._finish(self.job(job["id"], progress=False), "failed", _sanitize(public_error(error)))
@@ -605,7 +605,8 @@ class AcquisitionService:
         return {"provider": "earth-search", "collection": "sentinel-2-c1-l2a", "sensor": "Sentinel-2 optical",
                 "limits": LIMITS, "geometry": "WGS84 rectangle; no antimeridian crossing or polar AOIs",
                 "attribution": "Copernicus Sentinel data, served by Element 84 Earth Search",
-                "source_url": "https://earth-search.aws.element84.com/v1", "storage_bytes": self._check_storage(32),
+                "source_url": "https://earth-search.aws.element84.com/v1",
+                "storage_bytes": sum(path.stat().st_size for path in self.root.rglob("*") if path.is_file()),
                 "scheduling": "Local only; service must remain running", "minimum_date": "2015-06-23",
                 "cancellation": "Cooperative between bounded provider requests; completed observations are retained",
                 "sampling": "At most one quality-passing acquisition per month; no fabricated gaps or auxiliary modalities",
