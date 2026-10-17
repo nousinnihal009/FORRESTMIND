@@ -1,0 +1,183 @@
+{
+  "job_id": "acq-2c71528f1d7e4e93",
+  "created_at": "2026-10-17T17:51:59.811050+00:00",
+  "payload": {
+    "name": "Tamil Nadu, India",
+    "country": "India",
+    "source": "Cached sentinel2 surface reflectance | providers: element84-earth-search | collections: sentinel-2-c1-l2a",
+    "notes": "Monthly mean of valid pixel index samples from cached optical acquisitions. UTC month labels use the last actual acquisition date; no missing month is filled. valid_fraction is valid pixel samples / all pixel samples across that month's acquisitions, not spatial union coverage. NDVI=(NIR-red)/(NIR+red); NDMI uses SWIR1; NBR uses SWIR2. Explicit quality mask, finite [0,1] reflectance and positive denominators required. No climate, fire, SAR change or forest-cover values were supplied. 1 acquisitions; preprocessing: forestmind-grid-v3. The companion provenance JSON records source files, acquisition timestamps and hashes. Cache metadata and provider claims are not independently verified.",
+    "synthetic": false,
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [
+            78.59966506131795,
+            11.3223723
+          ],
+          [
+            78.62006273868204,
+            11.3223723
+          ],
+          [
+            78.62006273868204,
+            11.3423723
+          ],
+          [
+            78.59966506131795,
+            11.3423723
+          ],
+          [
+            78.59966506131795,
+            11.3223723
+          ]
+        ]
+      ]
+    },
+    "observations": [
+      {
+        "date": "2025-11-10",
+        "valid_fraction": 0.959229,
+        "ndvi": 0.739647,
+        "ndmi": 0.25224,
+        "nbr": 0.544768
+      }
+    ]
+  },
+  "provenance": {
+    "format_version": 1,
+    "created_at": "2026-10-17T17:51:59.811020+00:00",
+    "sensor_selection": "sentinel2",
+    "bbox_wgs84": [
+      78.59966506131795,
+      11.3223723,
+      78.62006273868204,
+      11.3423723
+    ],
+    "method": "Monthly mean of valid pixel index samples from cached optical acquisitions",
+    "providers": [
+      "element84-earth-search"
+    ],
+    "collections": [
+      "sentinel-2-c1-l2a"
+    ],
+    "preprocessing_versions": [
+      "forestmind-grid-v3"
+    ],
+    "legacy_cache": false,
+    "independently_verified": false,
+    "monthly_aggregation": [
+      {
+        "month": "2025-11",
+        "label_date": "2025-11-10",
+        "acquisition_count": 1,
+        "valid_samples": 3929,
+        "total_samples": 4096
+      }
+    ],
+    "acquisitions": [
+      {
+        "sensor": "sentinel2",
+        "bbox": [
+          78.59966506131795,
+          11.3223723,
+          78.62006273868204,
+          11.3423723
+        ],
+        "valid_samples": 3929,
+        "total_samples": 4096,
+        "grid_shape": [
+          64,
+          64
+        ],
+        "source_band_names": [
+          "B01",
+          "B02",
+          "B03",
+          "B04",
+          "B05",
+          "B06",
+          "B07",
+          "B08",
+          "B8A",
+          "B09",
+          "B11",
+          "B12"
+        ],
+        "invalid_numeric_samples": 0,
+        "scene_id": "S2A_T44PKT_20251110T052258_L2A",
+        "provider": "element84-earth-search",
+        "collection": "sentinel-2-c1-l2a",
+        "preprocessing_version": "forestmind-grid-v3",
+        "grid_crs": "EPSG:4326",
+        "grid_transform": [
+          0.00031871370881386696,
+          0.0,
+          78.59966506131795,
+          0.0,
+          -0.00031249999999999334,
+          11.3423723
+        ],
+        "data_units": "surface_reflectance_0_1",
+        "cache_file": "sentinel2\\S2A_T44PKT_20251110T052258_L2A_df0b4b31.npz",
+        "sha256": "219cbfbef9a42adc82ecf254cea0f87a18c8210d1839b2282e8bfeff75324a8e",
+        "datetime_utc": "2025-11-10T05:25:58.540000+00:00"
+      }
+    ],
+    "limitations": [
+      "Scene-average sampling can vary with cloud cover and acquisition footprints.",
+      "Bandpass, atmospheric correction and residual georegistration differences are not harmonized here.",
+      "Scene/cloud metadata cannot establish forest-only land cover; these summarize the entire cached AOI.",
+      "NDVI, NDMI and NBR alone cannot establish disturbance causes or tipping points."
+    ],
+    "history_selection": {
+      "plan_sha256": "6fe586a155cf02e4a069d0e2a5115fef16ca88c68356ffaea7117c3eae6f3840",
+      "report_sha256": "638bf7dd573c6fc6371169919afbfe7a31c94c902e7180e3f5c4d94c6672295c",
+      "accepted_cache_paths": [
+        "C:\\CODES\\project_nousin\\FORRESTMIND\\data\\forestmind-acquisition\\acq-2c71528f1d7e4e93\\cache\\sentinel2\\S2A_T44PKT_20251110T052258_L2A_df0b4b31.npz"
+      ],
+      "missing_months": [
+        "2025-12",
+        "2026-01",
+        "2026-02",
+        "2026-03",
+        "2026-04",
+        "2026-05",
+        "2026-06",
+        "2026-07",
+        "2026-08",
+        "2026-09",
+        "2026-10"
+      ],
+      "request": {
+        "provider": "earth-search",
+        "bbox": [
+          78.59966506131795,
+          11.3223723,
+          78.62006273868204,
+          11.3423723
+        ],
+        "start": "2025-11-01",
+        "end": "2026-10-17",
+        "patch_size": 64,
+        "max_cloud_cover": 30.0,
+        "min_valid_fraction": 0.6,
+        "candidates_per_month": 3,
+        "search_limit": 30,
+        "max_attempts": 6,
+        "max_downloads": 2,
+        "timeout_seconds": 30.0,
+        "name": "Tamil Nadu, India",
+        "country": "India",
+        "area_km2": 4.945738
+      },
+      "sampling": "At most one quality-passing actual acquisition per UTC month; no gap filling"
+    }
+  },
+  "accepted_cache_paths": [
+    "C:\\CODES\\project_nousin\\FORRESTMIND\\data\\forestmind-acquisition\\acq-2c71528f1d7e4e93\\cache\\sentinel2\\S2A_T44PKT_20251110T052258_L2A_df0b4b31.npz"
+  ],
+  "plan": "C:\\CODES\\project_nousin\\FORRESTMIND\\data\\forestmind-acquisition\\acq-2c71528f1d7e4e93\\plan.json",
+  "report": "C:\\CODES\\project_nousin\\FORRESTMIND\\data\\forestmind-acquisition\\acq-2c71528f1d7e4e93\\progress.json",
+  "artifact_path": "C:\\CODES\\project_nousin\\FORRESTMIND\\data\\forestmind-acquisition\\acq-2c71528f1d7e4e93\\provenance-26267121915bd04fe5f5.json"
+}
