@@ -45,7 +45,16 @@ def install_acquisition(app, store):
             workflow.run(region_id, **kwargs)
     service = AcquisitionService(store, on_complete=analyze)
     app.state.acquisition = service
-    app.add_event_handler("startup", service.start)
+    def startup():
+        try:
+            service.start()
+        except RuntimeError:
+            # A second local app/test context may share the DB. Its requests
+            # enqueue durable work for the existing owner; no second worker or
+            # restart recovery is started while the OS lease remains held.
+            if service.worker_status != "another_local_worker":
+                raise
+    app.add_event_handler("startup", startup)
     app.add_event_handler("shutdown", service.stop)
     router = APIRouter(prefix="/api/v1", tags=["acquisition"])
 
