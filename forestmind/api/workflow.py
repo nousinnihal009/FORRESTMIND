@@ -5,17 +5,28 @@ from datetime import date
 import json
 import os
 from typing import Annotated, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import Field, model_validator
 
-from forestmind.api.schemas import Geometry, StrictModel
-from forestmind.monitoring.workflow import WorkflowService, digest
+from forestmind.api.schemas import Geometry, StrictModel, Percent
+from forestmind.monitoring.workflow import WorkflowService, digest, now
+from forestmind.monitoring.projections import scenario_projection
 
 
 class WorkflowRequest(StrictModel):
     include_climate: bool = Field(default=False, strict=True)
+    include_landcover: bool = Field(default=False, strict=True)
+
+
+class ProjectionRequest(StrictModel):
+    manifest_id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    pressure_reduction: Percent = 0.
+    fire_reduction: Percent = 0.
+    restoration: Percent = 0.
+    climate_stress: Percent = 0.
 
 
 Pixel = Annotated[bool, Field(strict=True)]
@@ -74,7 +85,8 @@ def install_workflow(app, store):
     def submit(region_id: str, payload: WorkflowRequest | None = None):
         require_region(region_id)
         try:
-            return service.submit(region_id, include_climate=bool(payload and payload.include_climate))
+            return service.submit(region_id, include_climate=bool(payload and payload.include_climate),
+                                  include_landcover=bool(payload and payload.include_landcover))
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
 
@@ -96,6 +108,8 @@ def install_workflow(app, store):
             result = json.loads(row["payload"])
         else:
             result = service.latest(region_id)
+            if result.get("status") == "not_run":
+                raise HTTPException(409, "Run selected-area analysis before exporting a saved snapshot")
         return JSONResponse(result, headers={"Content-Disposition": f'attachment; filename="forestmind-analysis-{result["manifest"]["id"][:16]}.json"'})
 
     @router.post("/regions/{region_id}/forest-cover", status_code=201)
@@ -111,6 +125,23 @@ def install_workflow(app, store):
         job = service.submit(region_id)
         return {"source_sha256": value["sha256"], "job": job,
                 "interpretation": "User-supplied forest-cover classification; provenance is retained but not independently verified."}
+
+    @router.post("/regions/{region_id}/workflow/scenarios", status_code=201)
+    def projection(region_id: str, payload: ProjectionRequest):
+        require_region(region_id)
+        with store.connection() as db:
+            row = db.execute("SELECT payload FROM workflow_snapshots WHERE region_id=? AND id=?", (region_id, payload.manifest_id)).fetchone()
+        if not row:
+            raise HTTPException(404, "Selected analysis snapshot does not belong to this region")
+        snapshot = json.loads(row["payload"])
+        parameters = payload.model_dump(exclude={"manifest_id"})
+        result = scenario_projection(snapshot, parameters)
+        if not result["available"]:
+            raise HTTPException(409, result["reason"])
+        result.update({"id": "scenario-" + uuid4().hex[:12], "created_at": now(), "region_id": region_id,
+                       "manifest": snapshot["manifest"], "parameters": parameters})
+        store.save_scenario(result)
+        return result
 
     app.include_router(router)
     return service
