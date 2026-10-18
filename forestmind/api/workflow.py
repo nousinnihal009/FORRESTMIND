@@ -19,6 +19,7 @@ from forestmind.monitoring.projections import scenario_projection
 class WorkflowRequest(StrictModel):
     include_climate: bool = Field(default=False, strict=True)
     include_landcover: bool = Field(default=False, strict=True)
+    include_radar: bool = Field(default=False, strict=True)
 
 
 class ProjectionRequest(StrictModel):
@@ -86,7 +87,8 @@ def install_workflow(app, store):
         require_region(region_id)
         try:
             return service.submit(region_id, include_climate=bool(payload and payload.include_climate),
-                                  include_landcover=bool(payload and payload.include_landcover))
+                                  include_landcover=bool(payload and payload.include_landcover),
+                                  include_radar=bool(payload and payload.include_radar))
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
 
