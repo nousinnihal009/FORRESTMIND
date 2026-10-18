@@ -54,7 +54,8 @@ def test_worldwide_assets_and_keyboard_alternatives_are_served(tmp_path):
     with TestClient(create_app(tmp_path / "workspace.db")) as client:
         page = client.get("/").text
         for control in ("place-search", "area-map", "apply-coordinates", "confirm-area",
-                        "acquisition-form", "acquisition-jobs", "refresh-jobs"):
+                        "acquisition-form", "acquisition-jobs", "refresh-jobs",
+                        "scenario-horizon", "local-operations", "refresh-operations"):
             assert f'id="{control}"' in page
         for tab in ("workflow", "monitor", "coverage", "models"):
             assert f'data-detail="{tab}"' in page
@@ -62,7 +63,7 @@ def test_worldwide_assets_and_keyboard_alternatives_are_served(tmp_path):
         assert 'id="confirm-area" type="checkbox" disabled' in page
         assert 'id="start-acquisition" disabled' in page
         assert "not verified forest boundaries" in page or "not verify forest cover" in page
-        for filename in ("area-utils.js", "acquisition.js", "workflow.js"):
+        for filename in ("area-utils.js", "acquisition.js", "workflow.js", "operations.js"):
             response = client.get("/static/" + filename)
             assert response.status_code == 200
             assert "javascript" in response.headers["content-type"]
