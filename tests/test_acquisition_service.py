@@ -65,7 +65,19 @@ def test_real_history_ingestion_budget_resume_dedupe_and_atomic_snapshot(tmp_pat
     assert snapshot["payload"]["synthetic"] is False
     assert worker.store.analysis(region_id)["provenance"]["mode"] == "satellite_acquisition"
     assert worker.store.analysis(region_id)["forecast"]["points"] == []
+    repeated = worker.submit(request())
+    assert repeated["id"] == final["id"] and repeated["deduplicated"]
     assert not worker.run_once()
+
+
+def test_resume_conflicts_with_replacement_job_for_cancelled_request(tmp_path):
+    worker, _, _ = service(tmp_path)
+    old = worker.submit(request())
+    worker.cancel(old["id"])
+    replacement = worker.submit(request())
+    assert old["id"] != replacement["id"]
+    with pytest.raises(AcquisitionConflict, match="identical request"):
+        worker.resume(old["id"])
 
 
 def test_refresh_skips_saved_months_and_preserves_original_records(tmp_path):
