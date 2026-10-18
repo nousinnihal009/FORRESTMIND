@@ -1,0 +1,32 @@
+# Worldwide monitoring UI implementation
+
+Updated October 18, 2026. This document records the implemented browser workflow and the remaining verification boundary. The project remains a local research application.
+
+## Connected user actions
+
+- **Find a forest** submits an explicit Photon place search, with OpenStreetMap/Photon attribution and country labels. Search references are never called verified forest boundaries.
+- The geographic map uses normal visible-viewport OpenStreetMap tiles with attribution. Users can pan, zoom, draw a rectangle, or enter exact WGS84 coordinates. The map and pixel inspection support keyboard input; coordinate controls provide a complete drawing alternative.
+- The selected rectangle is previewed and must be confirmed before collection. Frontend screening matches the service's compact-area, polar, antimeridian, finite-coordinate and 25 km² constraints. The backend remains authoritative.
+- Collection options expose UTC dates, valid-pixel quality, scene budget, grid size and catalog cloud screening. Only the currently supported Earth Search source is offered. The UI explains masking, native resolution, missing observations and the save-on-first-accepted-observation rule.
+- Durable job cards show phase, accepted months, attempted downloads, missing months and saved errors. Cancel, bounded resume, inspect saved observations and job JSON export are available. Navigating back to the collection page refreshes the server record.
+- **Monitoring updates** exposes saved acquisition configuration, last successful update, next local update, failures, refresh and schedule intervals. Unsupported manually imported/synthetic areas have disabled automatic controls with a reason. The service-running requirement is explicit.
+- **Connected analysis** runs eligible computations, shows exact availability requirements, and retains a shared geometry/cutoff/version manifest. Exports request the displayed manifest ID. Stale snapshots are labeled.
+- Spatial NDVI/NDMI/NBR change renders actual returned grids without inventing masked pixels. A bounded canvas keeps 256×256 grids responsive; pointer or arrow-key inspection reports the sampled value and coordinate. Metadata describes source dates, grid extent, season/processing limitations and the distinction from forest loss or future risk.
+- Climate reanalysis is an explicit collection action and a monthly table with units and missingness. It is labeled context, separate from neural inputs. Dated forest-cover references can be collected automatically or supplied as a validated classified-cover JSON record; topology metrics require an actual classification.
+- The explicit radar action displays matched-pair VV/VH changes in dB, common-valid coverage, acquisition dates, platform, relative orbit and pass. These are measured context, not a causal structural diagnosis or automatically fused neural inputs. Provider reachability is still necessary.
+- Five-year comparisons present explicit coefficient assumptions, a no-additional-intervention baseline and conservation/restoration/fire/climate variants. The **Scenario lab** can save a custom five-year comparison against the selected immutable analysis manifest. These are hypothetical indicator sensitivities, not validated ecological forecasts or causal intervention effects.
+- The observations tab supports threshold configuration, acknowledgement, resolution, reopening, optional review notes and dated supporting observations/quality. These review controls do not themselves send notifications. Monitoring freshness is displayed separately from ecological condition.
+- **Data & methods** exposes local health, database integrity, available disk space and a verified database-backup action. Optional webhook delivery controls require an operator-configured destination/signing secret and an explicit user authorization checkbox. Destination host and delivery outcomes are shown; secret URLs/keys remain server-side. No external delivery was sent during UI work.
+- Satellite acquisitions, synthetic demonstrations and user-provided imports have distinct provenance labels. Locally executed registered model runs are distinguished from imported inference reports.
+
+## Verification record
+
+- All edited JavaScript passed `node --check` (app, acquisition, workflow, area utilities, operations and model runs).
+- `tests/test_worldwide_web.py` exercises invalid/reversed/antimeridian/polar/oversized/nonfinite/tiny areas, a real pilot rectangle, Mercator coordinate round trips, served scripts and accessible confirmation controls.
+- Focused frontend and existing web contracts: **11 passed in 11.34 seconds** on October 18 using the local Python interpreter outside the Windows sandbox, after the five-year/radar UI integration. A final rerun covers the added operations asset and controls; see the main validation record for aggregate results.
+- A sandbox run stalled before application startup while Windows asyncio's fallback socket pair waited in `socket.accept`. The successful escalated run avoids confusing this environment restriction with an application failure.
+- Parent integration work owns the actual browser screenshots, real acquisition, restart/recovery and full regression record in `VALIDATION.md`. Do not treat the focused tests above as proof those broader checks have passed.
+
+## Remaining evidence limits
+
+Provider reachability remains necessary for search, map tiles and optional context. Coordinate selection stays usable if map tiles/search fail. Data collection failures remain visible instead of being replaced with synthetic values. Registered checkpoints require operator-reviewed real-data scope and compatible inputs; no browser checkpoint upload executes arbitrary models. No UI, test or synthetic demonstration establishes global transfer, causal effects, calibrated ecological forecasts or tipping-point prediction.
