@@ -258,8 +258,10 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
 
     @app.post("/api/v1/scenarios", status_code=201)
     def scenario(payload: ScenarioRequest):
-        result = sensitivity_scenario(require_analysis(payload.region_id), payload.model_dump(exclude={"region_id"}))
-        result.update({"id": "scenario-" + uuid4().hex[:12], "created_at": now()})
+        # Pin scenario to the same geometry, observed cutoff and input version as its baseline.
+        analysis = require_analysis(payload.region_id)
+        result = sensitivity_scenario(analysis, payload.model_dump(exclude={"region_id"}))
+        result.update({"id": "scenario-" + uuid4().hex[:12], "created_at": now(), "manifest": analysis.get("manifest")})
         store.save_scenario(result)
         return result
 
@@ -279,6 +281,9 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
             output = io.StringIO(newline="")
             rows = [{**row, "provenance_mode": result["provenance"]["mode"],
                      "source": result["provenance"]["source"], "method": METHOD,
+                     "manifest_id": result.get("manifest", {}).get("id"),
+                     "geometry_geojson": store._json(result["geometry"]),
+                     "observation_cutoff": result["latest_date"],
                      "score_interpretation": "Heuristic uncalibrated indicator score"} for row in result["observations"]]
             writer = csv.DictWriter(output, fieldnames=list(rows[0]))
             writer.writeheader()
