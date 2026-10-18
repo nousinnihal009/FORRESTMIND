@@ -161,7 +161,8 @@ class AcquisitionService:
                "execution": "Single local worker; cancellation takes effect between bounded provider requests"}
         with self.store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            duplicate = db.execute("SELECT payload FROM acquisition_jobs WHERE fingerprint=? AND status IN ('queued','running','retry_wait')",
+            reusable = "('queued','running','retry_wait','completed','partial')" if region_id is None else "('queued','running','retry_wait')"
+            duplicate = db.execute("SELECT payload FROM acquisition_jobs WHERE fingerprint=? AND status IN " + reusable + " ORDER BY rowid DESC LIMIT 1",
                                    (fingerprint,)).fetchone()
             if duplicate:
                 return {**json.loads(duplicate[0]), "deduplicated": True}
@@ -201,6 +202,9 @@ class AcquisitionService:
                 return job
             if job["status"] == "completed":
                 raise AcquisitionConflict("Completed jobs cannot resume; refresh the saved area instead")
+            fingerprint = db.execute("SELECT fingerprint FROM acquisition_jobs WHERE id=?", (job_id,)).fetchone()[0]
+            if db.execute("SELECT 1 FROM acquisition_jobs WHERE fingerprint=? AND id<>? AND status IN ('queued','running','retry_wait')", (fingerprint, job_id)).fetchone():
+                raise AcquisitionConflict("An identical request already has an active acquisition job")
             if job["region_id"] and db.execute("SELECT 1 FROM acquisition_jobs WHERE region_id=? AND status IN ('queued','running','retry_wait')", (job["region_id"],)).fetchone():
                 raise AcquisitionConflict("This area already has an active acquisition job")
             if db.execute("SELECT COUNT(*) FROM acquisition_jobs WHERE status IN ('queued','running','retry_wait')").fetchone()[0] >= LIMITS["max_queued_jobs"]:
