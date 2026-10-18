@@ -78,7 +78,7 @@ def test_backup_restores_measurements_alert_review_and_migrations(app, tmp_path)
         result = client.post("/api/v1/operations/backup")
         assert result.status_code == 201
         snapshot = app.state.store.path.parent / "backups" / result.json()["filename"]
-        assert client.get("/api/v1/operations").json()["schema_migrations"] == [1, 2]
+        assert client.get("/api/v1/operations").json()["schema_migrations"] == [1, 2, 3]
     restored = create_app(snapshot, seed_demo=False)
     with TestClient(restored) as client:
         assert client.get(f"/api/v1/regions/{rid}").json() == before
