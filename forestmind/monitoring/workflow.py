@@ -211,15 +211,15 @@ class WorkflowService:
                 "reason": "Run selected-area analysis to create an immutable evidence snapshot on the worker.", "stale": False}
 
     def run(self, region_id, *, cache_dir=None, cutoff=None, job_id=None, source_paths=None,
-            execute_model=True, include_climate=False, include_landcover=False):
+            execute_model=True, include_climate=False, include_landcover=False, include_radar=False):
         # Separate from submit's short lock: HTTP submissions never wait on raster/network/model work.
         with self.analysis_lock:
             return self._run(region_id, cache_dir=cache_dir, cutoff=cutoff, job_id=job_id,
                              source_paths=source_paths, execute_model=execute_model,
-                             include_climate=include_climate, include_landcover=include_landcover)
+                             include_climate=include_climate, include_landcover=include_landcover, include_radar=include_radar)
 
     def _run(self, region_id, *, cache_dir=None, cutoff=None, job_id=None, source_paths=None,
-             execute_model=True, include_climate=False, include_landcover=False):
+             execute_model=True, include_climate=False, include_landcover=False, include_radar=False):
         saved = self.store.region(region_id)
         if saved is None:
             raise ValueError("Region not found")
@@ -291,6 +291,19 @@ class WorkflowService:
                 logging.getLogger(__name__).warning("climate_context_failed", extra={"region_id": region_id, "error_type": type(error).__name__})
                 climate = {"available": False, "reason": f"Climate provider request failed ({type(error).__name__}); retry collection. Existing observations remain intact."}
         climate = climate or {"available": False, "reason": "Collect climate context to request actual ERA5 rainfall, temperature, soil moisture and reference evapotranspiration; no climate measurements were supplied."}
+        radar = self._context(region_id, "radar")
+        if radar and (radar.get("geometry_sha256") != digest(region["geometry"]) or radar.get("end", "9999") > cutoff):
+            radar = None
+        if include_radar and not payload["synthetic"]:
+            try:
+                from forestmind.monitoring.radar import acquire_radar
+                radar = acquire_radar(region["geometry"], start=observations[0]["date"], end=cutoff)
+                if radar.get("available"):
+                    self.save_context(region_id, "radar", radar)
+            except Exception as error:
+                from forestmind.data.adapters.network import public_error
+                radar = {"available": False, "reason": f"Radar collection failed: {public_error(error)}"}
+        radar = radar or {"available": False, "reason": "Collect radar context to request a bounded same-platform, same-orbit Sentinel-1 RTC pair. No actual radar context is attached."}
         model, eligibility = model_eligibility(self.registry, region, prepared)
         model_result = {"available": False, "eligibility": eligibility, "reason": "; ".join(r for check in eligibility for r in check["reasons"])}
         model_version = None
@@ -327,7 +340,7 @@ class WorkflowService:
         projections = scenario_projection(analysis)
         capabilities = [
             capability("optical", "Optical observations and history", bool(observations), "Dated NDVI, NDMI and NBR; masks and source provenance retained.", evidence={"count": len(observations)}),
-            capability("radar", "Radar structural evidence", any(r.get("sar_change") is not None for r in observations), "Uses explicitly supplied SAR-change context only; automatic selected-area Sentinel-1 acquisition and orbit-consistent pairing are not yet integrated.", ["Terrain-corrected calibrated radar, common orbit/geometry and dated quality masks"]),
+            capability("radar", "Radar structural evidence", radar.get("available", False), radar.get("reason", "Actual same-platform, same-orbit RTC context; radar is not a neural input and changes can reflect moisture and geometry."), ["Two calibrated RTC acquisitions sharing platform/orbit/pass, common grid and valid masks"]),
             capability("climate", "Rainfall, temperature, water context", climate.get("available", False), climate.get("reason", "Measured-provider ERA5 reanalysis context, separate from neural model inputs."), ["Successful bounded ERA5 request"]),
             capability("condition", "Forest-condition screening", analysis["health_score"] is not None, analysis["health"]["interpretation"], ["Latest NDVI/NDMI/NBR and valid fraction >= 0.4"]),
             capability("disturbance", "Spatial spectral disturbance evidence", spatial["available"], spatial["reason"], ["Two common-grid real acquisitions with common valid pixels"]),
@@ -347,9 +360,14 @@ class WorkflowService:
         manifest = manifest_for(region, observations, cutoff, model_version)
         manifest["source_manifest_sha256"] = prepared.provenance["source_manifest_sha256"] if prepared else None
         manifest["context_sha256"] = {"climate": digest(climate) if climate.get("available") else None,
-                                      "forest_cover": digest(cover) if cover else None}
+                                      "forest_cover": digest(cover) if cover else None,
+                                      "radar": digest(radar) if radar.get("available") else None}
         manifest["registry_sha256"] = digest(self.registry)
         manifest["model_execution_status_sha256"] = digest({"available": model_result["available"], "reason": model_result["reason"]})
+        manifest["diagnostics_sha256"] = digest({"sequence": sequence_error if prepared is None else None,
+                                                  "climate": climate.get("reason") if not climate.get("available") else None,
+                                                  "radar": radar.get("reason") if not radar.get("available") else None,
+                                                  "landcover": landcover_error})
         manifest["implementation_sha256"] = {name: file_hash(Path(__file__).with_name(name))
                                               for name in ("workflow.py", "spatial.py", "climate.py", "projections.py")}
         manifest["id"] = digest({key: value for key, value in manifest.items() if key != "id"})
@@ -357,7 +375,7 @@ class WorkflowService:
                   "manifest": manifest, "stale": False, "job_id": job_id, "capabilities": capabilities,
                   "observations": observations, "condition": analysis["health"], "drivers": analysis["drivers"],
                   "forecast": analysis["forecast"], "resilience": analysis["resilience"], "recovery": recovery,
-                  "spatial_change": spatial, "fragmentation": fragmentation, "climate": climate, "model": model_result,
+                  "spatial_change": spatial, "fragmentation": fragmentation, "climate": climate, "radar": radar, "model": model_result,
                   "alerts": analysis["alerts"], "coverage": assess_history(payload), "evaluation": backtest_prepared(payload),
                   "scenarios": {**projections, "endpoint": f"/api/v1/regions/{region_id}/workflow/scenarios"},
                   "sequence": prepared.provenance if prepared else {"available": False, "reason": sequence_error}}
@@ -380,20 +398,22 @@ class WorkflowService:
         with self.store.connection() as db:
             db.execute("INSERT OR REPLACE INTO workflow_jobs VALUES (?,?,?)", (job["id"], job["region_id"], self.store._json(job)))
 
-    def submit(self, region_id, include_climate=False, include_landcover=False):
+    def submit(self, region_id, include_climate=False, include_landcover=False, include_radar=False):
         with self.lock:
             with self.store.connection() as db:
                 jobs = [json.loads(r["payload"]) for r in db.execute("SELECT payload FROM workflow_jobs")]
             active = [job for job in jobs if job["status"] in {"pending", "running"}]
             for job in active:
                 if job["region_id"] == region_id:
-                    if (job.get("include_climate", False) != include_climate or job.get("include_landcover", False) != include_landcover):
+                    if (job.get("include_climate", False) != include_climate or job.get("include_landcover", False) != include_landcover
+                            or job.get("include_radar", False) != include_radar):
                         raise ValueError("An analysis with different collection settings is already active for this area; wait for it to finish.")
                     return job
             if len(active) >= 4:
                 raise ValueError("Analysis queue is full (one worker, at most four queued/running jobs). Retry after a job finishes.")
             job = {"id": "workflow-" + uuid4().hex[:12], "region_id": region_id, "status": "pending",
-                   "created_at": now(), "include_climate": include_climate, "include_landcover": include_landcover, "error": None}
+                   "created_at": now(), "include_climate": include_climate, "include_landcover": include_landcover,
+                   "include_radar": include_radar, "error": None}
             self._save_job(job)
             self.executor.submit(self._execute, job.copy())
             return job
@@ -402,7 +422,8 @@ class WorkflowService:
         job.update(status="running", started_at=now())
         self._save_job(job)
         try:
-            result = self.run(job["region_id"], job_id=job["id"], include_climate=job["include_climate"], include_landcover=job.get("include_landcover", False))
+            result = self.run(job["region_id"], job_id=job["id"], include_climate=job["include_climate"],
+                              include_landcover=job.get("include_landcover", False), include_radar=job.get("include_radar", False))
             job.update(status="completed", manifest_id=result["manifest"]["id"], completed_at=now())
         except Exception:
             logging.getLogger(__name__).exception("selected_area_analysis_failed", extra={"job_id": job["id"]})
