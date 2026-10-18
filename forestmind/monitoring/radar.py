@@ -59,7 +59,7 @@ def _search(bbox, start, end, search_limit, timeout_seconds):
 
 
 def _candidate(item, start, end):
-    if item.get("collection") != COLLECTION or not isinstance(item.get("id"), str):
+    if not isinstance(item, dict) or item.get("collection") != COLLECTION or not isinstance(item.get("id"), str):
         raise ValueError("Radar item collection/identity does not match Sentinel-1 RTC")
     props = item["properties"]
     acquired = datetime.fromisoformat(props["datetime"].replace("Z", "+00:00"))
@@ -174,7 +174,8 @@ def acquire_radar(geometry: dict, *, start: str, end: str, patch_size: int = 64,
             powers.append(power)
             masks.append(valid)
             properties = item["properties"]
-            records.append({"id": item["id"], "datetime": properties["datetime"],
+            acquired = datetime.fromisoformat(properties["datetime"].replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+            records.append({"id": item["id"], "datetime": acquired,
                 "platform": properties["platform"], "relative_orbit": properties["sat:relative_orbit"],
                 "orbit_state": properties["sat:orbit_state"], "instrument_mode": "IW", "polarizations": ["VV", "VH"],
                 "valid_fraction": float(valid.sum() / inside.sum()), "valid_mask": valid.tolist(),
