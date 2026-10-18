@@ -26,6 +26,8 @@ function esc(value) {return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 function numeric(value, digits = 0) {return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('en-US', {maximumFractionDigits: digits, minimumFractionDigits: digits}) : '—';}
 function dateLabel(value, short = false) {if (!value) return 'Unavailable'; const d = new Date(value.slice(0, 10) + 'T00:00:00Z'); return Number.isNaN(+d) ? value : new Intl.DateTimeFormat('en', {month: 'short', ...(short ? {} : {day:'numeric'}), year:'numeric', timeZone:'UTC'}).format(d);}
 function isDemo(region) {return Boolean(region.provenance?.synthetic || String(region.provenance?.mode || region.provenance?.data_mode || region.provenance?.source || '').match(/synthetic|demo/i));}
+function isAcquired(region) {return region.provenance?.mode === 'satellite_acquisition';}
+function observationSource(region) {return isDemo(region)?'Synthetic observations':isAcquired(region)?'Satellite observations':'User-provided observations';}
 function statusClass(value) {const s = String(value).toLowerCase(); return /severe|critical|degrad|high/.test(s) ? 'critical' : /stress|watch|warning|elevat/.test(s) ? 'warning' : /unknown|insuff|unavail/.test(s) ? 'neutral' : '';}
 function badge(value) {return `<span class="status ${statusClass(value)}">${esc(String(value || 'Unavailable').replaceAll('_', ' '))}</span>`;}
 function pct(value) {return typeof value === 'number' && Number.isFinite(value) ? numeric(value * 100) + '%' : '—';}
@@ -48,7 +50,7 @@ function route() {
   $$('[data-route]').forEach(el => {el.classList.toggle('active', el.dataset.route === name); if (el.dataset.route === name) el.setAttribute('aria-current','page'); else el.removeAttribute('aria-current');});
   $('#page-name').textContent = {overview:'Overview',explore:'Find a forest',monitoring:'Monitoring regions',scenarios:'Scenario lab',methods:'Data & methods'}[name];
   if (name === 'monitoring') renderTable();
-  if (name === 'explore' && typeof renderAreaMap === 'function') renderAreaMap();
+  if (name === 'explore' && typeof renderAreaMap === 'function') {renderAreaMap();refreshAcquisitionJobs();}
 }
 async function loadWorkspace(selectId) {
   $('#error-banner').hidden = true;
@@ -57,8 +59,8 @@ async function loadWorkspace(selectId) {
     const regions = state.overview.regions || [];
     $('#region-count').textContent = regions.length;
     const demoCount = regions.filter(isDemo).length;
-    $('#mode-badge').innerHTML = `<span class="live-dot"></span>${!regions.length ? 'Empty workspace' : demoCount === regions.length ? 'Demo workspace' : demoCount ? 'Mixed data sources' : 'Imported observations'}`;
-    $('#demo-notice').innerHTML = `${icon('info',16)}<span><strong>A research view, with transparent evidence.</strong> ${demoCount ? `${demoCount} sample regions use synthetic observations.` : 'Imported observations are user-provided and unverified.'} Indicators are exploratory, not validated ecological predictions.</span><a href="#methods">How it works ↗</a>`;
+    $('#mode-badge').innerHTML = `<span class="live-dot"></span>${!regions.length ? 'Empty workspace' : demoCount === regions.length ? 'Demo workspace' : demoCount ? 'Mixed data sources' : regions.every(isAcquired)?'Satellite observations':'Observed records'}`;
+    $('#demo-notice').innerHTML = `${icon('info',16)}<span><strong>A research view, with transparent evidence.</strong> ${demoCount ? `${demoCount} sample regions use synthetic observations.` : 'Satellite and imported records retain their source and processing provenance.'} Indicators are exploratory, not validated ecological predictions.</span><a href="#methods">How it works ↗</a>`;
     renderMetrics(); renderPriorities(); renderTable(); renderProvenance();
     const previous = $('#scenario-region').value;
     $('#scenario-region').innerHTML = regions.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('');
@@ -75,7 +77,7 @@ function renderMetrics() {
     ['Monitored landscape', numeric(m.monitored_area_km2, 0), 'km²', 'globe', `${regions.length} region footprints · WGS84`],
     ['Mean condition index', numeric(m.mean_health, 1), '/ 100', 'leaf', 'Vegetation proxy · not a probability'],
     ['Active alerts', numeric(m.active_alerts), 'to investigate', 'alert', 'Evidence that merits a closer look'],
-    ['Monitoring regions', numeric(m.regions ?? regions.length), 'regions', 'layers', `${regions.filter(isDemo).length} synthetic · ${regions.filter(r => !isDemo(r)).length} imported`]
+    ['Monitoring regions', numeric(m.regions ?? regions.length), 'regions', 'layers', `${regions.filter(isDemo).length} synthetic · ${regions.filter(r => !isDemo(r)).length} observed records`]
   ];
   $('#metrics').innerHTML = entries.map(([label,value,unit,i,foot]) => `<div class="metric"><div class="metric-label">${label}${icon(i,16)}</div><div class="metric-value">${value}<small>${unit}</small></div><div class="metric-foot">${esc(foot)}</div></div>`).join('');
 }
@@ -129,7 +131,7 @@ async function selectRegion(id) {
     if(request!==state.request)return;
     state.region=region;
     $('#detail-title').textContent=region.name;
-    $('#detail-meta').textContent=`${region.country || 'Unspecified'} · ${numeric(region.area_km2)} km² · ${isDemo(region)?'Synthetic observations':'User-provided observations'} · Updated ${dateLabel(region.latest_date)}`;
+    $('#detail-meta').textContent=`${region.country || 'Unspecified'} · ${numeric(region.area_km2)} km² · ${observationSource(region)} · Updated ${dateLabel(region.latest_date)}`;
     if($('#scenario-region').value!==id)invalidateScenario();
     $('#scenario-region').value=id;
     renderMap();renderDetail();
@@ -172,7 +174,7 @@ function renderDetail() {
     const s=r.resilience;
     $('#detail-body').innerHTML=`<div class="resilience-grid"><div class="signal-card"><small>Lag-1 autocorrelation</small><strong>${numeric(s.ar1,3)}</strong><p>Persistence in the prepared vegetation series. A statistical indicator, not a tipping-point probability.</p></div><div class="signal-card"><small>Residual variance</small><strong>${numeric(s.variance,4)}</strong><p>Variability after preprocessing. Interpretation depends on record quality and length.</p></div><div class="signal-note"><h3>${esc(String(s.status || 'Insufficient evidence').replaceAll('_', ' '))}</h3><p>${esc(Array.isArray(s.evidence)?s.evidence.join(' '):s.evidence || '')}</p><p style="margin-top:10px">${esc(s.trend || '')}</p></div></div><div class="evidence-disclaimer">${esc(s.caveat || 'These exploratory indicators cannot establish an irreversible ecological tipping point.')}</div>`;
   }else if(state.tab==='observations'){
-    $('#detail-body').innerHTML=`<div class="observed-alerts">${(r.alerts||[]).map(a=>`<article class="observation-alert"><div>${badge(a.severity)}<strong>${esc(a.title)}</strong><small>${esc(dateLabel(a.date))}</small></div><p>${esc(a.message)}</p></article>`).join('') || '<p class="chart-caveat">No active alert in the current assessment.</p>'}</div><div class="observations-caption"><strong>The observation record</strong><span>${isDemo(r)?'Synthetic measurements':r.provenance?.acquisition?'Acquired satellite observations':'Observed / user-provided measurements'} · — denotes missing data</span></div><div class="observation-table table-scroll"><table><thead><tr><th>Date</th><th>NDVI</th><th>NDMI</th><th>NBR</th><th>Rainfall anomaly (σ)</th><th>Heat anomaly (°C)</th><th>Valid pixels</th><th>Index / 100</th></tr></thead><tbody>${[...r.observations].reverse().map(o=>`<tr><td>${esc(dateLabel(o.date))}</td><td>${numeric(o.ndvi,3)}</td><td>${numeric(o.ndmi,3)}</td><td>${numeric(o.nbr,3)}</td><td>${numeric(o.precipitation_anomaly,2)}</td><td>${numeric(o.temperature_anomaly,2)}</td><td>${pct(o.valid_fraction)}</td><td>${numeric(o.health_score,1)}</td></tr>`).join('')}</tbody></table></div><div class="detail-foot"><span>${esc(r.provenance?.source)}</span><span>${esc(r.provenance?.geometry_note || '')}</span></div><div id="alert-lifecycle"></div>`;
+    $('#detail-body').innerHTML=`<div class="observed-alerts">${(r.alerts||[]).map(a=>`<article class="observation-alert"><div>${badge(a.severity)}<strong>${esc(a.title)}</strong><small>${esc(dateLabel(a.date))}</small></div><p>${esc(a.message)}</p></article>`).join('') || '<p class="chart-caveat">No active alert in the current assessment.</p>'}</div><div class="observations-caption"><strong>The observation record</strong><span>${observationSource(r)} · — denotes missing data</span></div><div class="observation-table table-scroll"><table><thead><tr><th>Date</th><th>NDVI</th><th>NDMI</th><th>NBR</th><th>Rainfall anomaly (σ)</th><th>Heat anomaly (°C)</th><th>Valid pixels</th><th>Index / 100</th></tr></thead><tbody>${[...r.observations].reverse().map(o=>`<tr><td>${esc(dateLabel(o.date))}</td><td>${numeric(o.ndvi,3)}</td><td>${numeric(o.ndmi,3)}</td><td>${numeric(o.nbr,3)}</td><td>${numeric(o.precipitation_anomaly,2)}</td><td>${numeric(o.temperature_anomaly,2)}</td><td>${pct(o.valid_fraction)}</td><td>${numeric(o.health_score,1)}</td></tr>`).join('')}</tbody></table></div><div class="detail-foot"><span>${esc(r.provenance?.source)}</span><span>${esc(r.provenance?.geometry_note || '')}</span></div><div id="alert-lifecycle"></div>`;
     if(typeof renderAlertLifecycle==='function')renderAlertLifecycle(r);
   }else if(state.tab==='coverage'){
     renderCoverage(r.id);
@@ -193,7 +195,7 @@ async function renderEvaluation(id) {
     if(state.selected!==id||state.tab!=='evaluation')return;
     const names={persistence:'Persistence',seasonal_naive:'Seasonal naive',damped_trend:'Damped trend'};
     const rows=Object.entries(result.methods).flatMap(([method,scores])=>Object.entries(scores.by_horizon).map(([h,m])=>`<tr><td><strong>${names[method]}</strong></td><td>${h} month${h==='1'?'':'s'}</td><td>${m.n}</td><td>${numeric(m.mae,2)}</td><td>${numeric(m.rmse,2)}</td><td>${pct(m.coverage)}</td></tr>`));
-    $('#detail-body').innerHTML=`<div class="observations-caption"><strong>Historical baseline comparison</strong><button class="button secondary" id="export-evaluation">${icon('download',14)}Export evaluation</button></div><p class="chart-caveat" style="margin-bottom:16px">Each prediction uses only the observations available at its historical cutoff. Errors measure spectral index points; this is not validation against field-measured ecosystem health.</p><div class="table-scroll"><table><thead><tr><th>Baseline</th><th>Horizon</th><th>Scored targets</th><th>MAE ↓</th><th>RMSE ↓</th><th>Empirical range coverage</th></tr></thead><tbody>${rows.join('')}</tbody></table></div><div class="evidence-disclaimer">${esc(result.synthetic_warning || 'Imported observations have not been independently verified.')} Intervals remain uncalibrated. Overlapping cutoffs are dependent. Use an untouched period and region before claiming generalization.</div><p class="chart-caveat" style="margin-top:12px">Calendar-month targets are matched to the actual dated observation; nominal forecasts use 30, 180, and 365 days. Missing targets are skipped. A dash means unavailable.</p>`;
+    $('#detail-body').innerHTML=`<div class="observations-caption"><strong>Historical baseline comparison</strong><button class="button secondary" id="export-evaluation">${icon('download',14)}Export evaluation</button></div><p class="chart-caveat" style="margin-bottom:16px">Each prediction uses only the observations available at its historical cutoff. Errors measure spectral index points; this is not validation against field-measured ecosystem health.</p><div class="table-scroll"><table><thead><tr><th>Baseline</th><th>Horizon</th><th>Scored targets</th><th>MAE ↓</th><th>RMSE ↓</th><th>Empirical range coverage</th></tr></thead><tbody>${rows.join('')}</tbody></table></div><div class="evidence-disclaimer">${esc(result.synthetic_warning || 'Remote measurements and their ecological interpretation have not been independently validated.')} Intervals remain uncalibrated. Overlapping cutoffs are dependent. Use an untouched period and region before claiming generalization.</div><p class="chart-caveat" style="margin-top:12px">Calendar-month targets are matched to the actual dated observation; nominal forecasts use 30, 180, and 365 days. Missing targets are skipped. A dash means unavailable.</p>`;
     $('#export-evaluation').addEventListener('click',()=>downloadJSON(result,'forestmind-'+id+'-backtest.json'));
   }catch(error){if(state.selected===id&&state.tab==='evaluation')$('#detail-body').innerHTML=`<p class="observations-empty">${esc(error.message)} Try selecting Backtesting again.</p>`;}
 }
@@ -207,7 +209,7 @@ function renderTable() {
 }
 function renderProvenance() {
   if(!state.overview)return;
-  $('#provenance-list').innerHTML=state.overview.regions.map(r=>`<div class="provenance-row"><div><strong>${esc(r.name)}</strong><p>${esc(r.provenance?.source || 'Source recorded with observations')} · ${esc(r.provenance?.method || 'Interpretable monitoring baseline')}</p></div><div>${badge(isDemo(r)?'Synthetic demo':'User-provided')}<p>Last observed ${esc(dateLabel(r.latest_date))}</p></div></div>`).join('');
+  $('#provenance-list').innerHTML=state.overview.regions.map(r=>`<div class="provenance-row"><div><strong>${esc(r.name)}</strong><p>${esc(r.provenance?.source || 'Source recorded with observations')} · ${esc(r.provenance?.method || 'Interpretable monitoring baseline')}</p></div><div>${badge(observationSource(r))}<p>Last observed ${esc(dateLabel(r.latest_date))}</p></div></div>`).join('');
 }
 async function runAnalysis() {
   if(!state.selected)return;
