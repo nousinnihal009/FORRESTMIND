@@ -16,7 +16,8 @@ CATALOG_HOSTS = {"earth-search.aws.element84.com", "planetarycomputer.microsoft.
 ASSET_HOSTS = {"e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com",
                "sentinel-cogs.s3.us-west-2.amazonaws.com", "sentinel-cogs.s3.amazonaws.com",
                "sentinel2l2a01.blob.core.windows.net", "sentinel2l2a02.blob.core.windows.net",
-               "sentinel1rtc.blob.core.windows.net", "landsateuwest.blob.core.windows.net"}
+               "sentinel1rtc.blob.core.windows.net", "sentinel1euwestrtc.blob.core.windows.net",
+               "esa-worldcover.s3.eu-central-1.amazonaws.com", "landsateuwest.blob.core.windows.net"}
 
 
 def validate_destination(href: str, *, catalog=False) -> str:
