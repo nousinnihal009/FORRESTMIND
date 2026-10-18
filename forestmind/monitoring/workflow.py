@@ -22,6 +22,7 @@ from forestmind.monitoring.analysis import METHOD, analyze_region
 from forestmind.monitoring.coverage import assess_history
 from forestmind.monitoring.evaluation import backtest_prepared
 from forestmind.monitoring.spatial import fragmentation_metrics, geometry_bbox, recovery_diagnostics, spectral_change
+from forestmind.monitoring.projections import scenario_projection
 
 
 def now():
@@ -181,10 +182,14 @@ class WorkflowService:
             result["stale"] = bool(saved and (digest(saved[1]) != result["manifest"]["observations_sha256"]
                                              or digest(saved[0]["geometry"]) != result["manifest"]["geometry_sha256"]))
             return result
-        return self.run(region_id, execute_model=False)
+        saved = self.store.region(region_id)
+        if saved is None:
+            raise ValueError("Region not found")
+        return {"status": "not_run", "manifest": manifest_for(*saved), "capabilities": [],
+                "reason": "Run selected-area analysis to create an immutable evidence snapshot on the worker.", "stale": False}
 
     def run(self, region_id, *, cache_dir=None, cutoff=None, job_id=None, source_paths=None,
-            execute_model=True, include_climate=False):
+            execute_model=True, include_climate=False, include_landcover=False):
         saved = self.store.region(region_id)
         if saved is None:
             raise ValueError("Region not found")
@@ -230,8 +235,19 @@ class WorkflowService:
         cover = self._context(region_id, "forest_cover")
         if cover and (cover["geometry_sha256"] != digest(region["geometry"]) or cover["observed_at"] > cutoff):
             cover = None
+        landcover_error = None
+        if include_landcover and not payload["synthetic"]:
+            try:
+                from forestmind.monitoring.landcover import acquire_landcover
+                cover = acquire_landcover(region["geometry"], cutoff=cutoff)
+                self.save_context(region_id, "forest_cover", cover)
+            except Exception as error:
+                from forestmind.data.adapters.network import public_error
+                landcover_error = f"Forest-cover collection failed: {public_error(error)}"
         fragmentation = fragmentation_metrics(cover, region["geometry"]) if cover else {"available": False,
-            "reason": "No independently supplied forest/nonforest raster at or before this cutoff is attached. Import a dated classified cover raster; NDVI thresholds are not a substitute."}
+            "reason": landcover_error or "No forest/nonforest raster at or before this cutoff is attached. Collect WorldCover reference or import a dated classified cover raster; NDVI thresholds are not a substitute."}
+        if landcover_error:
+            fragmentation["collection_error"] = landcover_error
         climate = self._context(region_id, "climate")
         if climate and (climate.get("geometry_sha256") != digest(region["geometry"]) or climate["end"] > cutoff):
             climate = None
@@ -278,6 +294,7 @@ class WorkflowService:
             model_result["reason"] = "A registered checkpoint is eligible. Run selected-area analysis to execute it on the worker."
         forecast_available = bool(analysis["forecast"]["points"])
         resilience_available = analysis["resilience"]["status"] != "insufficient_data"
+        projections = scenario_projection(analysis)
         capabilities = [
             capability("optical", "Optical observations and history", bool(observations), "Dated NDVI, NDMI and NBR; masks and source provenance retained.", evidence={"count": len(observations)}),
             capability("radar", "Radar structural evidence", any(r.get("sar_change") is not None for r in observations), "Uses explicitly supplied SAR-change context only; automatic selected-area Sentinel-1 acquisition and orbit-consistent pairing are not yet integrated.", ["Terrain-corrected calibrated radar, common orbit/geometry and dated quality masks"]),
@@ -287,7 +304,7 @@ class WorkflowService:
             capability("land_cover", "Forest-cover and clearing evidence", cover is not None, "A dated classified forest-cover raster is attached; change requires a second comparable epoch." if cover else fragmentation["reason"], ["Dated classified cover raster, separate from spectral indices"]),
             capability("drivers", "Candidate drivers and competing explanations", any(d["evidence_score"] is not None for d in analysis["drivers"]), "Evidence scores are associations. Missing rainfall, fire, land-cover, human-activity and radar evidence remain explicit; cause may be uncertain."),
             capability("forecast", "30-day and one-year indicator forecast", forecast_available, analysis["forecast"]["caveat"], ["12 consecutive usable months ending at the cutoff"]),
-            capability("five_year", "Five-year scenario-conditioned projection", False, "No validated scenario-conditioned five-year model with supported climate and intervention inputs is registered. Current score shifts are sensitivity illustrations, not five-year ecological projections.", ["Defined target, long-horizon labels, calibrated model and supported scenario drivers"]),
+            capability("five_year", "Five-year hypothetical sensitivity projection", projections["available"], projections["reason"] + " No trained long-horizon ecological projection or calibrated uncertainty is established.", ["Usable one-year indicator baseline; explicit scenario assumptions"], status="hypothetical" if projections["available"] else "unavailable"),
             capability("resilience", "Autocorrelation and variance", resilience_available, " ".join(analysis["resilience"]["evidence"]), ["36 consecutive usable monthly observations"]),
             capability("recovery", "Observed recovery-time diagnostics", recovery["available"], recovery["reason"], ["24 contiguous baseline months plus 3 subsequent observations"]),
             capability("fragmentation", "Patch, edge and structural connectivity", fragmentation["available"], "Four-neighbour classified-cover topology; species-specific connectivity is unvalidated." if cover else fragmentation["reason"], ["Dated forest/nonforest raster and explicit valid mask"]),
@@ -301,6 +318,7 @@ class WorkflowService:
         manifest["source_manifest_sha256"] = prepared.provenance["source_manifest_sha256"] if prepared else None
         manifest["context_sha256"] = {"climate": digest(climate), "forest_cover": digest(cover) if cover else None}
         manifest["registry_sha256"] = digest(self.registry)
+        manifest["model_execution_status_sha256"] = digest({"available": model_result["available"], "reason": model_result["reason"]})
         manifest["implementation_sha256"] = {name: file_hash(Path(__file__).with_name(name))
                                               for name in ("workflow.py", "spatial.py", "climate.py")}
         manifest["id"] = digest({key: value for key, value in manifest.items() if key != "id"})
@@ -310,7 +328,7 @@ class WorkflowService:
                   "forecast": analysis["forecast"], "resilience": analysis["resilience"], "recovery": recovery,
                   "spatial_change": spatial, "fragmentation": fragmentation, "climate": climate, "model": model_result,
                   "alerts": analysis["alerts"], "coverage": assess_history(payload), "evaluation": backtest_prepared(payload),
-                  "scenarios": {"available": forecast_available, "endpoint": "/api/v1/scenarios", "causal": False},
+                  "scenarios": {**projections, "endpoint": f"/api/v1/regions/{region_id}/workflow/scenarios"},
                   "sequence": prepared.provenance if prepared else {"available": False, "reason": sequence_error}}
         with self.store.connection() as db:
             existing = db.execute("SELECT payload FROM workflow_snapshots WHERE id=?", (manifest["id"],)).fetchone()
@@ -331,18 +349,20 @@ class WorkflowService:
         with self.store.connection() as db:
             db.execute("INSERT OR REPLACE INTO workflow_jobs VALUES (?,?,?)", (job["id"], job["region_id"], self.store._json(job)))
 
-    def submit(self, region_id, include_climate=False):
+    def submit(self, region_id, include_climate=False, include_landcover=False):
         with self.lock:
             with self.store.connection() as db:
                 jobs = [json.loads(r["payload"]) for r in db.execute("SELECT payload FROM workflow_jobs")]
             active = [job for job in jobs if job["status"] in {"pending", "running"}]
             for job in active:
                 if job["region_id"] == region_id:
+                    if (job.get("include_climate", False) != include_climate or job.get("include_landcover", False) != include_landcover):
+                        raise ValueError("An analysis with different collection settings is already active for this area; wait for it to finish.")
                     return job
             if len(active) >= 4:
                 raise ValueError("Analysis queue is full (one worker, at most four queued/running jobs). Retry after a job finishes.")
             job = {"id": "workflow-" + uuid4().hex[:12], "region_id": region_id, "status": "pending",
-                   "created_at": now(), "include_climate": include_climate, "error": None}
+                   "created_at": now(), "include_climate": include_climate, "include_landcover": include_landcover, "error": None}
             self._save_job(job)
             self.executor.submit(self._execute, job.copy())
             return job
@@ -351,7 +371,7 @@ class WorkflowService:
         job.update(status="running", started_at=now())
         self._save_job(job)
         try:
-            result = self.run(job["region_id"], job_id=job["id"], include_climate=job["include_climate"])
+            result = self.run(job["region_id"], job_id=job["id"], include_climate=job["include_climate"], include_landcover=job.get("include_landcover", False))
             job.update(status="completed", manifest_id=result["manifest"]["id"], completed_at=now())
         except Exception:
             logging.getLogger(__name__).exception("selected_area_analysis_failed", extra={"job_id": job["id"]})
