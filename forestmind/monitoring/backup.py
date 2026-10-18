@@ -1,7 +1,7 @@
 """Offline workspace backup/restore including immutable source artifacts."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -66,7 +66,7 @@ def backup_workspace(database, destination):
         if sum(path.stat().st_size for path in files) + database.stat().st_size > 3 * 1024**3:
             raise ValueError("Workspace exceeds the 3 GiB backup limit; archive a reviewed study separately")
         db_copy = destination / database.name
-        with sqlite3.connect(database) as source, sqlite3.connect(db_copy) as target:
+        with closing(sqlite3.connect(database)) as source, closing(sqlite3.connect(db_copy)) as target:
             source.backup(target)
             if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("Database backup integrity check failed")
@@ -105,7 +105,7 @@ def verify_backup(source):
             raise ValueError("Backup file integrity mismatch: " + entry["path"])
     if database.name not in seen:
         raise ValueError("Backup is missing its database")
-    with sqlite3.connect(f"file:{(source / database.name).as_posix()}?mode=ro", uri=True) as db:
+    with closing(sqlite3.connect(f"file:{(source / database.name).as_posix()}?mode=ro", uri=True)) as db:
         if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("Backup database failed integrity check")
     return manifest
