@@ -10,6 +10,7 @@ from datetime import date, datetime, timezone
 import hashlib
 import json
 import logging
+import math
 from pathlib import Path
 import threading
 from uuid import uuid4
@@ -109,6 +110,14 @@ def model_eligibility(registry: list[dict], region: dict, prepared) -> tuple[dic
                 reasons.append("Model band order or physical units do not match the twelve-band Sentinel-2 sequence.")
             if contract.get("grid_shape") != prepared.provenance["grid_shape"]:
                 reasons.append("Model grid dimensions do not match the acquired cache.")
+            height, width = prepared.provenance["grid_shape"]
+            pixel_m = [math.radians(bbox[2] - bbox[0]) * 6371008.8 * math.cos(math.radians((bbox[1] + bbox[3]) / 2)) / width,
+                       math.radians(bbox[3] - bbox[1]) * 6371008.8 / height]
+            resolution = contract.get("pixel_size_m_range")
+            if (not isinstance(resolution, list) or len(resolution) != 2 or
+                    not all(isinstance(v, (int, float)) and math.isfinite(v) for v in resolution) or
+                    not all(resolution[0] <= value <= resolution[1] for value in pixel_m)):
+                reasons.append("Actual AOI grid spacing is outside the model's documented pixel_size_m_range.")
             if contract.get("sampling") != "individual_acquisitions":
                 reasons.append("Model must explicitly support individual acquisitions; this sequence is not monthly composites.")
             if not contract.get("min_steps", 1) <= count <= contract.get("max_steps", 48):
@@ -127,10 +136,11 @@ def model_eligibility(registry: list[dict], region: dict, prepared) -> tuple[dic
 class WorkflowService:
     def __init__(self, store, *, registry_path: str | None = None):
         self.store = store
-        self.root = store.path.parent / "workflow-artifacts"
+        self.root = store.path.parent / (store.path.stem + "-workflow")
         self.root.mkdir(exist_ok=True)
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="forestmind-analysis")
         self.lock = threading.RLock()
+        self.analysis_lock = threading.Lock()
         self.registry = []
         if registry_path:
             path = Path(registry_path).resolve()
@@ -181,6 +191,18 @@ class WorkflowService:
             saved = self.store.region(region_id)
             result["stale"] = bool(saved and (digest(saved[1]) != result["manifest"]["observations_sha256"]
                                              or digest(saved[0]["geometry"]) != result["manifest"]["geometry_sha256"]))
+            for name, expected in result["manifest"].get("implementation_sha256", {}).items():
+                if file_hash(Path(__file__).with_name(name)) != expected:
+                    result["stale"] = True
+            if result["manifest"].get("registry_sha256") != digest(self.registry):
+                result["stale"] = True
+            for kind, expected in result["manifest"].get("context_sha256", {}).items():
+                context = self._context(region_id, kind)
+                if context and (context.get("geometry_sha256") != result["manifest"]["geometry_sha256"] or
+                                context.get("end", context.get("observed_at", "9999")) > result["manifest"]["observation_cutoff"]):
+                    context = None
+                if (digest(context) if context else None) != expected:
+                    result["stale"] = True
             return result
         saved = self.store.region(region_id)
         if saved is None:
@@ -190,6 +212,14 @@ class WorkflowService:
 
     def run(self, region_id, *, cache_dir=None, cutoff=None, job_id=None, source_paths=None,
             execute_model=True, include_climate=False, include_landcover=False):
+        # Separate from submit's short lock: HTTP submissions never wait on raster/network/model work.
+        with self.analysis_lock:
+            return self._run(region_id, cache_dir=cache_dir, cutoff=cutoff, job_id=job_id,
+                             source_paths=source_paths, execute_model=execute_model,
+                             include_climate=include_climate, include_landcover=include_landcover)
+
+    def _run(self, region_id, *, cache_dir=None, cutoff=None, job_id=None, source_paths=None,
+             execute_model=True, include_climate=False, include_landcover=False):
         saved = self.store.region(region_id)
         if saved is None:
             raise ValueError("Region not found")
@@ -316,11 +346,12 @@ class WorkflowService:
             capability("tipping", "Validated ecosystem tipping-point prediction", False, "No operational tipping-point target or independent longitudinal validation exists. Recovery, variance and autocorrelation are descriptive research diagnostics.")]
         manifest = manifest_for(region, observations, cutoff, model_version)
         manifest["source_manifest_sha256"] = prepared.provenance["source_manifest_sha256"] if prepared else None
-        manifest["context_sha256"] = {"climate": digest(climate), "forest_cover": digest(cover) if cover else None}
+        manifest["context_sha256"] = {"climate": digest(climate) if climate.get("available") else None,
+                                      "forest_cover": digest(cover) if cover else None}
         manifest["registry_sha256"] = digest(self.registry)
         manifest["model_execution_status_sha256"] = digest({"available": model_result["available"], "reason": model_result["reason"]})
         manifest["implementation_sha256"] = {name: file_hash(Path(__file__).with_name(name))
-                                              for name in ("workflow.py", "spatial.py", "climate.py")}
+                                              for name in ("workflow.py", "spatial.py", "climate.py", "projections.py")}
         manifest["id"] = digest({key: value for key, value in manifest.items() if key != "id"})
         result = {"schema_version": 1, "kind": "forestmind_selected_area_analysis", "created_at": now(),
                   "manifest": manifest, "stale": False, "job_id": job_id, "capabilities": capabilities,
