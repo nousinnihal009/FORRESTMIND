@@ -152,6 +152,9 @@ def test_api_rejects_arbitrary_paths_and_exports_selected_manifest(tmp_path, sav
     app = FastAPI()
     service = install_workflow(app, store)
     with TestClient(app) as client:
+        empty = client.get(f"/api/v1/regions/{region['id']}/workflow").json()
+        assert empty["status"] == "not_run"
+        service.run(region["id"])
         result = client.get(f"/api/v1/regions/{region['id']}/workflow").json()
         identifier = result["manifest"]["id"]
         assert client.get(f"/api/v1/regions/{region['id']}/workflow/export?manifest_id={identifier}").json()["manifest"] == result["manifest"]
