@@ -50,6 +50,7 @@ function route() {
   $$('[data-route]').forEach(el => {el.classList.toggle('active', el.dataset.route === name); if (el.dataset.route === name) el.setAttribute('aria-current','page'); else el.removeAttribute('aria-current');});
   $('#page-name').textContent = {overview:'Overview',explore:'Find a forest',monitoring:'Monitoring regions',scenarios:'Scenario lab',methods:'Data & methods'}[name];
   if (name === 'monitoring') renderTable();
+  if (name === 'methods' && typeof renderOperations === 'function') renderOperations();
   if (name === 'explore' && typeof renderAreaMap === 'function') {renderAreaMap();refreshAcquisitionJobs();}
 }
 async function loadWorkspace(selectId) {
@@ -230,13 +231,19 @@ async function runScenario(event) {
   try{
     const values=Object.fromEntries(new FormData($('#scenario-form')));
     for(const k of ['fire_reduction','pressure_reduction','restoration','climate_stress'])values[k]=Number(values[k]);
-    const result=await api('/scenarios',{method:'POST',body:JSON.stringify(values)});
+    let result;
+    if($('#scenario-horizon').value==='five-year'){
+      const snapshot=await ensureWorkflowSnapshot(values.region_id);
+      const parameters={...values,manifest_id:snapshot.manifest.id};delete parameters.region_id;
+      result=await api('/regions/'+encodeURIComponent(values.region_id)+'/workflow/scenarios',{method:'POST',body:JSON.stringify(parameters)});
+      result={...result,scenario:result.comparisons[0].points,caveat:result.limitations.join(' '),historical:snapshot.forecast.historical};
+    }else result=await api('/scenarios',{method:'POST',body:JSON.stringify(values)});
     const region=await api('/regions/'+encodeURIComponent(values.region_id));
     state.scenario=result;
     if(!result.baseline.length){$('#scenario-results').innerHTML='<div class="empty-state"><h2>More observations are needed</h2><p>This region has no eligible forecast. No scenario projection was produced. Supply twelve consecutive usable monthly records, including the latest month.</p></div>';return;}
     const b=result.baseline.at(-1),s=result.scenario.at(-1),delta=b&&s?s.score-b.score:null;
     const assumptions=Array.isArray(result.assumptions)?result.assumptions:Object.entries(result.assumptions||{}).map(([k,v])=>`${k}: ${typeof v==='object'?JSON.stringify(v):v}`);
-    $('#scenario-results').innerHTML=`<div class="panel-heading"><div><div class="eyebrow">EXPLICIT ASSUMPTIONS · ILLUSTRATIVE OUTPUT</div><h2>${esc(region.name)}</h2></div>${badge('Uncalibrated')}</div><div class="scenario-result-body"><div class="scenario-metrics"><div class="scenario-metric"><small>Baseline · ${b?.horizon_days || '—'} days</small><strong>${numeric(b?.score,1)}</strong></div><div class="scenario-metric"><small>Scenario · same horizon</small><strong>${numeric(s?.score,1)}</strong></div><div class="scenario-metric"><small>Condition-point difference</small><strong>${typeof delta==='number'&&delta>0?'+':''}${numeric(delta,1)}</strong></div></div><div class="chart-topline"><div class="chart-legend"><span><i class="legend-line"></i>Observed</span><span><i class="legend-line dashed"></i>Baseline</span><span><i class="legend-line" style="border-color:#b3935c"></i>Scenario</span></div></div>${chart(region.forecast.historical.slice(-12),result.baseline,{alternative:result.scenario,label:'Baseline and hypothetical scenario condition trajectories'})}<div class="evidence-disclaimer">${esc(result.caveat)}</div><div class="scenario-assumptions"><strong>Assumptions saved with this comparison</strong><ul>${assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul><button id="export-scenario" class="button secondary">${icon('download',14)}Export comparison</button></div></div>`;
+    $('#scenario-results').innerHTML=`<div class="panel-heading"><div><div class="eyebrow">EXPLICIT ASSUMPTIONS · ILLUSTRATIVE OUTPUT</div><h2>${esc(region.name)}</h2></div>${badge('Uncalibrated')}</div><div class="scenario-result-body"><div class="scenario-metrics"><div class="scenario-metric"><small>Baseline · ${b?.horizon_days || '—'} days</small><strong>${numeric(b?.score,1)}</strong></div><div class="scenario-metric"><small>Scenario · same horizon</small><strong>${numeric(s?.score,1)}</strong></div><div class="scenario-metric"><small>Condition-point difference</small><strong>${typeof delta==='number'&&delta>0?'+':''}${numeric(delta,1)}</strong></div></div><div class="chart-topline"><div class="chart-legend"><span><i class="legend-line"></i>Observed</span><span><i class="legend-line dashed"></i>Baseline</span><span><i class="legend-line" style="border-color:#b3935c"></i>Scenario</span></div></div>${chart((result.historical || region.forecast.historical).slice(-12),result.baseline,{alternative:result.scenario,label:'Baseline and hypothetical scenario condition trajectories'})}<div class="evidence-disclaimer">${esc(result.caveat)}</div><div class="scenario-assumptions"><strong>Assumptions saved with this comparison</strong><ul>${assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul><button id="export-scenario" class="button secondary">${icon('download',14)}Export comparison</button></div></div>`;
     $('#export-scenario').addEventListener('click',()=>downloadJSON(state.scenario,'forestmind-scenario-'+state.scenario.id+'.json'));
     toast('Scenario comparison saved.');
   }catch(error){reportError(error);toast(error.message);}
@@ -271,6 +278,7 @@ $('#scenario-form').addEventListener('submit',runScenario);
 $$('input[type="range"]').forEach(el=>el.addEventListener('input',()=>{$('#'+el.id+'-output').textContent=el.value+'%';}));
 function invalidateScenario(){if(state.scenario){state.scenario=null;$('#scenario-results').innerHTML='<div class="empty-state"><h2>Assumptions changed</h2><p>Compare trajectories again to evaluate the selected region with these inputs.</p></div>';}}
 $('#scenario-region').addEventListener('change',()=>{invalidateScenario();selectRegion($('#scenario-region').value);});
+$('#scenario-horizon').addEventListener('change',invalidateScenario);
 $$('input[type="range"]').forEach(el=>el.addEventListener('input',invalidateScenario));
 $$('.import-trigger').forEach(el=>el.addEventListener('click',openImport));
 $('#close-import').addEventListener('click',()=>$('#import-dialog').close());
