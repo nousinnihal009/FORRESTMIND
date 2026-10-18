@@ -39,6 +39,10 @@ class Store:
             if added:
                 for row in connection.execute("SELECT result FROM analyses").fetchall():
                     self._save_analysis(connection, json.loads(row[0]))
+            added_manifest = connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (?,?)", (3, datetime.now(timezone.utc).isoformat())).rowcount
+            if added_manifest:
+                for row in connection.execute("SELECT result FROM analyses").fetchall():
+                    self._save_analysis(connection, json.loads(row[0]))
 
     @contextmanager
     def connection(self):
@@ -72,6 +76,14 @@ class Store:
 
     def _save_analysis(self, connection, analysis):
         from forestmind.monitoring.alerts import reconcile_alerts
+        from forestmind.monitoring.workflow import manifest_for
+        saved = connection.execute("SELECT metadata,observations FROM regions WHERE id=?", (analysis["id"],)).fetchone()
+        if saved:
+            region, observations = json.loads(saved[0]), json.loads(saved[1])
+            analyzed = [{k: v for k, v in row.items() if k != "health_score"} for row in analysis["observations"]]
+            if observations != analyzed or region["geometry"] != analysis["geometry"]:
+                raise ValueError("Observations changed while analysis ran; run analysis again for the current snapshot")
+            analysis["manifest"] = manifest_for(region, observations)
         reconcile_alerts(connection, analysis)
         connection.execute("INSERT OR REPLACE INTO analyses (region_id,result) VALUES (?,?)",
                            (analysis["id"], self._json(analysis)))
