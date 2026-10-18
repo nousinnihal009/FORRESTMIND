@@ -22,6 +22,9 @@ data/real-pilot/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/*-acquisition/
+data/*-workflow/
+data/backups/
 artifacts/
 build/
 dist/
