@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 import json
 from pathlib import Path
 import sqlite3
@@ -144,7 +144,7 @@ class Store:
         with destination.open("xb"):
             pass
         try:
-            with sqlite3.connect(self.path) as source, sqlite3.connect(destination) as target:
+            with closing(sqlite3.connect(self.path)) as source, closing(sqlite3.connect(destination)) as target:
                 source.backup(target)
                 if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                     raise ValueError("Backup integrity check failed")
