@@ -39,6 +39,10 @@ class WorkflowCapacityError(ValueError):
     """Refuse new work without removing existing reproducible evidence."""
 
 
+class ModelContractError(ValueError):
+    """A public-safe contract explanation, without paths or provider credentials."""
+
+
 def file_fingerprint(path):
     """Cheap freshness hint; execution still verifies the full pinned SHA256."""
     try:
@@ -204,12 +208,17 @@ class WorkflowService:
         return sum(db.execute(f"SELECT COALESCE(SUM(length(CAST(payload AS BLOB))),0) FROM {table}").fetchone()[0]
                    for table in WORKFLOW_TABLES)
 
-    def _check_metadata(self, db, payload, previous=None):
+    @staticmethod
+    def _job_reservation(db):
+        count = db.execute("SELECT COUNT(*) FROM workflow_jobs WHERE json_extract(payload,'$.status') IN ('pending','running')").fetchone()[0]
+        return count * 8192
+
+    def _check_metadata(self, db, payload, previous=None, reservation_delta=0):
         size = len(payload.encode("utf-8"))
         if size > MAX_WORKFLOW_RECORD_BYTES:
             raise WorkflowCapacityError("Analysis record exceeds the 16 MiB limit. Reduce the observation history or raster grid.")
         added = size - len((previous or "").encode("utf-8"))
-        if self._metadata_bytes(db) + added > MAX_WORKFLOW_METADATA_BYTES:
+        if self._metadata_bytes(db) + self._job_reservation(db) + added + reservation_delta > MAX_WORKFLOW_METADATA_BYTES:
             raise WorkflowCapacityError("Workflow metadata storage limit reached. Back up this workspace and use a new workspace database; existing evidence is preserved.")
 
     def _artifact_bytes(self):
@@ -229,7 +238,9 @@ class WorkflowService:
         with self.store.connection() as db:
             counts = {name: db.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0] for name in ("workflow_jobs", "workflow_snapshots")}
             metadata = self._metadata_bytes(db)
+            reserved = self._job_reservation(db)
         return {"metadata_bytes": metadata, "metadata_limit_bytes": MAX_WORKFLOW_METADATA_BYTES,
+                "reserved_job_completion_bytes": reserved,
                 "artifact_bytes": self._artifact_bytes(), "artifact_limit_bytes": MAX_WORKFLOW_ARTIFACT_BYTES,
                 "jobs": counts["workflow_jobs"], "job_limit": MAX_WORKFLOW_JOBS,
                 "snapshots": counts["workflow_snapshots"], "snapshot_limit": MAX_WORKFLOW_SNAPSHOTS,
@@ -420,10 +431,10 @@ class WorkflowService:
                 config = checkpoint.get("config", {})
                 data_config = config.get("data", {})
                 if data_config.get("source") == "synthetic" or data_config.get("synthetic") is not False:
-                    raise ValueError("Checkpoint itself must declare data.synthetic=false and a real training source")
+                    raise ModelContractError("Checkpoint itself must declare data.synthetic=false and a real training source")
                 foundation = config.get("foundation", {})
                 if foundation.get("name") != "custom_vit":
-                    raise ValueError("Native pretrained offline loading is not verified; proxy checkpoints are development-only and cannot serve real monitoring")
+                    raise ModelContractError("Native pretrained offline loading is not verified; proxy checkpoints are development-only and cannot serve real monitoring")
                 sequence_id = digest({"sources": prepared.provenance["sources"], "model": model["sha256"], "cutoff": cutoff})
                 input_path = self.root / f"sequence-{sequence_id}.npz"
                 if not input_path.exists():
@@ -440,6 +451,8 @@ class WorkflowService:
                                 "reason": "Executed compatible registered model. Registration records operator-reviewed scope; it does not independently establish scientific validity."}
             except WorkflowCapacityError:
                 raise
+            except ModelContractError as error:
+                model_result["reason"] = f"Registered model execution abstained: {error}"
             except Exception as error:
                 model_result["reason"] = f"Registered model execution abstained ({type(error).__name__}). Verify the local checkpoint configuration and input contract."
         elif model:
@@ -514,25 +527,48 @@ class WorkflowService:
 
     def _save_job(self, job):
         with self.store.connection() as db:
-            db.execute("INSERT OR REPLACE INTO workflow_jobs VALUES (?,?,?)", (job["id"], job["region_id"], self.store._json(job)))
+            db.execute("BEGIN IMMEDIATE")
+            self._write_job(db, job)
+
+    def _write_job(self, db, job):
+        prior = db.execute("SELECT payload FROM workflow_jobs WHERE id=?", (job["id"],)).fetchone()
+        payload = self.store._json(job)
+        if len(payload.encode("utf-8")) > 8192:
+            raise WorkflowCapacityError("Workflow job record exceeds its reserved 8 KiB bound.")
+        was_active = bool(prior and json.loads(prior[0])["status"] in {"pending", "running"})
+        active = job["status"] in {"pending", "running"}
+        self._check_metadata(db, payload, prior[0] if prior else None, (int(active) - int(was_active)) * 8192)
+        db.execute("INSERT OR REPLACE INTO workflow_jobs VALUES (?,?,?)", (job["id"], job["region_id"], payload))
+
+    def save_scenario(self, result):
+        with self.store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            payload = self.store._json(result)
+            self._check_metadata(db, payload)
+            db.execute("INSERT INTO scenarios (id,region_id,payload) VALUES (?,?,?)", (result["id"], result["region_id"], payload))
 
     def submit(self, region_id, include_climate=False, include_landcover=False, include_radar=False):
         with self.lock:
             with self.store.connection() as db:
+                db.execute("BEGIN IMMEDIATE")
                 jobs = [json.loads(r["payload"]) for r in db.execute("SELECT payload FROM workflow_jobs")]
-            active = [job for job in jobs if job["status"] in {"pending", "running"}]
-            for job in active:
-                if job["region_id"] == region_id:
-                    if (job.get("include_climate", False) != include_climate or job.get("include_landcover", False) != include_landcover
-                            or job.get("include_radar", False) != include_radar):
-                        raise ValueError("An analysis with different collection settings is already active for this area; wait for it to finish.")
-                    return job
-            if len(active) >= 4:
-                raise ValueError("Analysis queue is full (one worker, at most four queued/running jobs). Retry after a job finishes.")
-            job = {"id": "workflow-" + uuid4().hex[:12], "region_id": region_id, "status": "pending",
-                   "created_at": now(), "include_climate": include_climate, "include_landcover": include_landcover,
-                   "include_radar": include_radar, "error": None}
-            self._save_job(job)
+                active = [job for job in jobs if job["status"] in {"pending", "running"}]
+                for job in active:
+                    if job["region_id"] == region_id:
+                        if (job.get("include_climate", False) != include_climate or job.get("include_landcover", False) != include_landcover
+                                or job.get("include_radar", False) != include_radar):
+                            raise ValueError("An analysis with different collection settings is already active for this area; wait for it to finish.")
+                        return job
+                if len(active) >= 4:
+                    raise ValueError("Analysis queue is full (one worker, at most four queued/running jobs). Retry after a job finishes.")
+                if len(jobs) >= MAX_WORKFLOW_JOBS:
+                    raise WorkflowCapacityError("Workflow job history limit reached (10000). Back up this workspace and use a new workspace database; retained jobs are preserved.")
+                self._check_snapshot_capacity(db, region_id)
+                self._check_artifacts()
+                job = {"id": "workflow-" + uuid4().hex[:12], "region_id": region_id, "status": "pending",
+                       "created_at": now(), "include_climate": include_climate, "include_landcover": include_landcover,
+                       "include_radar": include_radar, "error": None}
+                self._write_job(db, job)
             self.executor.submit(self._execute, job.copy())
             return job
 
@@ -543,6 +579,8 @@ class WorkflowService:
             result = self.run(job["region_id"], job_id=job["id"], include_climate=job["include_climate"],
                               include_landcover=job.get("include_landcover", False), include_radar=job.get("include_radar", False))
             job.update(status="completed", manifest_id=result["manifest"]["id"], completed_at=now())
+        except WorkflowCapacityError as error:
+            job.update(status="failed", error=str(error), completed_at=now())
         except Exception:
             logging.getLogger(__name__).exception("selected_area_analysis_failed", extra={"job_id": job["id"]})
             job.update(status="failed", error="Selected-area analysis failed. See local logs; prior snapshots remain available.", completed_at=now())
