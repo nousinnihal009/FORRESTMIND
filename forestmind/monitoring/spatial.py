@@ -135,6 +135,9 @@ def fragmentation_metrics(payload: dict, geometry: dict) -> dict:
     forest_area = float(areas[forest].sum())
     return {"available": True, "kind": "forest_cover_topology", "source": payload["source"],
             "observed_at": payload["observed_at"], "classification": payload["classification"],
+            "provider": payload.get("provider", "User-supplied classification"), "license": payload.get("license"),
+            "published_at": payload.get("published_at"), "retrieved_at": payload.get("retrieved_at"),
+            "temporal_role": payload.get("temporal_role", "Dated user-supplied reference; availability history is not independently verified"),
             "valid_fraction": float(valid.mean()), "patch_count": int(count), "connectivity_rule": "four-neighbour adjacency",
             "forest_area_km2": forest_area / 1e6, "valid_area_km2": landscape_area / 1e6,
             "forest_fraction": forest_area / landscape_area if landscape_area else None,
@@ -142,7 +145,8 @@ def fragmentation_metrics(payload: dict, geometry: dict) -> dict:
             "edge_density_m_per_ha": edge / (landscape_area / 10000) if landscape_area else None,
             "largest_patch_fraction": float(patch_areas.max() / forest_area) if forest_area else None,
             "mean_nearest_centroid_m": float(nearest.mean()) if len(nearest) else None,
-            "limitations": ["User-supplied forest-cover classification is not independently verified.",
+            "limitations": ["Reference classification has not been independently field-validated for this AOI.",
                             "AOI boundary and nodata boundaries are excluded from edge length; outside connectivity is unknown.",
                             "Four-neighbour topology and centroid distance do not measure species-specific habitat connectivity.",
-                            "Areas and distances use a spherical local-grid approximation. No forest class is inferred from vegetation indices."]}
+                            "Areas and distances use a spherical local-grid approximation. No forest class is inferred from vegetation indices.",
+                            *payload.get("limitations", [])]}
