@@ -95,6 +95,12 @@ def test_common_valid_threshold_abstains(monkeypatch):
         radar.acquire_radar(geometry(), start="2024-07-01", end="2024-07-31", patch_size=16)
 
 
+def test_export_preserves_small_positive_linear_power():
+    values = np.asarray([[1e-9, .123456789]], dtype=np.float64)
+    result = radar._map(values, np.asarray([[True, True]]), digits=None)
+    assert result == [[1e-9, .123456789]]
+
+
 @pytest.mark.parametrize("kwargs", [
     {"end": "2999-01-01"}, {"start": "2024-08-01"}, {"patch_size": 256}, {"patch_size": True},
     {"search_limit": 100}, {"timeout_seconds": float("inf")}, {"geometry": geometry_for_bbox([0, 0, 1, 1])},
