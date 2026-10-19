@@ -24,3 +24,5 @@
 .local-operations{padding:0 23px 23px}.local-operations .monitor-status{margin-top:0}.notification-settings{margin-top:24px;border-top:1px solid var(--border);padding-top:20px}.notification-settings h3{font-size:14px}#notification-form{display:grid;gap:14px;margin:18px 0}#notification-form .button{justify-self:start}.local-operations .model-hashes{margin-top:17px}
 
 .workflow-readiness{margin-top:15px}.workflow-readiness>summary{font-size:11px;font-weight:600}#radar-change-map{image-rendering:pixelated;width:min(100%,450px);height:auto;border:1px solid var(--border);margin-top:12px;cursor:crosshair}
+
+.collection-errors{background:#fff4df;border:1px solid #e6cda5;padding:14px;border-radius:6px;margin-bottom:15px;font-size:11px;color:#754d20}.collection-errors p{margin-top:7px;color:#754d20;overflow-wrap:anywhere}
