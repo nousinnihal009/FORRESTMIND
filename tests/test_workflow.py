@@ -72,6 +72,7 @@ def test_workflow_binds_manifest_and_detects_changed_sources(tmp_path, saved):
     restarted = WorkflowService(Store(store.path))
     assert restarted.latest(region["id"])["manifest"] == result["manifest"]
     second.write_bytes(second.read_bytes() + b"changed")
+    assert service.latest(region["id"])["stale"]  # fingerprint marks changed evidence before a rerun
     changed = service.run(region["id"])
     assert not changed["spatial_change"]["available"]
     assert "changed after import" in changed["sequence"]["reason"]
