@@ -136,8 +136,8 @@ def _read_scene(item, bbox, patch_size, timeout_seconds):
     return np.stack(arrays), np.logical_and.reduce(valid_masks), metadata
 
 
-def _map(values, mask):
-    return [[round(float(value), 6) if keep else None for value, keep in zip(row, valid)]
+def _map(values, mask, *, digits=6):
+    return [[(round(float(value), digits) if digits is not None else float(value)) if keep else None for value, keep in zip(row, valid)]
             for row, valid in zip(values, mask)]
 
 
@@ -179,7 +179,7 @@ def acquire_radar(geometry: dict, *, start: str, end: str, patch_size: int = 64,
                 "platform": properties["platform"], "relative_orbit": properties["sat:relative_orbit"],
                 "orbit_state": properties["sat:orbit_state"], "instrument_mode": "IW", "polarizations": ["VV", "VH"],
                 "valid_fraction": float(valid.sum() / inside.sum()), "valid_mask": valid.tolist(),
-                "vv_linear_gamma0": _map(power[0], valid), "vh_linear_gamma0": _map(power[1], valid),
+                "vv_linear_gamma0": _map(power[0], valid, digits=None), "vh_linear_gamma0": _map(power[1], valid, digits=None),
                 "native_resolution_range_m": properties.get("sar:resolution_range"),
                 "native_resolution_azimuth_m": properties.get("sar:resolution_azimuth"),
                 "provider_pixel_spacing_range_m": properties.get("sar:pixel_spacing_range"),
