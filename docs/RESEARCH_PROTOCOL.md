@@ -54,3 +54,83 @@ Use justified spatial/temporal block resampling. Examine sensitivity to labels, 
 - Scenarios: declared sensitivity assumptions first; causal claims only with intervention data, an appropriate comparison design or validated process model.
 
 Archive data/model versions, configurations, split manifests, evaluation code and all outputs, including failed ablations and untested conditions. Advance claims only when the experiment supports them.
+
+## Connected analysis and context boundaries
+
+The selected-area worker now freezes the exact geometry, observation cutoff, observation hash, accepted acquisition manifest, code hashes, contextual layers and registered model version into an immutable snapshot. Refreshing observations creates another snapshot. Export the displayed manifest ID; a saved scenario retains that same manifest even after a later refresh. GET endpoints only read saved computations; raster work, backtesting, network collection and inference run on a serialized worker. Each database has its own `<database-stem>-workflow` artifacts directory.
+
+Observed NDVI/NDMI/NBR spatial deltas use only pixels valid in both first and last selected acquisitions. Seasonal differences, processing effects and remaining cloud/illumination errors can explain change. These are **observed spectral differences**, not classified clearing or calibrated maps of future degradation. The map export retains both dates, masks via null values, grid extent, source hashes and units.
+
+Recovery diagnostics freeze the first 24 consecutive usable months as a calendar-month NDVI baseline. Subsequent negative episodes use a declared 0.1 NDVI threshold; return requires two consecutive observations within 0.05 of baseline. Missing-month gaps and unrecovered final episodes are censored. This is retrospective index return, not an ecological recovery time or evidence of critical slowing down. Cross-episode ecological comparisons still require independent disturbance severity, climate and ecosystem controls.
+
+Optional contextual collection is actual provider data, with its own dated provenance:
+
+- ERA5 daily temperature, rainfall, surface soil moisture and reference evapotranspiration are retrieved at the AOI centroid, using the fixed Open-Meteo archive endpoint. Monthly counts retain null days; sums may be partial. The coarse reanalysis grid is not a forest-only observation or a model embedding. The actual three-day Tapajós smoke artifact is `artifacts/climate-context-pilot.json`. See the [provider documentation](https://open-meteo.com/en/docs/historical-weather-api) for its reanalysis provenance, coverage, latency and hosted usage terms.
+- ESA WorldCover provides historical classified tree/mangrove cover, not an authoritative forest boundary. Native map sampling and chosen output grid spacing differ. Annual reference, publication and retrieval dates are retained. A map published after an historical prediction cutoff is a retrospective reference, not a feature available to that historical forecast. These maps never enter model inputs or rolling-origin backtests. Version 100 (2020) and version 200 (2021) have different algorithms; their difference is not reported as forest loss. Patch areas, internal edge density and four-neighbour topology are descriptive at the selected sampling scale. Species-specific habitat connectivity is not measured.
+- Sentinel-1 RTC context uses a bounded, same-platform/relative-orbit/pass pair and positive calibrated linear gamma-naught samples. Pixelwise conversion is `10*log10(power)` with no clipping or min-max scaling. Differences use the common valid mask. Radar moisture, terrain, speckle and acquisition-geometry effects remain confounders. Two observations are not a seasonal radar baseline, and these contextual rasters are not silently inserted into optical neural sequences.
+
+Context source/mask arrays are included in the snapshot export. A failed recollection preserves the previous successful evidence and reports a separate collection error. Adding a contextual layer does not establish that the deployed model is multimodal.
+
+## Trusted model registration
+
+Normal application inference never executes an HTTP-supplied checkpoint path, executable upload or synthetic/proxy checkpoint. An operator may set `FORESTMIND_MODEL_REGISTRY` to a locally reviewed JSON file containing a `models` array. Paths in that file resolve relative to the registry; only the operator can configure them. Every entry needs:
+
+```json
+{
+  "id": "reviewed-study-model",
+  "version": "study-version",
+  "path": "checkpoints/model.pt",
+  "sha256": "64-character-checkpoint-sha256",
+  "trained_on_synthetic": false,
+  "license": "Actual applicable license",
+  "target": "Predefined measurable outcome, units and horizons",
+  "training_through": "YYYY-MM-DD",
+  "scope_bbox": [-56, -5, -54, -2],
+  "input": {
+    "bands": ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"],
+    "units": "surface_reflectance_0_1",
+    "grid_shape": [64, 64],
+    "pixel_size_m_range": [10, 50],
+    "sampling": "individual_acquisitions",
+    "min_steps": 12,
+    "max_steps": 48,
+    "required_modalities": ["optical"]
+  },
+  "evaluation": {
+    "path": "evidence/held-out-evaluation.json",
+    "sha256": "64-character-evaluation-sha256",
+    "independence_audited": true,
+    "acceptance_record": "Reviewed target, buffered split, metrics, failure modes and acceptance decision"
+  }
+}
+```
+
+The strings, study bounds and scales above illustrate the schema; they are **not an approved model**. The evaluation must be a real-data `test` report for that exact checkpoint. The loaded checkpoint must itself declare real training (`data.synthetic: false` and a nonsynthetic `data.source`). Physical bands, actual AOI pixel spacing, shape, sampling, geographic scope, cutoff and missing modalities must match. All four normalization arrays must be configured in the checkpoint. Current automatic execution accepts the local `custom_vit` architecture only. Native pretrained builders and development proxies are refused until a verified offline native-loading route exists. Registry declarations and a local audit record do not independently authenticate scientific quality.
+
+Eligible execution prepares a masked sequence from accepted acquisition files, runs on the local CPU and stores a model report plus the shared snapshot manifest. Ineligible execution records concrete reasons; it does not substitute the repository's synthetic demonstration checkpoint.
+
+## Reproducible real-reference baseline experiment
+
+`scripts/benchmark_references.py` supplies the missing conventional comparison harness without manufacturing reference labels. Prepare a versioned JSON manifest with:
+
+- `schema_version: 1`, `dataset_id`, `version`, `synthetic: false` and a fixed `feature_names` list.
+- `target`: `name`, `kind` (`continuous` or `event`), `definition`, `units`, `intended_use`, and one positive `horizon_days`. Use one frozen manifest per horizon/outcome.
+- `split_policy`: positive `spatial_buffer_km`, nonnegative `temporal_embargo_days`, `protected_test: true`.
+- `examples`: unique `id`, `region_id`, WGS84 `bbox`, `split` (`train`, `calibration`, `test`), `cutoff`, `features_available_at`, `target_date` exactly the frozen horizon after cutoff, `features` keyed by every feature name with finite numbers or explicit null, and numeric `target`.
+- Each example also requires independent `label_source` metadata (`reference`, `version`, `uncertainty`, `independent: true`), finite `persistence` and `seasonal` predictions, their `persistence_available_at` and `seasonal_available_at` dates, and `quality_group` (`high`, `partial`, `low`). A supplied `season` label is optional; otherwise calendar quarters are reported without claiming biome-specific seasons.
+- Event outcomes are 0/1 and baseline scores lie in [0,1]. Positive references additionally require `event_id` and an `event_date` strictly after the cutoff and no later than the horizon. These support unique-event missed-detection and first-warning lead-time summaries.
+
+At least 10 training, 5 calibration and 5 test examples are required to execute software; those counts are not scientifically adequate sample-size recommendations. Training and calibration event partitions must each contain both classes. Every partition uses disjoint region IDs and conservatively buffered footprints. A spherical bounding-circle lower bound audits spatial separation; it can reject large elongated footprints whose nearest corners would pass. Reduce spatial units or document a separately reviewed spatial-block design rather than silently disabling buffers. Training target windows must end before calibration cutoffs plus the embargo; calibration targets must end before test cutoffs plus the embargo.
+
+```powershell
+python scripts/benchmark_references.py freeze --input data/references/study.json --protocol artifacts/study-protocol.json
+python scripts/benchmark_references.py run --input data/references/study.json --protocol artifacts/study-protocol.json --output artifacts/study-reference-comparison.json
+```
+
+Freeze before inspecting test outcomes. Protocol and result writers refuse to overwrite existing files. The protocol pins the entire data manifest, target, feature list, split policy, model settings and audit result. Changing any test labels, target, features or thresholds afterward makes the existing protocol invalid. This guard cannot enforce human custody or prove that a researcher has never inspected a test label.
+
+The harness compares persistence, seasonal predictions, regularized features (Ridge for continuous targets, logistic regression for event targets) and a fixed random forest on **identical test IDs**. Training-only medians and explicit missingness flags prevent preprocessing leakage. Event sigmoid calibration is fitted on the separate calibration partition; raw and calibrated metrics are both retained. Continuous residual intervals use calibration quantiles and explicitly lack guaranteed coverage under transfer.
+
+Outputs retain raw predictions/labels, label references, input/protocol/implementation hashes, runtime versions, MAE/RMSE/bias or Brier/average-precision/precision/recall/F1/reliability, event missed detections/lead time, false alert origins per unioned region-year exposure and region/quality/season subgroup counts. Subgroups below five examples withhold their metrics. False alert origins are not deduplicated ecological episodes. Negative improvements over persistence remain in the result. Dependence-aware uncertainty/significance, gradient-boosted/recurrent/pretrained/multimodal/resilience ablations and authenticated field-label quality still require further experiments; no naive confidence interval is reported.
+
+All harness tests use explicitly documented controlled software fixtures. No real-reference benchmark has been run: an independent versioned reference dataset, protected splits and research acceptance decision are still missing. Successful tests demonstrate audit/model/calibration plumbing, not forest predictive performance.
