@@ -163,7 +163,8 @@ function chart(history, forecast, options={}) {
 function renderDetail() {
   if(!state.region)return;
   const r=state.region,h=r.health;
-  $$('[data-detail]').forEach(el=>el.setAttribute('aria-selected',String(el.dataset.detail===state.tab)));
+  $$('[data-detail]').forEach(el=>{const selected=el.dataset.detail===state.tab;el.setAttribute('aria-selected',String(selected));el.tabIndex=selected?0:-1;});
+  $('#detail-body').setAttribute('aria-labelledby','detail-tab-'+state.tab);
   if(state.tab==='trajectory'){
     const history=(r.forecast.historical||[]).slice(-24);
     const points=(r.forecast.points||[]).filter(p=>p.horizon_days<=state.horizon);
@@ -269,7 +270,8 @@ $('#map-layer').addEventListener('change',renderMap);
 $('#zoom-in').addEventListener('click',()=>{state.zoom=Math.min(8,state.zoom*1.5);renderMap();});
 $('#zoom-out').addEventListener('click',()=>{state.zoom=Math.max(.5,state.zoom/1.5);renderMap();});
 $('#zoom-reset').addEventListener('click',()=>{state.zoom=1;renderMap();});
-$$('[data-detail]').forEach(el=>el.addEventListener('click',()=>{state.tab=el.dataset.detail;renderDetail();}));
+$$('[data-detail]').forEach(el=>{el.id='detail-tab-'+el.dataset.detail;el.setAttribute('aria-controls','detail-body');el.tabIndex=el.dataset.detail===state.tab?0:-1;el.addEventListener('click',()=>{state.tab=el.dataset.detail;renderDetail();});});
+$('#detail-body').setAttribute('role','tabpanel');$('#detail-body').setAttribute('tabindex','0');$('#detail-body').setAttribute('aria-labelledby','detail-tab-'+state.tab);
 $('.detail-tabs').addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const tabs=$$('[data-detail]'),i=tabs.indexOf(document.activeElement),next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(i+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;tabs[next].focus();tabs[next].click();});
 $('#region-search').addEventListener('input',renderTable);$('#region-filter').addEventListener('change',renderTable);
 $('#run-analysis').addEventListener('click',runAnalysis);
