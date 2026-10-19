@@ -227,6 +227,47 @@ def test_api_validation_status_and_refresh_missing_area(tmp_path):
     assert client.get("/api/v1/acquisition/capabilities").json()["limits"]["concurrency"] == 1
 
 
+def test_schedule_changes_during_due_enqueue_are_preserved(tmp_path, monkeypatch):
+    worker, _, factory = service(tmp_path)
+    job = worker.submit(request(max_downloads=2))
+    worker.run_once()
+    region_id = worker.job(job["id"])["region_id"]
+    schedule = worker.set_schedule(region_id, True, 7)
+    schedule["next_run_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    with worker.store.connection() as db:
+        db.execute("UPDATE acquisition_schedules SET payload=? WHERE region_id=?", (json.dumps(schedule), region_id))
+    other = AcquisitionService(Store(tmp_path / "test.db"), adapter_factory=factory)
+    original = worker.refresh
+    def concurrent_changes(area_id):
+        # The interval has been claimed: another tick must not enqueue it.
+        other.tick_schedules()
+        assert len(other.jobs(region_id)) == 1
+        # An HTTP setting update during enqueue must not be overwritten.
+        other.set_schedule(region_id, False, 14)
+        return original(area_id)
+    monkeypatch.setattr(worker, "refresh", concurrent_changes)
+    worker.tick_schedules()
+    final = worker.schedule(region_id)
+    assert final["enabled"] is False and final["interval_days"] == 14
+    assert final["next_run_at"] is None
+    assert final["last_job_id"] != job["id"]
+    assert len(worker.jobs(region_id)) == 2
+
+
+def test_restart_finalizes_already_requested_cancellation(tmp_path):
+    worker, state, factory = service(tmp_path)
+    job = worker.submit(request())
+    with worker.store.connection() as db:
+        job.update(status="running", phase="acquiring", cancel_requested=True)
+        worker._save(db, job)
+    restarted = AcquisitionService(Store(tmp_path / "test.db"), adapter_factory=factory)
+    restarted.recover()
+    recovered = restarted.job(job["id"])
+    assert recovered["status"] == "cancelled" and recovered["completed_at"]
+    assert not restarted.run_once()
+    assert not state["searches"] and not state["downloads"]
+
+
 def test_partial_catalog_plan_resumes_without_repeating_completed_search(tmp_path):
     worker, state, factory = service(tmp_path)
     job = worker.submit(request(max_downloads=2))
