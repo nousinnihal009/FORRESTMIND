@@ -10,7 +10,8 @@ import os
 import socket
 import threading
 from urllib.parse import urlsplit
-from uuid import uuid4
+
+MAX_OUTBOX_EVENTS = 10000
 
 
 def now():
@@ -36,8 +37,19 @@ class Notifications:
         with self.store.connection() as db:
             row = db.execute("SELECT payload FROM notification_config WHERE id=1").fetchone()
         config = json.loads(row[0]) if row else {"enabled": False, "authorized": False}
+        # Authorization belongs to the configured destination. Changing the
+        # operator's URL must not silently redirect previously authorized data.
+        authorized_destination = config.pop("destination_sha256", None)
+        destination_matches = authorized_destination == hashlib.sha256(self.endpoint.encode()).hexdigest()
+        if not destination_matches:
+            config.update(enabled=False, authorized=False)
+        with self.store.connection() as db:
+            count = db.execute("SELECT COUNT(*) FROM notification_outbox").fetchone()[0]
         return {**config, "endpoint_configured": bool(self.endpoint), "signing_configured": bool(self.secret),
                 "destination_host": urlsplit(self.endpoint).hostname if self.endpoint else None,
+                "reauthorization_required": bool(row and not destination_matches),
+                "outbox_events": count, "outbox_limit": MAX_OUTBOX_EVENTS,
+                "capacity_reached": count >= MAX_OUTBOX_EVENTS,
                 "delivery": "At least once; recipients should deduplicate by event_id. No messages are sent until explicit configuration and authorization."}
 
     def configure(self, enabled, authorized):
@@ -45,7 +57,8 @@ class Notifications:
             raise ValueError("Set FORESTMIND_WEBHOOK_URL and FORESTMIND_WEBHOOK_SECRET, then explicitly authorize delivery before enabling notifications")
         if enabled:
             self._validate_url()
-        value = {"enabled": enabled, "authorized": authorized if enabled else False, "updated_at": now()}
+        value = {"enabled": enabled, "authorized": authorized if enabled else False, "updated_at": now(),
+                 "destination_sha256": hashlib.sha256(self.endpoint.encode()).hexdigest()}
         with self.store.connection() as db:
             db.execute("INSERT OR REPLACE INTO notification_config VALUES (1,?)", (self.store._json(value),))
         return self.config()
@@ -79,7 +92,11 @@ class Notifications:
         if not config["enabled"] or not config["authorized"]:
             return
         with self.store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            remaining = MAX_OUTBOX_EVENTS - db.execute("SELECT COUNT(*) FROM notification_outbox").fetchone()[0]
             for row in db.execute("SELECT region_id,payload FROM alerts").fetchall():
+                if remaining <= 0:
+                    break
                 alert = json.loads(row["payload"])
                 if alert["status"] != "active":
                     continue
@@ -92,7 +109,8 @@ class Notifications:
                            "alert": {k: alert.get(k) for k in ("id", "date", "title", "message", "severity", "kind", "supporting_observations")},
                            "interpretation": "Heuristic screening evidence, not a validated ecological forecast."}
                 entry = {"payload": payload, "attempts": 0, "next_attempt_at": now(), "error": None}
-                db.execute("INSERT OR IGNORE INTO notification_outbox VALUES (?,?,?,?)", (payload["event_id"], key, "pending", self.store._json(entry)))
+                inserted = db.execute("INSERT OR IGNORE INTO notification_outbox VALUES (?,?,?,?)", (payload["event_id"], key, "pending", self.store._json(entry)))
+                remaining -= inserted.rowcount
 
     def dispatch_once(self):
         config = self.config()
