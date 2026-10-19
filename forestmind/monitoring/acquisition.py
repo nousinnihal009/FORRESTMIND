@@ -225,6 +225,8 @@ class AcquisitionService:
                 job.update(status="cancelled" if job["cancel_requested"] else "queued", phase="recovered",
                            recovery_count=job["recovery_count"] + 1,
                            error="Service restarted; frozen plan and completed cache files will be checked before resuming.")
+                if job["cancel_requested"]:
+                    job["completed_at"] = utcnow()
                 self._save(db, job)
 
     def start(self):
@@ -646,18 +648,35 @@ class AcquisitionService:
     def tick_schedules(self):
         now = datetime.now(timezone.utc)
         with self.store.connection() as db:
-            rows = db.execute("SELECT region_id,payload FROM acquisition_schedules").fetchall()
+            rows = db.execute("SELECT region_id FROM acquisition_schedules").fetchall()
         for row in rows:
-            schedule = json.loads(row[1])
-            if not schedule["enabled"] or datetime.fromisoformat(schedule["next_run_at"]) > now:
-                continue
+            # Claim the due interval before enqueueing. Read under the write
+            # lock so a concurrently disabled schedule cannot be revived from
+            # an old listing, and a second tick cannot claim this interval.
+            with self.store.connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute("SELECT payload FROM acquisition_schedules WHERE region_id=?", (row[0],)).fetchone()
+                if current is None:
+                    continue
+                schedule = json.loads(current[0])
+                if not schedule["enabled"] or datetime.fromisoformat(schedule["next_run_at"]) > now:
+                    continue
+                schedule["next_run_at"] = (now + timedelta(days=schedule["interval_days"])).isoformat()
+                db.execute("UPDATE acquisition_schedules SET payload=? WHERE region_id=?", (self.store._json(schedule), row[0]))
             try:
                 job = self.refresh(row[0])
-                schedule.update(last_job_id=job["id"], last_error=None)
+                outcome = {"last_job_id": job["id"], "last_error": None}
             except (ValueError, KeyError) as error:
-                schedule["last_error"] = str(error)
-            schedule["next_run_at"] = (now + timedelta(days=schedule["interval_days"])).isoformat()
+                outcome = {"last_error": str(error)}
+            # Enqueueing has its own transaction. Preserve any setting changes
+            # made meanwhile; disabling does not cancel a job already claimed.
             with self.store.connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute("SELECT payload FROM acquisition_schedules WHERE region_id=?", (row[0],)).fetchone()
+                if current is None:
+                    continue
+                schedule = json.loads(current[0])
+                schedule.update(outcome)
                 db.execute("UPDATE acquisition_schedules SET payload=? WHERE region_id=?", (self.store._json(schedule), row[0]))
 
     def capabilities(self):
