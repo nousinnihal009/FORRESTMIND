@@ -67,11 +67,13 @@ def audit_references(document: dict) -> dict:
         raise ValueError("A positive spatial buffer, nonnegative temporal embargo and protected_test=true are required")
     features = document.get("feature_names", [])
     examples = document.get("examples", [])
-    if not 1 <= len(features) <= 256 or len(set(features)) != len(features):
+    if (not isinstance(features, list) or not 1 <= len(features) <= 256
+            or any(not isinstance(name, str) or not name for name in features) or len(set(features)) != len(features)):
         raise ValueError("Provide 1–256 unique feature names")
     if not 20 <= len(examples) <= 100000:
         raise ValueError("Reference dataset must contain 20–100000 explicitly labeled examples")
     ids, regions, footprints = set(), {}, {name: [] for name in ("train", "calibration", "test")}
+    event_references = {}
     splits = {name: [] for name in footprints}
     for example in examples:
         identity = example.get("id")
@@ -110,10 +112,16 @@ def audit_references(document: dict) -> dict:
             if calendar(example[field + "_available_at"]) > cutoff:
                 raise ValueError("Baseline feature availability exceeds the prediction cutoff")
         if target["kind"] == "event" and outcome == 1:
-            if not example.get("event_id") or not cutoff < calendar(example["event_date"]) <= target_date:
+            if not isinstance(example.get("event_id"), str) or not example["event_id"] or not cutoff < calendar(example["event_date"]) <= target_date:
                 raise ValueError("Positive event references require event_id and event_date strictly after cutoff within horizon")
+            reference = (region, example["event_date"], split)
+            if example["event_id"] in event_references and event_references[example["event_id"]] != reference:
+                raise ValueError("An event_id must identify one region, event date and protected split consistently")
+            event_references[example["event_id"]] = reference
         if example.get("quality_group") not in {"high", "partial", "low"}:
             raise ValueError("Declare quality_group high, partial or low for subgroup reporting")
+        if "season" in example and (not isinstance(example["season"], str) or not example["season"]):
+            raise ValueError("Optional season labels must be nonempty strings")
         footprints[split].append(bbox)
         splits[split].append(example)
     if len(splits["train"]) < 10 or len(splits["calibration"]) < 5 or len(splits["test"]) < 5:
