@@ -210,8 +210,7 @@ class WorkflowService:
 
     @staticmethod
     def _job_reservation(db):
-        count = db.execute("SELECT COUNT(*) FROM workflow_jobs WHERE json_extract(payload,'$.status') IN ('pending','running')").fetchone()[0]
-        return count * 8192
+        return db.execute("SELECT COALESCE(SUM(MAX(0,8192-length(CAST(payload AS BLOB)))),0) FROM workflow_jobs WHERE json_extract(payload,'$.status') IN ('pending','running')").fetchone()[0]
 
     def _check_metadata(self, db, payload, previous=None, reservation_delta=0):
         size = len(payload.encode("utf-8"))
@@ -374,8 +373,11 @@ class WorkflowService:
         if include_landcover and not payload["synthetic"]:
             try:
                 from forestmind.monitoring.landcover import acquire_landcover
-                cover = acquire_landcover(region["geometry"], cutoff=cutoff)
-                self.save_context(region_id, "forest_cover", cover)
+                collected = acquire_landcover(region["geometry"], cutoff=cutoff)
+                self.save_context(region_id, "forest_cover", collected)
+                cover = collected
+            except WorkflowCapacityError:
+                raise
             except Exception as error:
                 from forestmind.data.adapters.network import public_error
                 landcover_error = f"Forest-cover collection failed: {public_error(error)}"
@@ -390,9 +392,12 @@ class WorkflowService:
         if include_climate and not payload["synthetic"]:
             try:
                 from forestmind.monitoring.climate import acquire_climate
-                climate = acquire_climate(region["geometry"], start=observations[0]["date"], end=cutoff)
-                climate["geometry_sha256"] = digest(region["geometry"])
-                self.save_context(region_id, "climate", climate)
+                collected = acquire_climate(region["geometry"], start=observations[0]["date"], end=cutoff)
+                collected["geometry_sha256"] = digest(region["geometry"])
+                self.save_context(region_id, "climate", collected)
+                climate = collected
+            except WorkflowCapacityError:
+                raise
             except Exception as error:
                 logging.getLogger(__name__).warning("climate_context_failed", extra={"region_id": region_id, "error_type": type(error).__name__})
                 climate_collection_error = f"Climate provider request failed ({type(error).__name__}); retry collection. Previously saved evidence remains intact."
@@ -408,12 +413,14 @@ class WorkflowService:
                 from forestmind.monitoring.radar import acquire_radar
                 collected = acquire_radar(region["geometry"], start=observations[0]["date"], end=cutoff)
                 if collected.get("available"):
+                    self.save_context(region_id, "radar", collected)
                     radar = collected
-                    self.save_context(region_id, "radar", radar)
                 else:
                     radar_collection_error = collected.get("reason", "No eligible radar pair was returned; previously saved evidence remains intact.")
                     if not radar:
                         radar = collected
+            except WorkflowCapacityError:
+                raise
             except Exception as error:
                 from forestmind.data.adapters.network import public_error
                 radar_collection_error = f"Radar collection failed: {public_error(error)}"
@@ -537,7 +544,9 @@ class WorkflowService:
             raise WorkflowCapacityError("Workflow job record exceeds its reserved 8 KiB bound.")
         was_active = bool(prior and json.loads(prior[0])["status"] in {"pending", "running"})
         active = job["status"] in {"pending", "running"}
-        self._check_metadata(db, payload, prior[0] if prior else None, (int(active) - int(was_active)) * 8192)
+        reservation_before = 8192 - len(prior[0].encode("utf-8")) if was_active else 0
+        reservation_after = 8192 - len(payload.encode("utf-8")) if active else 0
+        self._check_metadata(db, payload, prior[0] if prior else None, reservation_after - reservation_before)
         db.execute("INSERT OR REPLACE INTO workflow_jobs VALUES (?,?,?)", (job["id"], job["region_id"], payload))
 
     def save_scenario(self, result):
@@ -569,7 +578,12 @@ class WorkflowService:
                        "created_at": now(), "include_climate": include_climate, "include_landcover": include_landcover,
                        "include_radar": include_radar, "error": None}
                 self._write_job(db, job)
-            self.executor.submit(self._execute, job.copy())
+            try:
+                self.executor.submit(self._execute, job.copy())
+            except RuntimeError:
+                job.update(status="failed", completed_at=now(), error="Analysis worker is shutting down. Restart the service and retry.")
+                self._save_job(job)
+                raise ValueError(job["error"]) from None
             return job
 
     def _execute(self, job):
