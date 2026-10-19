@@ -71,6 +71,10 @@ def install_workflow(app, store):
             raise HTTPException(404, "Region not found")
         return saved
 
+    @router.get("/workflow/storage")
+    def storage():
+        return service.capacity()
+
     @router.get("/regions/{region_id}/workflow")
     def workflow(region_id: str):
         require_region(region_id)
@@ -123,8 +127,11 @@ def install_workflow(app, store):
         value = payload.model_dump()
         value["geometry_sha256"] = digest(geometry)
         value["sha256"] = digest(value)
-        service.save_context(region_id, "forest_cover", value)
-        job = service.submit(region_id)
+        try:
+            service.save_context(region_id, "forest_cover", value)
+            job = service.submit(region_id)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
         return {"source_sha256": value["sha256"], "job": job,
                 "interpretation": "User-supplied forest-cover classification; provenance is retained but not independently verified."}
 
@@ -142,7 +149,10 @@ def install_workflow(app, store):
             raise HTTPException(409, result["reason"])
         result.update({"id": "scenario-" + uuid4().hex[:12], "created_at": now(), "region_id": region_id,
                        "manifest": snapshot["manifest"], "parameters": parameters})
-        store.save_scenario(result)
+        try:
+            service.save_scenario(result)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
         return result
 
     app.include_router(router)
