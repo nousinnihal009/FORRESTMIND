@@ -12,6 +12,7 @@ from forestmind.api.workflow import install_workflow
 from forestmind.monitoring.analysis import analyze_region
 from forestmind.monitoring.climate import VARIABLES, aggregate_climate
 from forestmind.monitoring.spatial import fragmentation_metrics, recovery_diagnostics, spectral_change
+from forestmind.monitoring.projections import scenario_projection
 from forestmind.monitoring.workflow import WorkflowService, digest, file_hash, model_eligibility
 from forestmind.data.sequence import OPTICAL_BANDS, prepare_sequence
 from test_prepare_sequence import cache
@@ -185,3 +186,66 @@ def test_interrupted_analysis_is_recoverable_and_preserves_snapshots(saved):
     assert restarted.latest(region["id"])["manifest"]["id"] == snapshot["manifest"]["id"]
     service.executor.shutdown()
     restarted.executor.shutdown()
+
+
+def test_snapshot_marks_changed_context_stale_without_recomputing(saved, monkeypatch):
+    store, region, _ = saved
+    service = WorkflowService(store)
+    before = service.run(region["id"])
+    assert not service.latest(region["id"])["stale"]
+    context = {"available": True, "end": "2024-02-02", "geometry_sha256": digest(region["geometry"]), "monthly": []}
+    service.save_context(region["id"], "climate", context)
+    monkeypatch.setattr(service, "run", lambda *a, **k: pytest.fail("GET must never perform analysis"))
+    assert service.latest(region["id"])["stale"]
+    assert service.latest(region["id"])["manifest"]["id"] == before["manifest"]["id"]
+    service.executor.shutdown()
+
+
+def test_future_context_does_not_enter_earlier_snapshot(saved):
+    store, region, _ = saved
+    service = WorkflowService(store)
+    service.save_context(region["id"], "climate", {"available": True, "end": "2025-01-01", "geometry_sha256": digest(region["geometry"])})
+    service.save_context(region["id"], "radar", {"available": True, "end": "2025-01-01", "geometry_sha256": digest(region["geometry"])})
+    result = service.run(region["id"])
+    assert not result["climate"]["available"] and not result["radar"]["available"]
+    assert result["manifest"]["context_sha256"]["climate"] is None
+    assert not service.latest(region["id"])["stale"]
+    service.executor.shutdown()
+
+
+def test_five_year_projection_is_explicit_hypothesis_with_common_start():
+    analysis = {"health_score": 70., "latest_date": "2024-02-02", "forecast": {"points": [{"horizon_days": 365, "score": 65.}], "caveat": "Uncalibrated"}}
+    result = scenario_projection(analysis)
+    assert result["available"] and result["scientifically_validated"] is False
+    assert result["comparisons"][0]["points"] == result["baseline"]
+    assert all(row["points"][0]["score"] == 70. for row in result["comparisons"])
+    assert result["baseline"][-1]["horizon_days"] == 1825
+    assert result["comparisons"][1]["five_year_difference"] > 0
+    assert result["comparisons"][-1]["five_year_difference"] < 0
+    assert not scenario_projection({**analysis, "forecast": {"points": [], "caveat": "Twelve consecutive months needed"}})["available"]
+
+
+def test_model_execution_rejects_checkpoint_synthetic_claim_even_if_registry_lies(tmp_path, saved, monkeypatch):
+    import torch
+    store, region, _ = saved
+    first = cache(tmp_path, "first", "2024-01-02T10:00:00+00:00")
+    second = cache(tmp_path, "second", "2024-02-02T10:00:00+00:00")
+    path = tmp_path / "synthetic.pt"
+    torch.save({"config": {"data": {"source": "synthetic", "synthetic": True}}, "model_state_dict": {}}, path)
+    service = WorkflowService(store)
+    entry = {"id": "controlled-registry-fixture", "version": "test", "path": str(path), "sha256": file_hash(path), "target": "test only"}
+    monkeypatch.setattr("forestmind.monitoring.workflow.model_eligibility", lambda *args: (entry, [{"id": entry["id"], "reasons": [], "eligible": True}]))
+    monkeypatch.setattr("forestmind.inference.predict.predict_checkpoint", lambda *a, **k: pytest.fail("Synthetic checkpoint must never run against real-monitoring sequence"))
+    result = service.run(region["id"], cache_dir=tmp_path, source_paths=[first, second])
+    assert not result["model"]["available"]
+    assert "data.synthetic=false" in result["model"]["reason"]
+    assert not store.list_model_runs(region["id"])
+    service.executor.shutdown()
+
+
+def test_workflow_artifact_roots_are_isolated_by_database(tmp_path):
+    one, two = WorkflowService(Store(tmp_path / "one.db")), WorkflowService(Store(tmp_path / "two.db"))
+    assert one.root == tmp_path / "one-workflow"
+    assert two.root == tmp_path / "two-workflow"
+    one.executor.shutdown()
+    two.executor.shutdown()
