@@ -22,7 +22,7 @@ Cancellation is cooperative between bounded catalog and raster requests. An in-f
 
 The worker uses an OS file lock so only one process executes acquisition for a database. A secondary local API instance may enqueue work for the existing lock owner; it does not perform restart recovery or start another worker. This is still a local single-user service, not a hosted multi-worker deployment design.
 
-On restart, interrupted work returns to the queue. Completed catalog windows are reused, frozen plans are checked, and accepted cache hashes and processing contracts are revalidated. Persisted download counters never reset automatically. An explicit **Resume** authorizes another batch equal to the original download budget. Resume continues remaining/interrupted candidates from the frozen plan; previously failed or rejected candidates are not silently selected again. If all candidates are exhausted, submit a new plan with a different period or quality selection and inspect the resulting sampling differences.
+On restart, interrupted work returns to the queue. A cancellation requested before interruption is finalized as cancelled with a completion timestamp. Completed catalog windows are reused, frozen plans are checked, and accepted cache hashes and processing contracts are revalidated. Persisted download counters never reset automatically. An explicit **Resume** authorizes another batch equal to the original download budget. Resume continues remaining/interrupted candidates from the frozen plan; previously failed or rejected candidates are not silently selected again. If all candidates are exhausted, submit a new plan with a different period or quality selection and inspect the resulting sampling differences.
 
 Refresh uses the same saved geometry and processing settings, skips months already stored, and merges only absent months. Existing observations are not overwritten. Automatic refresh considers at most the latest 60 months when a saved history becomes older than that limit. This rolling acquisition window does not delete earlier saved observations. The area can retain up to 600 monthly observations.
 
@@ -50,7 +50,9 @@ All routes begin with `/api/v1`.
 | POST | `/regions/{region_id}/refresh` | Acquire absent months, optionally bounded by start/end/download count |
 | GET/PUT | `/regions/{region_id}/schedule` | Local schedule, enabled flag and 1–365 day interval |
 
-Acquisition submission requires `name`, `bbox: [west,south,east,north]`, `provider: "earth-search"`, `start` and `end`; optional quality and resource settings use the names shown by the API documentation. Exact duplicate active requests return the existing job. Different overlapping updates to the same saved area return HTTP 409 until its active job finishes.
+Acquisition submission requires `name`, `bbox: [west,south,east,north]`, `provider: "earth-search"`, `start` and `end`; optional quality and resource settings use the names shown by the API documentation. Exact duplicate active requests return the existing job. Repeating an identical new-area request that already completed or partially saved also returns that existing job; use Resume or the saved area's Refresh controls to extend it. Different overlapping updates to the same saved area return HTTP 409 until its active job finishes.
+
+Due schedule intervals are claimed transactionally before enqueueing. Concurrent schedule edits are retained. Disabling a schedule stops future intervals but does not cancel an already claimed or queued job; use that job's Cancel control. A process interruption between claiming an interval and enqueueing can defer the update until the next interval; Refresh remains available immediately after restart.
 
 ## Troubleshooting
 
