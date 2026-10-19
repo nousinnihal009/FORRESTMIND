@@ -1,6 +1,6 @@
 [project]
 name = "forestmind"
-version = "0.5.0"
+version = "0.6.0"
 description = "Forest monitoring, multimodal research, and evidence-based early-warning workflows"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,6 +23,7 @@ dependencies = [
 web = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "requests>=2.31",
 ]
 geo = [
     "rasterio>=1.3",
