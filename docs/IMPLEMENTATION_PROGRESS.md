@@ -1,4 +1,17 @@
-# Continuation record — 2026-10-18
+# Continuation record — 2026-10-19
+
+## Latest continuation checkpoint
+
+- Version is now 0.6.0. README updated with normal UI flow; `docs/OPERATOR_GUIDE.md` now covers setup, quotas, backups, restore, local rollout/rollback, notifications and troubleshooting. Final validation/completion docs and wheel/environment record still pending.
+- Full actual workspace backup completed and verified: `data/backups/workspace-20261019`, 11 files (database + source/workflow trees). Do not overwrite it. Existing user data preserved.
+- Real radar smoke succeeded: `artifacts/radar-real-smoke.json`, Tapajós July 11 → July 23 2024, S1A/orbit39/descending, 4096 common-valid samples; VV change −0.244568 dB, VH −0.466682 dB. This is measured backscatter context, not disturbance attribution or a forecast.
+- Browser climate collection succeeded for July17–Aug26 2024. Actual climate and WorldCover contexts persisted through restart. Browser reconnect verified all eight original saved regions.
+- Notifications now bind authorization to destination and cap retained events at 10,000; no actual destination configured or messages sent. Two added tests pending inclusion in final full suite.
+- Final UI changes: collapsed capability cards, real radar grid keyboard inspection, compact partial-month climate coverage, notification cap/reauthorization state, arbitrary 1–365 day schedule values, ARIA tabs/panel/focus. Frontend14tests passed and all seven JS syntax checks passed.
+- Acquisition audit fixed due-schedule claim race and cancellation timestamps;144 focused tests passed in12.88s. Restart needed after these edits. Native pretrained offline path is undergoing a separate implementation feasibility audit.
+- Research reference experiment harness exists with frozen outcomes/datasets/splits, buffered geography/embargo, identical baseline comparisons, calibration/events/subgroups. Earlier focused39tests passed. Final workflow storage/freshness audit currently running.
+- Current server at this checkpoint: PID17792, exec session64980, `python scripts/serve.py --port 8000` with artifacts/geo-validation on PYTHONPATH. Verify current PID/command and active jobs before restarting. Browser tab1 in IAB, handle forestTab in current CUA session; it is collecting radar context for area-858ffd6a4f28. UI verifies outcome next. Context/session handles can reset after usage interruptions.
+- Still to do: complete browser radar/refresh/schedule/cancel-resume/failure/mobile/export evidence, final full tests, packaging and accurate three-gate handoff. Preserve user's Tamil Nadu area.
 
 The user requests the full original proposal plus the worldwide search → real acquisition → monitoring workflow. Do not interpret the local application milestone as scientific completion. Original proposal: attachment `2356b8c3-679f-4302-9adf-414b4a571fcc/Pasted text.txt`; current expanded request: attachment `044b2d52-e600-4756-bd72-97e7c1ad4605/Pasted text.txt`.
 
