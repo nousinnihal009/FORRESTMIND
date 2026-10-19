@@ -2,7 +2,7 @@
 
 **Forest observation, evidence, and early-warning research in one local workspace.**
 
-ForestMind combines a working monitoring application with a separate multimodal machine-learning pipeline. Inspect dated observations, vegetation condition, candidate disturbance evidence, exploratory forecasts, alerts, and explicit scenarios. Train and evaluate optical/radar models in the research pipeline.
+ForestMind v0.6 connects worldwide place search, confirmed small-area selection, real satellite acquisition and continuing monitoring in one local application. Inspect dated observations, spatial change, radar and climate context, classified-cover topology, candidate disturbance evidence, exploratory forecasts, alerts and hypothetical scenarios. Compatible, operator-registered real-trained models can run automatically for the selected area; supervised model development remains a research workflow.
 
 The included Amazon regions are **synthetic demonstrations**. The dashboard's condition index, forecast envelopes and scenario coefficients are transparent, uncalibrated baselines. They do not establish ecological tipping points, causal drivers or intervention effectiveness. Imported measurements retain their source and an unverified-provenance label.
 
@@ -11,13 +11,13 @@ The included Amazon regions are **synthetic demonstrations**. The dashboard's co
 Python 3.10+ is required. From the repository root:
 
 ```powershell
-python -m pip install -e ".[web,dev]"
+python -m pip install -e ".[web,real-data,dev]"
 python scripts/serve.py
 ```
 
 Open **http://127.0.0.1:8000**. Interactive API documentation: **http://127.0.0.1:8000/docs**.
 
-The server binds to localhost. Regions, analyses, alerts, scenarios and job status persist in `data/forestmind.db`. This is a **single-process, single-user local application with no authentication**; do not expose it directly to a public network. Use `--port 8001` if needed; `--reload` enables development reloading. Multiple worker processes are unsupported. Stop with Ctrl+C.
+The server enforces loopback access. Regions, analyses, alerts, schedules, scenarios and jobs persist in `data/forestmind.db`; source artifacts live in adjacent `forestmind-acquisition` and `forestmind-workflow` directories. This is a **single-process, single-user local application with no authentication**. Public hosting is disabled pending authentication and user isolation. Use `--port 8001` if needed; `--reload` enables development reloading. Stop with Ctrl+C. Local schedules run only while the service is running.
 
 Choose a separate study database in PowerShell:
 
@@ -26,12 +26,28 @@ $env:FORESTMIND_DB = "data/my-study.db"
 python scripts/serve.py
 ```
 
-The frontend is packaged HTML/CSS/JavaScript served by FastAPI; no Node build is needed. Charts and region footprints render locally. The map is explicitly schematic, not satellite imagery or official protected-area boundaries. Optional Google Fonts have system-font fallbacks.
+The frontend is packaged HTML/CSS/JavaScript served by FastAPI; no Node build is needed. The overview uses schematic footprints; Find a forest uses attributed OpenStreetMap tiles. Place search uses Photon/OSM and does not establish a verified forest boundary. Optional Google Fonts have system-font fallbacks.
+
+## Search, collect and keep monitoring
+
+1. Open **Find a forest**. Search a forest/place, enter coordinates, or draw a small rectangle. Review the country, exact bounds and area. Confirm the rectangle separately from the named-place result.
+2. Choose dates, cloud/valid-pixel settings and a download budget. Start collection; progress, missing months, cancellation and explicit resume stay visible. No missing observations are invented.
+3. Open the saved area after its first usable observation. **Data coverage** explains gaps and history requirements. **Connected analysis** shows spatial optical changes and can collect real ERA5 climate, ESA WorldCover and orbit-matched Sentinel-1 context for the same geometry/cutoff.
+4. In **Monitoring updates**, refresh absent months or configure a local schedule. Existing months are preserved. Review dated alerts, acknowledge or resolve them, and export reproducible evidence.
+
+Normal monitoring needs no Python commands or manual model-report import. A registered model runs only if its checkpoint, independent evaluation, input compatibility and supported geography pass checks. No eligible real-trained model is bundled. Real observations are never run through the synthetic demonstration model as an ecological prediction.
+
+Limits include a 25 km² maximum rectangular AOI, 60 months per acquisition request, a single worker and bounded downloads/storage. Forecasts need at least 12 consecutive usable months; descriptive autocorrelation/variance needs 36. These are software eligibility rules, not scientific validation. See the [operator guide](docs/OPERATOR_GUIDE.md), [acquisition limits and recovery](docs/ACQUISITION_OPERATIONS.md), [requirement-by-requirement status](docs/REQUIREMENTS_MATRIX.md) and [actual verification evidence](docs/VALIDATION.md).
 
 ## Implemented capabilities
 
 | Area | Behavior |
 | --- | --- |
+| Worldwide entry | Explicit attributed place search, interactive map, drawing/coordinates and confirmed bounded area |
+| Connected jobs | Durable acquisition, bounded retries, cancellation, restart recovery, resume and transactional saved-area updates |
+| Multimodal context | Actual orbit-matched Sentinel-1 RTC, ERA5 reanalysis and dated ESA WorldCover, explicitly separate from trained model inputs |
+| Spatial evidence | Common-valid spectral change grid; classified-cover patches, internal edges and centroid connectivity |
+| Continuing monitoring | Skip existing months, local schedules, freshness diagnostics, configurable dated alert episodes and review history |
 | Monitoring | Four reproducible demo regions; strict JSON import for dated monthly measurements |
 | Spatial overview | Selectable WGS84 footprints, condition/coverage/alert layers and zoom |
 | Evidence | NDVI/NDMI/NBR history, candidate-driver evidence, coverage and dated alert explanations |
@@ -39,7 +55,7 @@ The frontend is packaged HTML/CSS/JavaScript served by FastAPI; no Node build is
 | Forecasting | 30/180/365-day baseline with uncalibrated residual envelopes; withheld for inadequate histories |
 | Resilience | Descriptive season-adjusted autocorrelation and variance, with validity checks |
 | Backtesting | Persistence, seasonal naive and damped trend at historical cutoffs; auditable per-horizon exports |
-| Scenarios | Saved pressure/fire/restoration/climate sensitivity comparisons with explicit assumptions |
+| Scenarios | Saved pressure/fire/restoration/climate comparisons and five-year hypothetical index sensitivity; no causal effect claims |
 | API/jobs | REST endpoints, SQLite persistence, background jobs and interrupted-job recovery |
 | Export | Region JSON, observation CSV, scenario JSON and backtesting JSON with provenance |
 | Satellite pipeline | Sentinel-2/Sentinel-1/Landsat adapters, common-grid caches and optical-cache import preparation |
@@ -47,6 +63,8 @@ The frontend is packaged HTML/CSS/JavaScript served by FastAPI; no Node build is
 | Neural research | Custom ViT, explicit proxy/native pretrained modes, modality masks, temporal model and task heads |
 | Model runs | Validated, persisted inference reports with checkpoint/input hashes, class/driver scores and configured horizons |
 | Reproducible evaluation | JSON metrics, raw predictions and targets, split identity, artifact/code hashes and per-horizon errors |
+| Real-reference experiments | Frozen targets/datasets, buffered geographic and temporal holdouts, identical-example baselines, calibration and event metrics; real reference data must be supplied |
+| Operations | Local HTTP boundary, diagnostics, migrations, database snapshots, verified full workspace backup/restore and opt-in signed webhook outbox |
 
 ## Import observations
 
@@ -73,7 +91,9 @@ Dates must be strictly increasing, unique, and at most one per month. Accepts 1�
 
 A usable condition score requires all three spectral indices and at least 40% valid-pixel samples. Forecasting requires 12 consecutive usable months and a usable latest observation. Dashboard resilience diagnostics require at least 36 consecutive usable months. These are screening choices, not ecological standards.
 
-## Real satellite data → dashboard
+## Advanced satellite commands
+
+These commands remain available for research and migration. Use **Find a forest** for the connected application workflow above.
 
 ```powershell
 python -m pip install -e ".[web,real-data]"
@@ -154,7 +174,7 @@ Real pretrained weight downloads, GPU inference and independently labeled benchm
 
 ### Connect a trained checkpoint to the dashboard
 
-Use **Model runs** in a selected region to import the JSON produced by `scripts/predict.py`. The application validates and stores the report without executing an uploaded checkpoint. Observation-based condition scores, scenarios and alerts retain their existing methods. Imported model outputs are explicitly user-provided and unverified.
+The normal **Connected analysis** workflow automatically prepares accepted acquisitions and runs an eligible operator-registered checkpoint. Configure the trusted local `FORESTMIND_MODEL_REGISTRY` using [the research protocol](docs/RESEARCH_PROTOCOL.md). The browser never executes uploaded checkpoints. **Model runs** also supports portable reports from `scripts/predict.py` for advanced research; those imported outputs are explicitly user-provided and unverified. Observation-based scores and alerts retain their own methods.
 
 First prepare an optical sequence from current Sentinel-2 caches:
 
@@ -219,9 +239,11 @@ Install `[web,dev,real-data]` for optional raster tests; without Rasterio they s
 ## Architecture
 
 ```text
-Provider scenes → aligned masked cache → monthly import JSON → SQLite observations
-    → transparent condition / evidence / forecast methods
-    → FastAPI → dashboard / exports / scenarios / historical backtesting
+Search/map → confirmed area → durable bounded acquisition queue
+    → provider scenes → aligned masked cache → transactional SQLite observations
+    → immutable geometry/cutoff/source/code/model manifest
+    → spatial change / context / eligible model / diagnostics / hypothetical scenarios
+    → FastAPI → dashboard / exports / alerts / refresh and local schedules
 
 Separate research path:
 observations + independent labels + explicit data partitions
