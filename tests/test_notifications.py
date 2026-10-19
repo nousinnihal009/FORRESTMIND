@@ -57,3 +57,28 @@ def test_failed_delivery_bounded_and_redacted(tmp_path, monkeypatch):
     failed = [r for r in service.outbox() if r["status"] == "failed"]
     assert failed and failed[0]["attempts"] == 3
     assert "secret" not in json.dumps(failed)
+
+
+def test_changed_destination_requires_fresh_authorization(tmp_path, monkeypatch):
+    service = prepared(tmp_path, monkeypatch, lambda _: None)
+    service.configure(True, True)
+    service.collect()
+    monkeypatch.setenv("FORESTMIND_WEBHOOK_URL", "https://different.example/receiver")
+    sent = []
+    restarted = Notifications(service.store, sender=sent.append)
+    assert restarted.config()["reauthorization_required"]
+    assert not restarted.dispatch_once() and not sent
+    restarted.configure(True, True)
+    assert not restarted.config()["reauthorization_required"]
+    assert restarted.dispatch_once() and sent
+
+
+def test_outbox_capacity_preserves_deduplication_and_records(tmp_path, monkeypatch):
+    monkeypatch.setattr("forestmind.monitoring.notifications.MAX_OUTBOX_EVENTS", 1)
+    service = prepared(tmp_path, monkeypatch, lambda _: None)
+    service.configure(True, True)
+    service.collect()
+    assert len(service.outbox()) == 1 and service.config()["capacity_reached"]
+    assert service.dispatch_once()
+    service.collect()
+    assert len(service.outbox()) == 1 and service.outbox()[0]["status"] == "sent"
