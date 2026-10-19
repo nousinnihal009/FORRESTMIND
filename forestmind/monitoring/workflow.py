@@ -281,6 +281,7 @@ class WorkflowService:
         climate = self._context(region_id, "climate")
         if climate and (climate.get("geometry_sha256") != digest(region["geometry"]) or climate["end"] > cutoff):
             climate = None
+        climate_collection_error = None
         if include_climate and not payload["synthetic"]:
             try:
                 from forestmind.monitoring.climate import acquire_climate
@@ -289,11 +290,14 @@ class WorkflowService:
                 self.save_context(region_id, "climate", climate)
             except Exception as error:
                 logging.getLogger(__name__).warning("climate_context_failed", extra={"region_id": region_id, "error_type": type(error).__name__})
-                climate = {"available": False, "reason": f"Climate provider request failed ({type(error).__name__}); retry collection. Existing observations remain intact."}
+                climate_collection_error = f"Climate provider request failed ({type(error).__name__}); retry collection. Previously saved evidence remains intact."
+                if not climate:
+                    climate = {"available": False, "reason": climate_collection_error}
         climate = climate or {"available": False, "reason": "Collect climate context to request actual ERA5 rainfall, temperature, soil moisture and reference evapotranspiration; no climate measurements were supplied."}
         radar = self._context(region_id, "radar")
         if radar and (radar.get("geometry_sha256") != digest(region["geometry"]) or radar.get("end", "9999") > cutoff):
             radar = None
+        radar_collection_error = None
         if include_radar and not payload["synthetic"]:
             try:
                 from forestmind.monitoring.radar import acquire_radar
@@ -302,7 +306,9 @@ class WorkflowService:
                     self.save_context(region_id, "radar", radar)
             except Exception as error:
                 from forestmind.data.adapters.network import public_error
-                radar = {"available": False, "reason": f"Radar collection failed: {public_error(error)}"}
+                radar_collection_error = f"Radar collection failed: {public_error(error)}"
+                if not radar:
+                    radar = {"available": False, "reason": radar_collection_error}
         radar = radar or {"available": False, "reason": "Collect radar context to request a bounded same-platform, same-orbit Sentinel-1 RTC pair. No actual radar context is attached."}
         model, eligibility = model_eligibility(self.registry, region, prepared)
         model_result = {"available": False, "eligibility": eligibility, "reason": "; ".join(r for check in eligibility for r in check["reasons"])}
@@ -365,17 +371,19 @@ class WorkflowService:
         manifest["registry_sha256"] = digest(self.registry)
         manifest["model_execution_status_sha256"] = digest({"available": model_result["available"], "reason": model_result["reason"]})
         manifest["diagnostics_sha256"] = digest({"sequence": sequence_error if prepared is None else None,
-                                                  "climate": climate.get("reason") if not climate.get("available") else None,
-                                                  "radar": radar.get("reason") if not radar.get("available") else None,
+                                                  "climate": climate_collection_error or (climate.get("reason") if not climate.get("available") else None),
+                                                  "radar": radar_collection_error or (radar.get("reason") if not radar.get("available") else None),
                                                   "landcover": landcover_error})
         manifest["implementation_sha256"] = {name: file_hash(Path(__file__).with_name(name))
-                                              for name in ("workflow.py", "spatial.py", "climate.py", "projections.py")}
+                                              for name in ("workflow.py", "spatial.py", "climate.py", "projections.py", "landcover.py", "radar.py")}
         manifest["id"] = digest({key: value for key, value in manifest.items() if key != "id"})
         result = {"schema_version": 1, "kind": "forestmind_selected_area_analysis", "created_at": now(),
                   "manifest": manifest, "stale": False, "job_id": job_id, "capabilities": capabilities,
                   "observations": observations, "condition": analysis["health"], "drivers": analysis["drivers"],
                   "forecast": analysis["forecast"], "resilience": analysis["resilience"], "recovery": recovery,
-                  "spatial_change": spatial, "fragmentation": fragmentation, "climate": climate, "radar": radar, "model": model_result,
+                  "spatial_change": spatial, "fragmentation": fragmentation, "forest_cover": cover,
+                  "climate": climate, "radar": radar, "model": model_result,
+                  "collection_errors": {"climate": climate_collection_error, "radar": radar_collection_error, "forest_cover": landcover_error},
                   "alerts": analysis["alerts"], "coverage": assess_history(payload), "evaluation": backtest_prepared(payload),
                   "scenarios": {**projections, "endpoint": f"/api/v1/regions/{region_id}/workflow/scenarios"},
                   "sequence": prepared.provenance if prepared else {"available": False, "reason": sequence_error}}
