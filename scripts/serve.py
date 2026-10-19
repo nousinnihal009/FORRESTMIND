@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 import sys
 
@@ -21,6 +22,13 @@ def main():
         import uvicorn
     except ImportError:
         raise SystemExit('Install web dependencies: python -m pip install -e ".[web]"') from None
+    request_log = logging.getLogger("forestmind.http")
+    if not request_log.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        request_log.addHandler(handler)
+    request_log.setLevel(logging.INFO)
+    request_log.propagate = False
     uvicorn.run("forestmind.api.app:create_app", factory=True, host=args.host, port=args.port,
                 reload=args.reload, app_dir=str(Path(__file__).resolve().parents[1]))
 
