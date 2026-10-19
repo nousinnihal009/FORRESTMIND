@@ -25,6 +25,32 @@ from forestmind.monitoring.evaluation import backtest_prepared
 from forestmind.monitoring.spatial import fragmentation_metrics, geometry_bbox, recovery_diagnostics, spectral_change
 from forestmind.monitoring.projections import scenario_projection
 
+MAX_WORKFLOW_JOBS = 10000
+MAX_WORKFLOW_SNAPSHOTS = 2048
+MAX_REGION_SNAPSHOTS = 256
+MAX_WORKFLOW_METADATA_BYTES = 256 * 1024**2
+MAX_WORKFLOW_ARTIFACT_BYTES = 1024**3
+MAX_WORKFLOW_RECORD_BYTES = 16 * 1024**2
+WORKFLOW_TABLES = ("workflow_snapshots", "workflow_bindings", "workflow_jobs", "workflow_context", "model_runs", "scenarios")
+IMPLEMENTATION_FILES = ("workflow.py", "spatial.py", "climate.py", "projections.py", "landcover.py", "radar.py", "analysis.py", "coverage.py", "evaluation.py", "../data/sequence.py", "../inference/predict.py")
+
+
+class WorkflowCapacityError(ValueError):
+    """Refuse new work without removing existing reproducible evidence."""
+
+
+def file_fingerprint(path):
+    """Cheap freshness hint; execution still verifies the full pinned SHA256."""
+    try:
+        stat = Path(path).stat()
+        return {"bytes": stat.st_size, "modified_ns": stat.st_mtime_ns}
+    except OSError:
+        return None
+
+
+def implementation_hashes():
+    return {name: file_hash(Path(__file__).parent / name) for name in IMPLEMENTATION_FILES}
+
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -174,9 +200,64 @@ class WorkflowService:
             row = db.execute("SELECT payload FROM workflow_context WHERE region_id=? AND kind=?", (region_id, kind)).fetchone()
         return json.loads(row["payload"]) if row else None
 
-    def save_context(self, region_id, kind, value):
+    def _metadata_bytes(self, db):
+        return sum(db.execute(f"SELECT COALESCE(SUM(length(CAST(payload AS BLOB))),0) FROM {table}").fetchone()[0]
+                   for table in WORKFLOW_TABLES)
+
+    def _check_metadata(self, db, payload, previous=None):
+        size = len(payload.encode("utf-8"))
+        if size > MAX_WORKFLOW_RECORD_BYTES:
+            raise WorkflowCapacityError("Analysis record exceeds the 16 MiB limit. Reduce the observation history or raster grid.")
+        added = size - len((previous or "").encode("utf-8"))
+        if self._metadata_bytes(db) + added > MAX_WORKFLOW_METADATA_BYTES:
+            raise WorkflowCapacityError("Workflow metadata storage limit reached. Back up this workspace and use a new workspace database; existing evidence is preserved.")
+
+    def _artifact_bytes(self):
+        total = 0
+        for path in self.root.rglob("*"):
+            if path.is_symlink():
+                raise WorkflowCapacityError("Workflow artifacts contain a symbolic link; operator review is required before writing more artifacts.")
+            if path.is_file():
+                total += path.stat().st_size
+        return total
+
+    def _check_artifacts(self, reserve=0):
+        if self._artifact_bytes() + reserve > MAX_WORKFLOW_ARTIFACT_BYTES:
+            raise WorkflowCapacityError("Workflow artifact storage limit reached (1 GiB). Back up this workspace and use a new workspace database; no saved artifacts were deleted.")
+
+    def capacity(self):
         with self.store.connection() as db:
-            db.execute("INSERT OR REPLACE INTO workflow_context VALUES (?,?,?)", (region_id, kind, self.store._json(value)))
+            counts = {name: db.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0] for name in ("workflow_jobs", "workflow_snapshots")}
+            metadata = self._metadata_bytes(db)
+        return {"metadata_bytes": metadata, "metadata_limit_bytes": MAX_WORKFLOW_METADATA_BYTES,
+                "artifact_bytes": self._artifact_bytes(), "artifact_limit_bytes": MAX_WORKFLOW_ARTIFACT_BYTES,
+                "jobs": counts["workflow_jobs"], "job_limit": MAX_WORKFLOW_JOBS,
+                "snapshots": counts["workflow_snapshots"], "snapshot_limit": MAX_WORKFLOW_SNAPSHOTS,
+                "per_region_snapshot_limit": MAX_REGION_SNAPSHOTS, "record_limit_bytes": MAX_WORKFLOW_RECORD_BYTES,
+                "retention": "Refuse new work at capacity. Existing snapshots, jobs, scenarios and artifacts are never silently deleted."}
+
+    def _check_snapshot_capacity(self, db, region_id):
+        total = db.execute("SELECT COUNT(*) FROM workflow_snapshots").fetchone()[0]
+        local = db.execute("SELECT COUNT(*) FROM workflow_snapshots WHERE region_id=?", (region_id,)).fetchone()[0]
+        if total >= MAX_WORKFLOW_SNAPSHOTS or local >= MAX_REGION_SNAPSHOTS:
+            raise WorkflowCapacityError("Analysis snapshot limit reached (2048 per workspace, 256 per area). Back up this workspace and use a new workspace database; saved snapshots remain exportable.")
+
+    def _registry_files(self):
+        return [{"id": entry.get("id"), "checkpoint": file_fingerprint(entry.get("path", "")),
+                 "evaluation": file_fingerprint(entry.get("evaluation", {}).get("path", ""))} for entry in self.registry]
+
+    @staticmethod
+    def _source_files(binding):
+        return [{"source": digest(row["path"]), "expected_sha256": row["sha256"], "file": file_fingerprint(row["path"])}
+                for row in (binding or {}).get("sources", [])]
+
+    def save_context(self, region_id, kind, value):
+        payload = self.store._json(value)
+        with self.store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            prior = db.execute("SELECT payload FROM workflow_context WHERE region_id=? AND kind=?", (region_id, kind)).fetchone()
+            self._check_metadata(db, payload, prior[0] if prior else None)
+            db.execute("INSERT OR REPLACE INTO workflow_context VALUES (?,?,?)", (region_id, kind, payload))
 
     def _binding(self, region_id):
         with self.store.connection() as db:
@@ -191,10 +272,15 @@ class WorkflowService:
             saved = self.store.region(region_id)
             result["stale"] = bool(saved and (digest(saved[1]) != result["manifest"]["observations_sha256"]
                                              or digest(saved[0]["geometry"]) != result["manifest"]["geometry_sha256"]))
-            for name, expected in result["manifest"].get("implementation_sha256", {}).items():
-                if file_hash(Path(__file__).with_name(name)) != expected:
-                    result["stale"] = True
+            if result["manifest"].get("implementation_sha256") != implementation_hashes():
+                result["stale"] = True
+            if result["manifest"].get("software_version") != __version__:
+                result["stale"] = True
             if result["manifest"].get("registry_sha256") != digest(self.registry):
+                result["stale"] = True
+            if result["manifest"].get("registry_files") != self._registry_files():
+                result["stale"] = True
+            if result["manifest"].get("source_files") != self._source_files(self._binding(region_id)):
                 result["stale"] = True
             for kind, expected in result["manifest"].get("context_sha256", {}).items():
                 context = self._context(region_id, kind)
@@ -224,6 +310,10 @@ class WorkflowService:
         if saved is None:
             raise ValueError("Region not found")
         region, observations = saved
+        self._check_artifacts()
+        with self.store.connection() as db:
+            self._check_snapshot_capacity(db, region_id)
+            self._check_metadata(db, "")
         cutoff = cutoff or observations[-1]["date"]
         date.fromisoformat(cutoff)
         observations = [row for row in observations if row["date"] <= cutoff]
@@ -246,7 +336,11 @@ class WorkflowService:
                 sources[path] = {"path": path, "sha256": file_hash(path)}
             binding = {"geometry_sha256": digest(region["geometry"]), "sources": list(sources.values())}
             with self.store.connection() as db:
-                db.execute("INSERT OR REPLACE INTO workflow_bindings VALUES (?,?)", (region_id, self.store._json(binding)))
+                db.execute("BEGIN IMMEDIATE")
+                previous = db.execute("SELECT payload FROM workflow_bindings WHERE region_id=?", (region_id,)).fetchone()
+                serialized = self.store._json(binding)
+                self._check_metadata(db, serialized, previous[0] if previous else None)
+                db.execute("INSERT OR REPLACE INTO workflow_bindings VALUES (?,?)", (region_id, serialized))
         prepared, sequence_error = None, "No accepted real optical caches are bound to this region. Collect observations through the acquisition workflow."
         if binding and not payload["synthetic"]:
             try:
@@ -301,9 +395,14 @@ class WorkflowService:
         if include_radar and not payload["synthetic"]:
             try:
                 from forestmind.monitoring.radar import acquire_radar
-                radar = acquire_radar(region["geometry"], start=observations[0]["date"], end=cutoff)
-                if radar.get("available"):
+                collected = acquire_radar(region["geometry"], start=observations[0]["date"], end=cutoff)
+                if collected.get("available"):
+                    radar = collected
                     self.save_context(region_id, "radar", radar)
+                else:
+                    radar_collection_error = collected.get("reason", "No eligible radar pair was returned; previously saved evidence remains intact.")
+                    if not radar:
+                        radar = collected
             except Exception as error:
                 from forestmind.data.adapters.network import public_error
                 radar_collection_error = f"Radar collection failed: {public_error(error)}"
@@ -328,6 +427,8 @@ class WorkflowService:
                 sequence_id = digest({"sources": prepared.provenance["sources"], "model": model["sha256"], "cutoff": cutoff})
                 input_path = self.root / f"sequence-{sequence_id}.npz"
                 if not input_path.exists():
+                    # Uncompressed arrays plus ZIP/JSON overhead are a conservative write reservation.
+                    self._check_artifacts(sum(array.nbytes for array in prepared.arrays.values()) + 1024**2)
                     write_sequence(prepared, input_path)
                 from forestmind.inference.predict import predict_checkpoint
                 report = predict_checkpoint(model["path"], input_path, region_id=region_id,
@@ -337,8 +438,10 @@ class WorkflowService:
                 model_version = {"id": model["id"], "version": model["version"], "sha256": model["sha256"], "target": model["target"]}
                 model_result = {"available": True, "eligibility": eligibility, "run_id": run["id"], "report": report,
                                 "reason": "Executed compatible registered model. Registration records operator-reviewed scope; it does not independently establish scientific validity."}
+            except WorkflowCapacityError:
+                raise
             except Exception as error:
-                model_result["reason"] = f"Registered model execution abstained: {type(error).__name__}: {error}"
+                model_result["reason"] = f"Registered model execution abstained ({type(error).__name__}). Verify the local checkpoint configuration and input contract."
         elif model:
             model_result["reason"] = "A registered checkpoint is eligible. Run selected-area analysis to execute it on the worker."
         forecast_available = bool(analysis["forecast"]["points"])
@@ -369,13 +472,14 @@ class WorkflowService:
                                       "forest_cover": digest(cover) if cover else None,
                                       "radar": digest(radar) if radar.get("available") else None}
         manifest["registry_sha256"] = digest(self.registry)
+        manifest["registry_files"] = self._registry_files()
+        manifest["source_files"] = self._source_files(binding)
         manifest["model_execution_status_sha256"] = digest({"available": model_result["available"], "reason": model_result["reason"]})
         manifest["diagnostics_sha256"] = digest({"sequence": sequence_error if prepared is None else None,
                                                   "climate": climate_collection_error or (climate.get("reason") if not climate.get("available") else None),
                                                   "radar": radar_collection_error or (radar.get("reason") if not radar.get("available") else None),
                                                   "landcover": landcover_error})
-        manifest["implementation_sha256"] = {name: file_hash(Path(__file__).with_name(name))
-                                              for name in ("workflow.py", "spatial.py", "climate.py", "projections.py", "landcover.py", "radar.py")}
+        manifest["implementation_sha256"] = implementation_hashes()
         manifest["id"] = digest({key: value for key, value in manifest.items() if key != "id"})
         result = {"schema_version": 1, "kind": "forestmind_selected_area_analysis", "created_at": now(),
                   "manifest": manifest, "stale": False, "job_id": job_id, "capabilities": capabilities,
@@ -388,13 +492,19 @@ class WorkflowService:
                   "scenarios": {**projections, "endpoint": f"/api/v1/regions/{region_id}/workflow/scenarios"},
                   "sequence": prepared.provenance if prepared else {"available": False, "reason": sequence_error}}
         with self.store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
             existing = db.execute("SELECT payload FROM workflow_snapshots WHERE id=?", (manifest["id"],)).fetchone()
             if existing:
                 return json.loads(existing["payload"])
+            self._check_snapshot_capacity(db, region_id)
             if model_result["available"]:
                 run["manifest"] = manifest
-                db.execute("INSERT INTO model_runs (id,region_id,payload) VALUES (?,?,?)", (run["id"], region_id, self.store._json(run)))
-            db.execute("INSERT INTO workflow_snapshots VALUES (?,?,?)", (manifest["id"], region_id, self.store._json(result)))
+                serialized_run = self.store._json(run)
+                self._check_metadata(db, serialized_run)
+                db.execute("INSERT INTO model_runs (id,region_id,payload) VALUES (?,?,?)", (run["id"], region_id, serialized_run))
+            serialized = self.store._json(result)
+            self._check_metadata(db, serialized)
+            db.execute("INSERT INTO workflow_snapshots VALUES (?,?,?)", (manifest["id"], region_id, serialized))
         return result
 
     def job(self, job_id):
