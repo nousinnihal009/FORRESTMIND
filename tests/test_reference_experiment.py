@@ -82,6 +82,26 @@ def test_target_window_and_embargo_are_purged():
         audit_references(document)
 
 
+def test_event_identity_cannot_merge_unrelated_events_or_cross_splits():
+    document = references("event")
+    document["examples"][-1]["event_id"] = document["examples"][1]["event_id"]
+    with pytest.raises(ValueError, match="event_id must identify one"):
+        audit_references(document)
+
+
+def test_consistent_event_identity_groups_repeated_warning_origins():
+    from forestmind.training.reference_experiment import _event_metrics
+    import numpy as np
+    rows = [{"region_id": "same-site", "cutoff": "2024-01-01", "target_date": "2024-03-01", "target": 1,
+             "event_id": "one-disturbance", "event_date": "2024-02-15"},
+            {"region_id": "same-site", "cutoff": "2024-02-01", "target_date": "2024-04-01", "target": 1,
+             "event_id": "one-disturbance", "event_date": "2024-02-15"}]
+    metrics = _event_metrics(rows, np.array([1, 1]), np.array([.8, .9]))
+    assert metrics["unique_reference_events"] == 1
+    assert metrics["mean_first_warning_lead_days"] == 45
+    assert metrics["exposure_region_days"] == 91  # overlapping horizons count once
+
+
 def test_target_protocol_and_test_labels_cannot_change_after_freeze(tmp_path):
     document = references()
     protocol = freeze_protocol(document)
