@@ -3,6 +3,7 @@
 from datetime import datetime
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 import pytest
@@ -172,6 +173,105 @@ def test_atomic_json_enforces_readable_size_before_mutating_destination(tmp_path
     path.write_bytes(b" " * 65)
     with pytest.raises(ValueError, match="limit"):
         history._read_json(path)
+
+
+@pytest.mark.parametrize("winerror", [5, 32, 33])
+def test_atomic_json_retries_transient_windows_lock_after_closing_writer(tmp_path, monkeypatch, winerror):
+    path = tmp_path / "report.json"
+    path.write_bytes(b"original report")
+    original_replace = Path.replace
+    original_temporary_file = history.tempfile.NamedTemporaryFile
+    handles, attempts, waits = [], [], []
+    value = {"replacement": "complete \u00e9vidence"}
+
+    def temporary_file(*args, **kwargs):
+        handle = original_temporary_file(*args, **kwargs)
+        handles.append(handle)
+        return handle
+
+    def transient_lock(temporary, destination):
+        assert handles and all(handle.closed for handle in handles)
+        assert destination == path and path.read_bytes() == b"original report"
+        assert json.loads(temporary.read_text(encoding="utf-8")) == value
+        attempts.append(temporary)
+        if len(attempts) < 3:
+            error = PermissionError("Temporary Windows sharing/access denial")
+            error.winerror = winerror
+            raise error
+        return original_replace(temporary, destination)
+
+    monkeypatch.setattr(history.tempfile, "NamedTemporaryFile", temporary_file)
+    monkeypatch.setattr(Path, "replace", transient_lock)
+    monkeypatch.setattr(history, "sleep", waits.append)
+    history._atomic_json(path, value)
+    assert history._read_json(path) == value
+    assert len(attempts) == 3 and len(set(attempts)) == 1
+    assert waits == list(history.ATOMIC_REPLACE_RETRY_DELAYS[:2])
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("winerror", [5, 32, 33, 19, None])
+def test_atomic_json_permanent_refusal_preserves_destination_and_stops(tmp_path, monkeypatch, winerror):
+    path = tmp_path / "report.json"
+    original = b'{"existing":"do not truncate or delete"}'
+    path.write_bytes(original)
+    attempts, waits = [], []
+    error = PermissionError("Persistent refusal")
+    if winerror is not None:
+        error.winerror = winerror
+
+    def refuse(temporary, destination):
+        assert destination == path and path.read_bytes() == original
+        assert temporary.exists()
+        attempts.append(temporary)
+        raise error
+
+    monkeypatch.setattr(Path, "replace", refuse)
+    monkeypatch.setattr(history, "sleep", waits.append)
+    with pytest.raises(PermissionError) as raised:
+        history._atomic_json(path, {"new": "never committed"})
+    assert raised.value is error
+    expected_waits = list(history.ATOMIC_REPLACE_RETRY_DELAYS) if winerror in {5, 32, 33} else []
+    assert waits == expected_waits and sum(waits) <= .31
+    assert len(attempts) == len(expected_waits) + 1
+    assert len(set(attempts)) == 1
+    assert path.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Exercises an actual Windows file-sharing lock")
+def test_atomic_json_recovers_after_actual_windows_reader_releases_lock(tmp_path, monkeypatch):
+    import ctypes
+    from ctypes import wintypes
+    path = tmp_path / "report.json"
+    path.write_bytes(b"original report")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    # Allow reads/writes but omit FILE_SHARE_DELETE, as an external reader can.
+    reader = kernel.CreateFileW(str(path), 0x80000000, 3, None, 3, 128, None)
+    assert reader != ctypes.c_void_p(-1).value, ctypes.WinError(ctypes.get_last_error())
+    waits = []
+
+    def release_reader(delay):
+        nonlocal reader
+        waits.append(delay)
+        assert path.read_bytes() == b"original report"
+        assert kernel.CloseHandle(reader)
+        reader = None
+
+    monkeypatch.setattr(history, "sleep", release_reader)
+    try:
+        history._atomic_json(path, {"saved": True})
+    finally:
+        if reader is not None:
+            kernel.CloseHandle(reader)
+    assert waits == [history.ATOMIC_REPLACE_RETRY_DELAYS[0]]
+    assert history._read_json(path) == {"saved": True}
+    assert list(tmp_path.iterdir()) == [path]
 
 
 def test_invalid_out_of_window_or_provider_candidates_are_recorded_and_excluded(tmp_path):
