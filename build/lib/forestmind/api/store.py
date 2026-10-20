@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 import json
 from pathlib import Path
 import sqlite3
+from datetime import datetime, timezone
 
 
 class Store:
@@ -14,6 +15,7 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
             connection.executescript("""
+                CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS regions (
                     id TEXT PRIMARY KEY, metadata TEXT NOT NULL, observations TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS analyses (
@@ -27,7 +29,20 @@ class Store:
                 CREATE TABLE IF NOT EXISTS model_runs (
                     id TEXT PRIMARY KEY, region_id TEXT NOT NULL REFERENCES regions(id), payload TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS model_runs_region ON model_runs(region_id);
+                CREATE TABLE IF NOT EXISTS alert_settings (
+                    region_id TEXT PRIMARY KEY REFERENCES regions(id), payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS alert_history (
+                    episode TEXT PRIMARY KEY, region_id TEXT NOT NULL REFERENCES regions(id), payload TEXT NOT NULL);
             """)
+            connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (?,?)", (1, datetime.now(timezone.utc).isoformat()))
+            added = connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (?,?)", (2, datetime.now(timezone.utc).isoformat())).rowcount
+            if added:
+                for row in connection.execute("SELECT result FROM analyses").fetchall():
+                    self._save_analysis(connection, json.loads(row[0]))
+            added_manifest = connection.execute("INSERT OR IGNORE INTO schema_migrations VALUES (?,?)", (3, datetime.now(timezone.utc).isoformat())).rowcount
+            if added_manifest:
+                for row in connection.execute("SELECT result FROM analyses").fetchall():
+                    self._save_analysis(connection, json.loads(row[0]))
 
     @contextmanager
     def connection(self):
@@ -60,6 +75,16 @@ class Store:
             self._save_analysis(connection, analysis)
 
     def _save_analysis(self, connection, analysis):
+        from forestmind.monitoring.alerts import reconcile_alerts
+        from forestmind.monitoring.workflow import manifest_for
+        saved = connection.execute("SELECT metadata,observations FROM regions WHERE id=?", (analysis["id"],)).fetchone()
+        if saved:
+            region, observations = json.loads(saved[0]), json.loads(saved[1])
+            analyzed = [{k: v for k, v in row.items() if k != "health_score"} for row in analysis["observations"]]
+            if observations != analyzed or region["geometry"] != analysis["geometry"]:
+                raise ValueError("Observations changed while analysis ran; run analysis again for the current snapshot")
+            analysis["manifest"] = manifest_for(region, observations)
+        reconcile_alerts(connection, analysis)
         connection.execute("INSERT OR REPLACE INTO analyses (region_id,result) VALUES (?,?)",
                            (analysis["id"], self._json(analysis)))
         connection.execute("DELETE FROM alerts WHERE region_id=?", (analysis["id"],))
@@ -111,6 +136,22 @@ class Store:
         with self.connection() as connection:
             return [{**json.loads(row["payload"]), "region_id": row["region_id"]}
                     for row in connection.execute("SELECT region_id,payload FROM alerts ORDER BY rowid")]
+
+    def backup(self, destination: str | Path) -> Path:
+        """SQLite online backup; refuses overwrite and checks the resulting database."""
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open("xb"):
+            pass
+        try:
+            with closing(sqlite3.connect(self.path)) as source, closing(sqlite3.connect(destination)) as target:
+                source.backup(target)
+                if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise ValueError("Backup integrity check failed")
+        except Exception:
+            destination.unlink(missing_ok=True)
+            raise
+        return destination
 
     def save_model_run(self, region_id: str, run: dict):
         with self.connection() as connection:
