@@ -151,14 +151,28 @@ def test_missing_masks_and_hidden_pickle_are_rejected(tmp_path, config):
         load_sequence(path, config, observed_through="2025-06-01", synthetic_input=True)
 
 
-def test_native_backbone_rejected_before_constructor_or_download(tmp_path, config, monkeypatch):
+@pytest.mark.parametrize("name", ["prithvi", "terramind"])
+def test_native_backbone_rejected_before_constructor_or_download(tmp_path, config, monkeypatch, name):
     import forestmind.inference.predict as module
     native = deepcopy(config)
-    native["foundation"] = {"name": "prithvi", "prithvi": {"use_proxy": False}}
+    native["foundation"] = {"name": name, name: {"use_proxy": False}}
     path = tmp_path / "native.pt"
     torch.save({"config": native, "model_state_dict": {}}, path)
     monkeypatch.setattr(module, "ForestMindModel", lambda _: pytest.fail("Must not initialize a download-capable native model"))
     with pytest.raises(ValueError, match="offline inference"):
+        predict_checkpoint(path, "unused.npz", region_id="xingu", observed_through="2025-06-01", synthetic_input=True)
+
+
+@pytest.mark.parametrize("proxy", ["false", "true", 1, None])
+def test_checkpoint_cannot_choose_proxy_through_truthy_nonboolean(tmp_path, config, monkeypatch, proxy):
+    import forestmind.inference.predict as module
+    from copy import deepcopy
+    invalid = deepcopy(config)
+    invalid["foundation"] = {"name": "terramind", "terramind": {"use_proxy": proxy}}
+    path = tmp_path / "invalid-mode.pt"
+    torch.save({"config": invalid, "model_state_dict": {}}, path)
+    monkeypatch.setattr(module, "ForestMindModel", lambda _: pytest.fail("Invalid mode must stop before construction"))
+    with pytest.raises(ValueError, match="explicit boolean"):
         predict_checkpoint(path, "unused.npz", region_id="xingu", observed_through="2025-06-01", synthetic_input=True)
 
 
