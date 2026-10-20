@@ -32,7 +32,7 @@ MAX_WORKFLOW_METADATA_BYTES = 256 * 1024**2
 MAX_WORKFLOW_ARTIFACT_BYTES = 1024**3
 MAX_WORKFLOW_RECORD_BYTES = 16 * 1024**2
 WORKFLOW_TABLES = ("workflow_snapshots", "workflow_bindings", "workflow_jobs", "workflow_context", "model_runs", "scenarios")
-IMPLEMENTATION_FILES = ("workflow.py", "spatial.py", "climate.py", "projections.py", "landcover.py", "radar.py", "analysis.py", "coverage.py", "evaluation.py", "../data/sequence.py", "../inference/predict.py")
+IMPLEMENTATION_FILES = ("workflow.py", "spatial.py", "climate.py", "projections.py", "landcover.py", "radar.py", "analysis.py", "coverage.py", "evaluation.py", "ingest.py", "../data/sequence.py", "../data/transforms.py", "../inference/predict.py", "../inference/schemas.py")
 
 
 class WorkflowCapacityError(ValueError):
@@ -53,7 +53,13 @@ def file_fingerprint(path):
 
 
 def implementation_hashes():
-    return {name: file_hash(Path(__file__).parent / name) for name in IMPLEMENTATION_FILES}
+    directory = Path(__file__).parent
+    values = {name: file_hash(directory / name) for name in IMPLEMENTATION_FILES}
+    # Prediction behavior also depends on the architecture and normalization,
+    # even when the registered weight artifact itself has not changed.
+    for path in sorted((directory.parent / "models").rglob("*.py")):
+        values["../" + path.relative_to(directory.parent).as_posix()] = file_hash(path)
+    return values
 
 
 def now():
@@ -555,6 +561,13 @@ class WorkflowService:
             payload = self.store._json(result)
             self._check_metadata(db, payload)
             db.execute("INSERT INTO scenarios (id,region_id,payload) VALUES (?,?,?)", (result["id"], result["region_id"], payload))
+
+    def save_model_run(self, region_id, run):
+        with self.store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            payload = self.store._json(run)
+            self._check_metadata(db, payload)
+            db.execute("INSERT INTO model_runs (id,region_id,payload) VALUES (?,?,?)", (run["id"], region_id, payload))
 
     def submit(self, region_id, include_climate=False, include_landcover=False, include_radar=False):
         with self.lock:
