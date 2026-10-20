@@ -57,6 +57,65 @@ def test_event_metrics_calibration_false_alerts_and_lead_time():
     assert model["calibration"]["count"] == 6
 
 
+@pytest.mark.parametrize("kind", ["continuous", "event"])
+def test_gradient_boosting_keeps_protected_examples_calibration_and_deterministic_results(kind):
+    document = references(kind)
+    protocol = freeze_protocol(document)
+    result = run_reference_experiment(document, protocol)
+    boosted = result["models"]["gradient_boosted_features"]
+    expected = [row for row in document["examples"] if row["split"] == "test"]
+    assert len(result["models"]) == 5
+    for model in result["models"].values():
+        assert [row["id"] for row in model["examples"]] == [row["id"] for row in expected]
+        assert [row["target"] for row in model["examples"]] == [row["target"] for row in expected]
+    assert boosted["calibration"]["count"] == 6
+    assert boosted == run_reference_experiment(document, protocol)["models"]["gradient_boosted_features"]
+    if kind == "event":
+        assert boosted["raw_metrics"] is not None
+        assert 0 <= boosted["metrics"]["brier"] <= 1
+        assert sum(bin["count"] for bin in boosted["metrics"]["reliability"]) == len(expected)
+        assert all(0 <= row["raw_prediction"] <= 1 and 0 <= row["prediction"] <= 1
+                   for row in boosted["examples"])
+    else:
+        assert boosted["raw_metrics"] is None
+        assert boosted["metrics"]["mae"] >= 0
+        offsets = boosted["calibration"]["offsets"]
+        for row in boosted["examples"]:
+            assert row["lower"] == pytest.approx(row["prediction"] + offsets[0])
+            assert row["upper"] == pytest.approx(row["prediction"] + offsets[1])
+
+
+@pytest.mark.parametrize("kind", ["continuous", "event"])
+def test_gradient_boosting_never_fits_imputation_or_model_on_held_out_features(kind):
+    document = references(kind)
+    probe = next(row for row in document["examples"] if row["split"] == "test")
+    probe["features"] = {name: None for name in document["feature_names"]}
+    altered = deepcopy(document)
+    # A missing held-out probe uses the training medians. Other held-out inputs
+    # must not influence either its imputation or its raw fitted-model output.
+    for row in altered["examples"]:
+        if row["split"] != "train" and row["id"] != probe["id"]:
+            row["features"] = {name: 10000. for name in altered["feature_names"]}
+    before = run_reference_experiment(document, freeze_protocol(document))
+    after = run_reference_experiment(altered, freeze_protocol(altered))
+    assert before["training_preprocessing"] == after["training_preprocessing"]
+    before_probe = before["models"]["gradient_boosted_features"]["examples"][0]
+    after_probe = after["models"]["gradient_boosted_features"]["examples"][0]
+    assert before_probe["id"] == after_probe["id"] == probe["id"]
+    assert before_probe["raw_prediction"] == after_probe["raw_prediction"]
+
+
+def test_gradient_boosting_configuration_cannot_change_after_protocol_freeze(monkeypatch):
+    from forestmind.training import reference_experiment as experiment
+    document = references()
+    protocol = freeze_protocol(document)
+    assert protocol["models"]["boost_stages"] == 100
+    assert protocol["models"]["boost_n_iter_no_change"] is None
+    monkeypatch.setitem(experiment.MODEL_CONFIG, "boost_learning_rate", .2)
+    with pytest.raises(ValueError, match="Model configuration differs"):
+        run_reference_experiment(document, protocol)
+
+
 @pytest.mark.parametrize("change,match", [
     (lambda d: d["examples"][-1].update(features_available_at="2027-01-01"), "Features must"),
     (lambda d: d["examples"][-1].update(bbox=d["examples"][0]["bbox"]), "spatial buffer"),
