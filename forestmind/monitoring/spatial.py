@@ -39,20 +39,31 @@ def spectral_change(prepared, geometry: dict) -> dict:
     if len(data) < 2:
         return {"available": False, "reason": "Two accepted, quality-masked optical acquisitions are required; one is available."}
     start, end = data[0], data[-1]
-    valid = arrays["quality_mask"][0] & arrays["quality_mask"][-1] & polygon_mask(geometry, start.shape[1:])
-    outputs = {}
+    area_mask = polygon_mask(geometry, start.shape[1:])
+    valid = arrays["quality_mask"][0] & arrays["quality_mask"][-1] & area_mask
+    outputs, computable = {}, False
     for name, other in (("ndvi", 3), ("ndmi", 10), ("nbr", 11)):
-        den0, den1 = start[7] + start[other], end[7] + end[other]
-        good = valid & (den0 > 1e-8) & (den1 > 1e-8)
-        before = np.divide(start[7] - start[other], den0, out=np.zeros_like(den0), where=good)
-        after = np.divide(end[7] - end[other], den1, out=np.zeros_like(den1), where=good)
+        good = valid.copy()
+        for band in (start[7], start[other], end[7], end[other]):
+            good &= np.isfinite(band) & (band >= 0) & (band <= 1)
+        den0 = np.add(start[7], start[other], out=np.zeros_like(start[7]), where=good)
+        den1 = np.add(end[7], end[other], out=np.zeros_like(end[7]), where=good)
+        good &= (den0 > 1e-8) & (den1 > 1e-8)
+        num0 = np.subtract(start[7], start[other], out=np.zeros_like(den0), where=good)
+        num1 = np.subtract(end[7], end[other], out=np.zeros_like(den1), where=good)
+        before = np.divide(num0, den0, out=np.zeros_like(den0), where=good)
+        after = np.divide(num1, den1, out=np.zeros_like(den1), where=good)
         delta = after - before
+        computable |= bool(good.any())
         outputs[name] = {"values": [[round(float(delta[y, x]), 5) if good[y, x] else None
                                       for x in range(delta.shape[1])] for y in range(delta.shape[0])],
                          "mean_delta": float(delta[good].mean()) if good.any() else None,
-                         "valid_fraction": float(good.sum() / max(1, polygon_mask(geometry, good.shape).sum()))}
-    return {"available": bool(valid.any()), "kind": "observed_spectral_change", "units": "index difference (latest minus first)",
-            "reason": "Actual common-valid pixels only." if valid.any() else "No common valid pixels across the two dates.",
+                         "valid_fraction": float(good.sum() / max(1, area_mask.sum()))}
+    reason = ("Actual computable common-valid index pixels only." if computable else
+              "No computable index deltas across the two dates: required bands need finite [0,1] reflectance and positive denominators." if valid.any() else
+              "No common valid pixels across the two dates.")
+    return {"available": computable, "kind": "observed_spectral_change", "units": "index difference (latest minus first)",
+            "reason": reason,
             "start": dates[0], "end": dates[-1], "bbox": geometry_bbox(geometry),
             "shape": list(start.shape[1:]), "crs": "EPSG:4326", "layers": outputs,
             "sources": [prepared.provenance["sources"][0], prepared.provenance["sources"][-1]],
@@ -110,6 +121,48 @@ def recovery_diagnostics(observations: list[dict], threshold: float = .1) -> dic
                             "Comparisons across episodes require independent disturbance severity and climate controls."]}
 
 
+def _patch_shapes(patches, valid, patch_areas, dx, dy):
+    """Grid compactness only for patches with a fully observed boundary.
+
+    A clipped patch has no complete perimeter. Unknown cells and the AOI edge
+    must never be assumed to be nonforest in order to manufacture one.
+    """
+    count = len(patch_areas)
+    perimeter = np.zeros(count + 1, dtype=float)
+    censored = np.zeros(count + 1, dtype=bool)
+    padded_valid = np.pad(valid, 1, constant_values=False)
+    padded_patches = np.pad(patches, 1, constant_values=0)
+    height, width = patches.shape
+    north = np.r_[dx[0], (dx[:-1] + dx[1:]) / 2]
+    south = np.r_[(dx[:-1] + dx[1:]) / 2, dx[-1]]
+    for row_offset, col_offset, lengths in (
+            (-1, 0, north[:, None]), (1, 0, south[:, None]),
+            (0, -1, dy), (0, 1, dy)):
+        neighbour_valid = padded_valid[1 + row_offset:1 + row_offset + height,
+                                       1 + col_offset:1 + col_offset + width]
+        neighbour_patch = padded_patches[1 + row_offset:1 + row_offset + height,
+                                         1 + col_offset:1 + col_offset + width]
+        censored[np.unique(patches[(patches > 0) & ~neighbour_valid])] = True
+        boundary = (patches > 0) & neighbour_valid & (neighbour_patch == 0)
+        weights = np.broadcast_to(lengths, patches.shape)[boundary]
+        perimeter += np.bincount(patches[boundary], weights=weights, minlength=count + 1)
+    metrics = []
+    for identifier, area in enumerate(patch_areas, 1):
+        complete = not bool(censored[identifier])
+        length = float(perimeter[identifier])
+        compactness = 4 * math.pi * float(area) / length ** 2 if complete and length > 0 else None
+        metrics.append({"patch_id": identifier, "area_km2": float(area) / 1e6,
+                        "boundary_complete": complete, "observed_edge_m": length,
+                        "perimeter_m": length if complete else None,
+                        "compactness": compactness})
+    known = [row["compactness"] for row in metrics if row["compactness"] is not None]
+    return {"method": "grid-isoperimetric-compactness-v1", "formula": "4 * pi * area_m2 / perimeter_m^2",
+            "complete_patch_count": len(known), "censored_patch_count": count - len(known),
+            "mean_compactness": float(np.mean(known)) if known else None,
+            "patches": metrics,
+            "interpretation": "Grid boundary shape only; higher values mean more compact observed patches. Values depend on sampling resolution and do not measure habitat quality or connectivity."}
+
+
 def fragmentation_metrics(payload: dict, geometry: dict) -> dict:
     """4-connected forest patch topology from a separately supplied cover raster."""
     cover = np.asarray(payload["forest"], dtype=bool)
@@ -145,8 +198,10 @@ def fragmentation_metrics(payload: dict, geometry: dict) -> dict:
             "edge_density_m_per_ha": edge / (landscape_area / 10000) if landscape_area else None,
             "largest_patch_fraction": float(patch_areas.max() / forest_area) if forest_area else None,
             "mean_nearest_centroid_m": float(nearest.mean()) if len(nearest) else None,
+            "shape": _patch_shapes(patches, valid, patch_areas, dx, dy),
             "limitations": ["Reference classification has not been independently field-validated for this AOI.",
                             "AOI boundary and nodata boundaries are excluded from edge length; outside connectivity is unknown.",
+                            "Compactness is withheld for patches touching the AOI boundary or nodata; grid stair-stepping affects perimeters.",
                             "Four-neighbour topology and centroid distance do not measure species-specific habitat connectivity.",
                             "Areas and distances use a spherical local-grid approximation. No forest class is inferred from vegetation indices.",
                             *payload.get("limitations", [])]}
