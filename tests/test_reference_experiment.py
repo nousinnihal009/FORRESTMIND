@@ -119,6 +119,15 @@ def test_target_protocol_and_test_labels_cannot_change_after_freeze(tmp_path):
         write_new_json(protocol, output)
 
 
+def test_frozen_protocol_pins_numerical_runtime(monkeypatch):
+    import numpy as np
+    document = references()
+    protocol = freeze_protocol(document)
+    monkeypatch.setattr(np, "__version__", "different-runtime")
+    with pytest.raises(ValueError, match="numerical runtime differs"):
+        run_reference_experiment(document, protocol)
+
+
 def test_insufficient_subgroups_report_counts_without_unstable_metrics():
     document = references()
     document["examples"][-1]["quality_group"] = "low"
