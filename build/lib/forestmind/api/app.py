@@ -21,6 +21,13 @@ from forestmind.api.store import Store
 from forestmind.monitoring.analysis import DISCLAIMER, METHOD, analyze_region, sensitivity_scenario
 from forestmind.monitoring.coverage import assess_history
 from forestmind.monitoring.demo import demo_regions
+from forestmind.api.places import install_places
+from forestmind.api.security import LocalOnlyMiddleware
+from forestmind.monitoring.alerts import install_alerts
+from forestmind.api.operations import install_operations
+from forestmind.api.acquisition import install_acquisition
+from forestmind.api.workflow import install_workflow
+from forestmind.monitoring.notifications import install_notifications
 
 
 def now() -> str:
@@ -47,6 +54,13 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
         "There is no authentication. Bind to localhost. " + DISCLAIMER
     ))
     app.state.store = store
+    app.add_middleware(LocalOnlyMiddleware)
+    install_places(app, store)
+    install_alerts(app, store)
+    install_operations(app, store)
+    install_workflow(app, store)
+    install_acquisition(app, store)
+    install_notifications(app, store)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request, error: RequestValidationError):
@@ -61,7 +75,7 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
     async def local_response_headers(request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["X-Frame-Options"] = "DENY"
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
@@ -195,7 +209,10 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
             raise HTTPException(422, "Report region_id must match the selected monitoring region")
         run = {"id": "model-" + uuid4().hex[:12], "imported_at": now(),
                "verification": "user_provided_unverified", "report": payload.model_dump(mode="json")}
-        store.save_model_run(region_id, run)
+        try:
+            app.state.workflow.save_model_run(region_id, run)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
         return run
 
     @app.get("/api/v1/regions/{region_id}/model-runs")
@@ -246,9 +263,14 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
 
     @app.post("/api/v1/scenarios", status_code=201)
     def scenario(payload: ScenarioRequest):
-        result = sensitivity_scenario(require_analysis(payload.region_id), payload.model_dump(exclude={"region_id"}))
-        result.update({"id": "scenario-" + uuid4().hex[:12], "created_at": now()})
-        store.save_scenario(result)
+        # Pin scenario to the same geometry, observed cutoff and input version as its baseline.
+        analysis = require_analysis(payload.region_id)
+        result = sensitivity_scenario(analysis, payload.model_dump(exclude={"region_id"}))
+        result.update({"id": "scenario-" + uuid4().hex[:12], "created_at": now(), "manifest": analysis.get("manifest")})
+        try:
+            app.state.workflow.save_scenario(result)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
         return result
 
     @app.get("/api/v1/scenarios/{scenario_id}")
@@ -267,6 +289,9 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
             output = io.StringIO(newline="")
             rows = [{**row, "provenance_mode": result["provenance"]["mode"],
                      "source": result["provenance"]["source"], "method": METHOD,
+                     "manifest_id": result.get("manifest", {}).get("id"),
+                     "geometry_geojson": store._json(result["geometry"]),
+                     "observation_cutoff": result["latest_date"],
                      "score_interpretation": "Heuristic uncalibrated indicator score"} for row in result["observations"]]
             writer = csv.DictWriter(output, fieldnames=list(rows[0]))
             writer.writeheader()
