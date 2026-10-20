@@ -1,5 +1,5 @@
 """Bounded persistence and freshness retain immutable evidence at capacity."""
-from copy import deepcopy
+import json
 
 import pytest
 from fastapi import FastAPI
@@ -95,6 +95,15 @@ def test_registered_file_and_software_changes_mark_saved_snapshot_stale(service,
     assert service.latest("observed")["stale"]
 
 
+def test_model_implementation_changes_mark_saved_snapshot_stale(service, monkeypatch):
+    from forestmind.monitoring.workflow import file_hash
+    before = service.run("observed")
+    assert "../models/forestmind_model.py" in before["manifest"]["implementation_sha256"]
+    monkeypatch.setattr("forestmind.monitoring.workflow.file_hash", lambda path: "changed-head-code" if path.name == "forestmind_model.py" else file_hash(path))
+    assert service.latest("observed")["stale"]
+    assert service.latest("observed")["manifest"] == before["manifest"]
+
+
 def test_unavailable_radar_recollection_retains_successful_context(service, saved, monkeypatch):
     radar = {"available": True, "end": "2024-02-02", "geometry_sha256": digest(saved[1]["geometry"]), "source": "controlled prior context"}
     service.save_context("observed", "radar", radar)
@@ -115,7 +124,7 @@ def test_capacity_api_and_admission_conflict_preserve_snapshots(saved, monkeypat
         response = client.post("/api/v1/regions/observed/workflow", json={})
         assert response.status_code == 409 and "snapshot limit" in response.json()["detail"]
         exported = client.get("/api/v1/regions/observed/workflow/export", params={"manifest_id": snapshot["manifest"]["id"]})
-        assert exported.status_code == 200 and exported.json() == snapshot
+        assert exported.status_code == 200 and exported.json() == json.loads(service.store._json(snapshot))
 
 
 def test_scenario_capacity_rolls_back_without_deleting_prior_results(service, monkeypatch):
@@ -126,3 +135,25 @@ def test_scenario_capacity_rolls_back_without_deleting_prior_results(service, mo
         service.save_scenario({**result, "id": "two"})
     with service.store.connection() as db:
         assert db.execute("SELECT COUNT(*) FROM scenarios").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("endpoint", ["scenario", "model"])
+def test_legacy_api_persistence_obeys_shared_workflow_budget(tmp_path, monkeypatch, endpoint):
+    from forestmind.api.app import create_app
+    from test_inference import example_report
+    app = create_app(tmp_path / "legacy-budget.db")
+    path = "/api/v1/scenarios" if endpoint == "scenario" else "/api/v1/regions/xingu/model-runs"
+    payload = {"region_id": "xingu", "restoration": 20} if endpoint == "scenario" else example_report()
+    with TestClient(app) as client:
+        previous = client.post(path, json=payload)
+        assert previous.status_code == 201
+        used = app.state.workflow.capacity()["metadata_bytes"]
+        monkeypatch.setattr("forestmind.monitoring.workflow.MAX_WORKFLOW_METADATA_BYTES", used)
+        denied = client.post(path, json=payload)
+        assert denied.status_code == 409 and "metadata storage" in denied.json()["detail"]
+        if endpoint == "scenario":
+            persisted = client.get("/api/v1/scenarios/" + previous.json()["id"]).json()
+        else:
+            persisted = client.get("/api/v1/regions/xingu/model-runs/" + previous.json()["id"]).json()
+        assert persisted == previous.json()
+        assert app.state.workflow.capacity()["metadata_bytes"] == used
