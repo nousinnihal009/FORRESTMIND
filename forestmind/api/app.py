@@ -209,7 +209,10 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
             raise HTTPException(422, "Report region_id must match the selected monitoring region")
         run = {"id": "model-" + uuid4().hex[:12], "imported_at": now(),
                "verification": "user_provided_unverified", "report": payload.model_dump(mode="json")}
-        store.save_model_run(region_id, run)
+        try:
+            app.state.workflow.save_model_run(region_id, run)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
         return run
 
     @app.get("/api/v1/regions/{region_id}/model-runs")
@@ -264,7 +267,10 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
         analysis = require_analysis(payload.region_id)
         result = sensitivity_scenario(analysis, payload.model_dump(exclude={"region_id"}))
         result.update({"id": "scenario-" + uuid4().hex[:12], "created_at": now(), "manifest": analysis.get("manifest")})
-        store.save_scenario(result)
+        try:
+            app.state.workflow.save_scenario(result)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
         return result
 
     @app.get("/api/v1/scenarios/{scenario_id}")
