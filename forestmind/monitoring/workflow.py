@@ -409,6 +409,17 @@ class WorkflowService:
                 climate_collection_error = f"Climate provider request failed ({type(error).__name__}); retry collection. Previously saved evidence remains intact."
                 if not climate:
                     climate = {"available": False, "reason": climate_collection_error}
+        if climate and climate.get("available") and isinstance(climate.get("raw_response"), dict):
+            from forestmind.monitoring.climate import refresh_climate_diagnostics
+            try:
+                refreshed = refresh_climate_diagnostics(climate)
+            except (ValueError, TypeError, KeyError):
+                climate_collection_error = (climate_collection_error or
+                    "Saved daily climate evidence cannot support the current diagnostic; collect climate context again. Earlier evidence remains intact.")
+            else:
+                if refreshed != climate:
+                    self.save_context(region_id, "climate", refreshed)
+                    climate = refreshed
         climate = climate or {"available": False, "reason": "Collect climate context to request actual ERA5 rainfall, temperature, soil moisture and reference evapotranspiration; no climate measurements were supplied."}
         radar = self._context(region_id, "radar")
         if radar and (radar.get("geometry_sha256") != digest(region["geometry"]) or radar.get("end", "9999") > cutoff):
