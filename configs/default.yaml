@@ -4,7 +4,7 @@
 # ─── Data ───────────────────────────────────────────────
 data:
   source: synthetic          # synthetic | sentinel2 | landsat
-  patch_size: 128            # pixels (128 × 128 = 1.28km × 1.28km at 10m)
+  patch_size: 128            # sample-grid pixels; physical spacing depends on source/AOI
   num_bands: 12              # Sentinel-2 equivalent bands
   sar_channels: 2            # VV + VH
   time_steps: 12             # monthly snapshots over 1 year
@@ -25,14 +25,19 @@ foundation:
     num_heads: 8
     mlp_ratio: 4.0
     drop_rate: 0.1
+  # Native research encoders require the foundation extra and actual weights.
+  # These are TerraTorch registry IDs, not Hugging Face repository IDs.
+  # Native offline inference remains disabled; see docs/NATIVE_MODEL_AUDIT.md.
   # Prithvi-specific (used when foundation.name = prithvi)
   prithvi:
-    model_name: "ibm-nasa-geospatial/Prithvi-EO-2.0-300M"
+    model_name: "prithvi_eo_v2_300"
     freeze: true
+    use_proxy: false
   # TerraMind-specific
   terramind:
-    model_name: "terramind-base"
+    model_name: "terramind_v1_base"
     freeze: true
+    use_proxy: false
 
 # ─── Fusion ────────────────────────────────────────────
 fusion:
