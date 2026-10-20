@@ -1,6 +1,50 @@
 # Build verification
 
-ForestMind v0.5 verified locally on Windows on 2026-10-16, with the final monthly-history artifact and persistence audit on October 17. The first real single-scene pilot was verified during v0.4 on October 14.
+## v0.6 connected application — October 20, 2026
+
+This release continues the existing FastAPI/SQLite/buildless dashboard. It connects worldwide search, small confirmed AOIs, actual acquisition, durable jobs, saved observations, optional real context, reproducible analyses, refresh and local schedules. The full original scientific proposal is **not complete**; the [requirements matrix](REQUIREMENTS_MATRIX.md) maps all 59 original-proposal and 40 expanded acceptance items, including incomplete implementations and missing evidence.
+
+### Executed software checks
+
+- Final integrated regression result: **pending rerun after the Windows atomic-save repair**. The first complete v0.6 run produced 611 passes and three WinError5 failures at atomic history-file replacement, in72.32s. Those failures are retained in `artifacts/regression-0.6.0.txt`; they are not counted as passes.
+- Focused acquisition/history/WorldCover/radar checks:144 passed before that repair. Workflow/reference/API/model-import checks:70 passed; final additional capacity/freshness checks:13 passed; reference-experiment checks:15 passed. Native inference/adapter checks:83 passed. Notifications/search/local-security/full-backup checks:18 passed. Frontend contracts:14 passed. These runs overlap and must not be added together as a total.
+- All seven dashboard JavaScript files passed `node --check`.
+- Packaging: the v0.6 wheel was built, and ten critical new modules/assets were compared byte-for-byte with source. Final wheel rebuild/hash after the atomic-save repair is pending. The package verification record is `artifacts/package-verification-0.6.0.json`.
+- Runtime inventory: `artifacts/validated-runtime-0.6.0.json`, Windows/Python3.13.7, CPU PyTorch, with optional geospatial dependencies in `artifacts/geo-validation`. This is a record of tested versions, not a universal dependency lockfile or security audit.
+
+### Actual browser workflow and provider results
+
+The in-app browser performed the application actions below. No synthetic observations were substituted, no public deployment occurred, and no external notification was sent.
+
+| Check | Observed result |
+| --- | --- |
+| Worldwide search | Explicit `Tapajos Brazil` query returned eight disambiguated Photon/OSM results with location and attribution. A place result was selected, then a small independent study rectangle was confirmed. |
+| Confirm and collect | `Tapajos connected real pilot`, bbox `[-55.10,-3.50,-55.08,-3.48]`, July–August2024,64×64 grid, two-download cap. Job `acq-d74c8ccee2f14153` accepted July17 and August26,100% valid samples, and saved area `area-858ffd6a4f28`. |
+| Refresh/cancel/resume | UI refresh job `acq-aead355d7b794983` was cancelled during planning, confirmed cancelled with saved observations unchanged, then explicitly resumed. It accepted September2 and October12 using exactly two downloads and retained the original July/August records. The broader requested window remains partial with explicit gaps. |
+| Local schedule | Enabled a15-day interval in the UI, observed a next-run date, then disabled it after the check. Restart retained `enabled:false`, `interval_days:15`; no unattended test schedule remains enabled for this area. |
+| Additional geography | Existing user area `Tamil Nadu, India` was preserved: November10,2025,95.9229% valid samples. New `Black Forest real pipeline check`, bbox `[8.20,48.55,8.22,48.57]`, saved August11,2024 at100% validity; July had no eligible candidate in the bounded plan. These are pipeline checks, not ecological geographic-transfer validation. |
+| No data | A small Pacific Ocean test rectangle returned no eligible observations. The job is failed with month-level reasons and zero downloads; no saved region or fabricated measurement was created. |
+| Climate context | UI ERA5 collection saved July17–August26,2024 centroid reanalysis, actual units/counts and partial-month date ranges. Standalone three-day smoke also succeeded (`artifacts/climate-context-pilot.json`). |
+| Land-cover context | Actual ESA WorldCover2021 v200 crop,64×64,4096 valid samples, class10 throughout this small Tapajós area. UI computed one patch and zero internal edge; this is historical classified woody cover, not independent current forest verification. `artifacts/worldcover-real-smoke.json`. |
+| Radar context | UI collected S1A/orbit39/descending RTC acquisitions August4 and16,2024,100% common valid samples; mean VV change≈+0.211dB and VH≈+0.451dB. A separate July11→23 smoke is retained in `artifacts/radar-real-smoke.json`. Dates/polarizations/units/orbit and masks are exported; the pairs do not establish disturbance cause. |
+| Spatial/keyboard | Real NDVI/NDMI/NBR difference rasters render. ArrowRight changes optical and radar pixel readouts. Final optical example reads pixel2,1≈+0.00397 NDVI with area mean≈−0.064. It is measured spectral change, not loss or future-risk probability. |
+| Mobile |390×844 viewport: document client/scroll widths both375px; no page overflow in real-region list or connected analysis. Spatial grid, labels and keyboard focus remained usable. Wide tables have internal scrolling. Screenshot `artifacts/forestmind-connected-mobile.jpg`. |
+| Desktop |1365×900 breakpoint checked, selected-area identity/cutoff and connected controls visible. Screenshot `artifacts/forestmind-connected-desktop.jpg`. Final browser error log was empty after reconnecting to the running service. Temporary viewport overrides were reset. |
+| Browser export | **Export reproducible record** downloaded the actual selected-area JSON. Workspace copy `artifacts/browser-connected-export.json`:2,327,832bytes, SHA256 `037b0a7e42f2f3baa5eae95cc809aa020ca06e49a68583995e3418381a7aaa00`; geometry/cutoff2024-10-12/four observations/context hashes/version0.6.0 retained, model null. |
+| Persistence/immutability | After restart, all nine areas remained (four synthetic/five real records), including all four refreshed Tapajós observations. Export of the older exact snapshot ID compared equal to its saved pre-restart payload. Rerunning after code changes produced a fresh non-stale snapshot. `artifacts/restart-verification-0.6.0.json`. |
+| Operations | UI showed local service and database integrity `ok`, available disk space, and created verified DB snapshot `forestmind-20261020T112518-8a22d2.db`. Notifications displayed disabled/unconfigured with zero outbox entries. |
+
+`artifacts/connected-final-jobs.json` retains the five acquisition jobs and their actual settings/outcomes. The original single-scene and eight-month imports remain unchanged. The real histories are still too short or discontinuous for the current forecast/resilience minimums, and the application withholds those outputs. Trained model and five-year ecological forecast validation were not demonstrated on these records.
+
+### Recovery and scientific gates
+
+Full workspace backups were created and hash/integrity verified at `data/backups/workspace-20261019` (11files) and `data/backups/workspace-20261020` (22files), including SQLite and both artifact trees. Automated restore tests recover the original job/source references and reject tampering, path traversal and overwrites. Database-only UI snapshots are deliberately distinguished from full source backups. Schedule concurrency fixes preserve user edits during enqueueing and prevent duplicate due ticks. The [operator guide](OPERATOR_GUIDE.md) documents original-path restore, quotas and rollback.
+
+**G1:** final regression/package rerun pending; the documented bounded local workflow has been exercised in the browser. **G2:** public/hosted deployment is not ready: no authentication, area/job ownership isolation, hosted supervision/load testing or real webhook-delivery acceptance. Local access is enforced. **G3:** not achieved: independent reference labels, real-trained accepted models, protected experiments and ecological predictive/causal evidence are missing. The new reference-experiment harness is tested with fixtures; it has not run an independent real-data benchmark. Native pretrained runtime/checkpoints remain unavailable and offline loading is blocked, as detailed in [NATIVE_MODEL_AUDIT.md](NATIVE_MODEL_AUDIT.md). Other incomplete original capabilities remain explicit in the matrix and completion plan.
+
+## Earlier v0.5 evidence (retained historical record)
+
+ForestMind v0.5 was verified locally on Windows on2026-10-16, with its monthly-history artifact and persistence audit on October17. The first real single-scene pilot was verified during v0.4 on October14. The counts and limitations below describe that earlier build.
 
 ## Completed checks
 
