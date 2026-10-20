@@ -16,6 +16,7 @@ import math
 from pathlib import Path
 import re
 import tempfile
+from time import sleep
 from urllib.parse import urlsplit, urlunsplit
 
 import numpy as np
@@ -29,6 +30,10 @@ SCHEMA_VERSION = 1
 REPORT_SCHEMA_VERSION = 2
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_MONTHS = 120
+# Indexers and virus scanners can briefly deny replacement after a file closes.
+# Six attempts wait at most 310 ms; unrelated and persistent errors still fail.
+ATOMIC_REPLACE_RETRY_DELAYS = (.01, .02, .04, .08, .16)
+WINDOWS_REPLACE_RETRY_ERRORS = frozenset({5, 32, 33})
 PROVIDERS = {"earth-search": "element84-earth-search",
              "planetary-computer": "microsoft-planetary-computer"}
 COLLECTIONS = {"earth-search": "sentinel-2-c1-l2a", "planetary-computer": "sentinel-2-l2a"}
@@ -197,7 +202,18 @@ def _atomic_json(path: Path, value: dict) -> None:
                                          suffix=".tmp", delete=False) as handle:
             temporary = Path(handle.name)
             handle.write(encoded)
-        temporary.replace(path)
+        # The writer is closed before every attempt. Keep using the same
+        # complete temporary file and atomic replacement; never delete or
+        # truncate the destination to work around a Windows sharing lock.
+        for attempt in range(len(ATOMIC_REPLACE_RETRY_DELAYS) + 1):
+            try:
+                temporary.replace(path)
+                break
+            except OSError as error:
+                if (getattr(error, "winerror", None) not in WINDOWS_REPLACE_RETRY_ERRORS
+                        or attempt == len(ATOMIC_REPLACE_RETRY_DELAYS)):
+                    raise
+                sleep(ATOMIC_REPLACE_RETRY_DELAYS[attempt])
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
