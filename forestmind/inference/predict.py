@@ -164,8 +164,10 @@ def predict_checkpoint(checkpoint_path: str | Path, input_path: str | Path, *,
     proxy = foundation.get(name, {}).get("use_proxy", False)
     if name not in {"custom_vit", "prithvi", "terramind"}:
         raise ValueError("Unsupported checkpoint backbone")
+    if type(proxy) is not bool:
+        raise ValueError("Checkpoint foundation use_proxy must be an explicit boolean")
     if name != "custom_vit" and not proxy:
-        raise ValueError("Native pretrained encoders are not supported by offline inference yet; their current builders download weights. Use a local custom_vit or explicit proxy checkpoint.")
+        raise ValueError("Native pretrained encoders are not supported by offline inference yet; their current builders may download weights. A verified native runtime, complete local trained checkpoint and strict offline loader are required. See docs/NATIVE_MODEL_AUDIT.md. Explicit proxy checkpoints remain development baselines only.")
     heads = config.get("heads", {})
     if (heads.get("health", {}).get("num_classes", 5) != 5 or
             not heads.get("health", {}).get("continuous_score", True) or
