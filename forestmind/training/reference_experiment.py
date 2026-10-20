@@ -152,10 +152,13 @@ def audit_references(document: dict) -> dict:
 
 
 def freeze_protocol(document: dict) -> dict:
+    import sklearn
     audit = audit_references(document)
     protocol = {"schema_version": 1, "kind": "forestmind_frozen_reference_protocol", "dataset_sha256": content_hash(document),
                 "target": document["target"], "split_policy": document["split_policy"], "feature_names": document["feature_names"],
-                "models": dict(MODEL_CONFIG), "audit": audit, "created_at": datetime.now(timezone.utc).isoformat()}
+                "models": dict(MODEL_CONFIG), "audit": audit, "created_at": datetime.now(timezone.utc).isoformat(),
+                "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                "runtime": {"numpy": np.__version__, "scikit_learn": sklearn.__version__}}
     protocol["protocol_sha256"] = content_hash(protocol)
     return protocol
 
@@ -204,11 +207,15 @@ def _event_metrics(rows, truth, scores):
 
 def run_reference_experiment(document: dict, protocol: dict) -> dict:
     """Fit train-only models; calibrate on calibration; inspect protected test once."""
+    import sklearn
     recorded = {key: value for key, value in protocol.items() if key != "protocol_sha256"}
     if protocol.get("protocol_sha256") != content_hash(recorded) or protocol.get("dataset_sha256") != content_hash(document):
         raise ValueError("Dataset or frozen protocol changed; do not retune targets/labels after protected-test inspection")
     if protocol.get("models") != MODEL_CONFIG:
         raise ValueError("Model configuration differs from the frozen implementation")
+    if (protocol.get("implementation_sha256") != hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+            or protocol.get("runtime") != {"numpy": np.__version__, "scikit_learn": sklearn.__version__}):
+        raise ValueError("Experiment code or numerical runtime differs from the frozen protocol; restore the pinned implementation/runtime before running")
     audit = audit_references(document)
     splits = {s: [r for r in document["examples"] if r["split"] == s] for s in ("train", "calibration", "test")}
     features = document["feature_names"]
@@ -267,7 +274,6 @@ def run_reference_experiment(document: dict, protocol: dict) -> dict:
     baseline = outputs["persistence"]["metrics"][primary]
     for output in outputs.values():
         output["improvement_over_persistence"] = baseline - output["metrics"][primary]
-    import sklearn
     return {"schema_version": 1, "kind": "forestmind_reference_baseline_experiment", "created_at": datetime.now(timezone.utc).isoformat(),
             "dataset_id": document["dataset_id"], "dataset_version": document["version"], "dataset_sha256": content_hash(document),
             "data_provenance": "user_declared_nonsynthetic_references_not_independently_authenticated",
