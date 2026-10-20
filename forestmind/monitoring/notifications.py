@@ -12,6 +12,8 @@ import threading
 from urllib.parse import urlsplit
 
 MAX_OUTBOX_EVENTS = 10000
+MAX_DELIVERY_ATTEMPTS = 3
+EXHAUSTED_DELIVERY_ERROR = "Delivery attempt limit reached; an interrupted final attempt may have reached the receiver. Check the receiver using the event_id."
 
 
 def now():
@@ -119,7 +121,20 @@ class Notifications:
         with self.store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             candidates = db.execute("SELECT id,payload FROM notification_outbox WHERE status IN ('pending','retry') ORDER BY rowid LIMIT 100").fetchall()
-            selected = next((r for r in candidates if json.loads(r["payload"])["next_attempt_at"] <= now()), None)
+            selected = None
+            for candidate in candidates:
+                value = json.loads(candidate["payload"])
+                # Attempts are reserved before network I/O. Older recovery code
+                # could leave an exhausted row retryable after a crash; never
+                # spend another attempt even when that state is already saved.
+                if value["attempts"] >= MAX_DELIVERY_ATTEMPTS:
+                    value["error"] = EXHAUSTED_DELIVERY_ERROR
+                    db.execute("UPDATE notification_outbox SET status='failed',payload=? WHERE id=?",
+                               (self.store._json(value), candidate["id"]))
+                    continue
+                if value["next_attempt_at"] <= now():
+                    selected = candidate
+                    break
             if selected is None:
                 return False
             entry = json.loads(selected["payload"])
@@ -131,7 +146,7 @@ class Notifications:
             entry.update(sent_at=now(), error=None)
         except Exception as error:
             # Never expose endpoint, tokens, credentials or provider response bodies.
-            status = "failed" if entry["attempts"] >= 3 else "retry"
+            status = "failed" if entry["attempts"] >= MAX_DELIVERY_ATTEMPTS else "retry"
             entry.update(error=f"Delivery failed ({type(error).__name__}); inspect receiver availability.",
                          next_attempt_at=(datetime.now(timezone.utc) + timedelta(seconds=30 * entry["attempts"])).isoformat())
         with self.store.connection() as db:
@@ -142,7 +157,13 @@ class Notifications:
         if self.thread and self.thread.is_alive():
             return
         with self.store.connection() as db:
-            db.execute("UPDATE notification_outbox SET status='retry' WHERE status='sending'")
+            for row in db.execute("SELECT id,payload FROM notification_outbox WHERE status='sending'").fetchall():
+                entry = json.loads(row["payload"])
+                exhausted = entry["attempts"] >= MAX_DELIVERY_ATTEMPTS
+                if exhausted:
+                    entry["error"] = EXHAUSTED_DELIVERY_ERROR
+                db.execute("UPDATE notification_outbox SET status=?,payload=? WHERE id=?",
+                           ("failed" if exhausted else "retry", self.store._json(entry), row["id"]))
         def run():
             while not self.stop_event.wait(5):
                 try:
