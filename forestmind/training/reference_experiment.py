@@ -13,13 +13,16 @@ import math
 from pathlib import Path
 
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor, RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import average_precision_score, brier_score_loss, mean_absolute_error, mean_squared_error, precision_recall_fscore_support
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 MODEL_CONFIG = {"seed": 17, "ridge_alpha": 1., "forest_trees": 100, "forest_min_samples_leaf": 3,
+                "boost_stages": 100, "boost_learning_rate": .05, "boost_max_depth": 2,
+                "boost_min_samples_leaf": 3, "boost_subsample": 1., "boost_n_iter_no_change": None,
+                "boost_continuous_loss": "squared_error", "boost_event_loss": "log_loss",
                 "event_threshold": .5, "minimum_subgroup_size": 5, "interval_nominal_coverage": .9}
 
 
@@ -229,7 +232,13 @@ def run_reference_experiment(document: dict, protocol: dict) -> dict:
     truth = {s: np.array([r["target"] for r in rows]) for s, rows in splits.items()}
     event = document["target"]["kind"] == "event"
     models = {"regularized_features": make_pipeline(StandardScaler(), LogisticRegression(C=1., random_state=17, max_iter=1000) if event else Ridge(alpha=1.)),
-              "random_forest_features": (RandomForestClassifier if event else RandomForestRegressor)(n_estimators=100, min_samples_leaf=3, random_state=17, n_jobs=1)}
+              "random_forest_features": (RandomForestClassifier if event else RandomForestRegressor)(n_estimators=100, min_samples_leaf=3, random_state=17, n_jobs=1),
+              "gradient_boosted_features": (GradientBoostingClassifier if event else GradientBoostingRegressor)(
+                  loss=MODEL_CONFIG["boost_event_loss" if event else "boost_continuous_loss"],
+                  n_estimators=MODEL_CONFIG["boost_stages"], learning_rate=MODEL_CONFIG["boost_learning_rate"],
+                  max_depth=MODEL_CONFIG["boost_max_depth"], min_samples_leaf=MODEL_CONFIG["boost_min_samples_leaf"],
+                  subsample=MODEL_CONFIG["boost_subsample"], random_state=MODEL_CONFIG["seed"],
+                  n_iter_no_change=MODEL_CONFIG["boost_n_iter_no_change"])}
     predictions = {}
     for name in ("persistence", "seasonal"):
         predictions[name] = {s: np.array([r[name] for r in rows], dtype=float) for s, rows in splits.items() if s != "train"}
