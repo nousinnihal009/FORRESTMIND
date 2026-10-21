@@ -4,7 +4,7 @@ import math
 import numpy as np
 import pytest
 
-from forestmind.monitoring.spatial import fragmentation_metrics
+from forestmind.monitoring.spatial import fragmentation_metrics, polygon_mask
 
 
 GEOMETRY = {"type": "Polygon", "coordinates": [[[0., 0.], [.008, 0.],
@@ -101,3 +101,47 @@ def test_fully_forested_aoi_has_unknown_shape_instead_of_false_compactness():
     assert result["internal_edge_km"] == 0
     assert patch["observed_edge_m"] == 0
     assert patch["perimeter_m"] is None and patch["compactness"] is None
+
+
+def test_nonrectangular_coverage_counts_only_sample_centres_inside_the_aoi():
+    geometry = {"type": "Polygon", "coordinates": [[[0., 0.], [.008, 0.], [0., .008], [0., 0.]]]}
+    forest = np.zeros((8, 8), dtype=bool)
+    inside = polygon_mask(geometry, forest.shape)
+    complete = measure(forest, geometry=geometry)
+    assert complete["available"] and complete["patch_count"] == 0
+    assert complete["forest_fraction"] == 0  # fully observed nonforest is a real zero
+    assert complete["valid_fraction"] == 1
+    assert complete["aoi_sample_count"] == complete["valid_sample_count"] == int(inside.sum())
+    partial_mask = np.ones_like(forest)
+    missing_rows, missing_cols = np.nonzero(inside)
+    partial_mask[missing_rows[:3], missing_cols[:3]] = False
+    partial = measure(forest, partial_mask, geometry)
+    assert partial["valid_fraction"] == pytest.approx((int(inside.sum()) - 3) / inside.sum())
+    # Values outside the AOI neither improve its coverage nor contribute forest.
+    outside_forest = ~inside
+    same = measure(outside_forest, partial_mask, geometry)
+    assert same["valid_fraction"] == partial["valid_fraction"]
+    assert same["forest_area_km2"] == 0
+
+
+@pytest.mark.parametrize("valid_outside_only", [False, True])
+def test_no_valid_samples_in_aoi_withholds_topology_instead_of_reporting_zero_forest(valid_outside_only):
+    geometry = {"type": "Polygon", "coordinates": [[[0., 0.], [.008, 0.], [0., .008], [0., 0.]]]}
+    forest = np.ones((8, 8), dtype=bool)
+    inside = polygon_mask(geometry, forest.shape)
+    valid = ~inside if valid_outside_only else np.zeros_like(forest)
+    result = measure(forest, valid, geometry)
+    assert not result["available"]
+    assert result["valid_fraction"] == 0 and result["valid_sample_count"] == 0
+    assert result["aoi_sample_count"] > 0
+    assert "No valid classified samples" in result["reason"]
+    assert result["source"] == "Controlled classified grid fixture"
+    assert "patch_count" not in result and "forest_area_km2" not in result and "shape" not in result
+
+
+def test_grid_without_aoi_sample_centres_requires_finer_classification():
+    geometry = {"type": "Polygon", "coordinates": [[[0., 0.], [.008, 0.], [0., .008], [0., 0.]]]}
+    result = measure(np.ones((1, 1), dtype=bool), geometry=geometry)
+    assert not result["available"] and result["aoi_sample_count"] == 0
+    assert "finer classified grid" in result["reason"]
+    assert "patch_count" not in result
