@@ -1,6 +1,22 @@
-# Continuation record — 2026-10-19
+# Continuation record — 2026-10-22
 
-## Latest continuation checkpoint
+## Latest checkpoint — October 22
+
+- User resumed after another usage limit. Preserve all existing source changes and data; do not repeat completed acquisitions. Version remains 0.6.0.
+- Windows atomic report-save repair is complete: bounded retries only for WinError5/32/33, original destination preserved on failure. Actual Windows sharing-lock regression passed. Full suite **623 passed in111.07s** on October21 before the subsequent additions; `artifacts/regression-0.6.0-final.txt` retains that run.
+- Notifications now preserve attempt reservations after restart and cannot make a fourth delivery attempt. Four restart cases plus mocked HTTP/HMAC/private-DNS/redirect checks passed in the **14-test** focused run. No receiver configured and no actual messages sent.
+- Gradient-boosted conventional baseline added to the frozen reference experiment for continuous/event targets. **20 reference-experiment tests passed**. All five baselines use the same protected IDs; no real independent dataset supplied or scientific gain claimed.
+- Classified-cover patch compactness/perimeter implemented in `spatial.py`, exported and displayed in `web/workflow.js`. Compactness is withheld at AOI/nodata boundaries; **8 tests passed**. Review/final regression pending.
+- Spectral change availability now requires actual computable paired index deltas, distinguishing all-null input from unchanged valid pixels. **9 focused tests passed**. Other spatial functions preserved.
+- Climate paired daily precipitation minus reference ET0 computation and UI exist. Agent is finishing cached-source rederivation, tests and documentation. It must preserve raw responses and older immutable snapshots; no anomaly or validated drought claim.
+- October21 restart verified **nine saved regions**, all five terminal acquisition jobs, disabled 15-day Tapajos test schedule and an exactly unchanged old manifest export. Evidence: `artifacts/restart-verification-20261021.json`. Tamil Nadu retained. Earlier browser search/refresh/cancel/resume/mobile/export/provider tests are documented in `VALIDATION.md`; don't repeat expensive downloads.
+- Latest prior server was PID14804 / exec95687 on port8000; interruption may have stopped it. Inspect before starting a replacement. Use `artifacts/geo-validation` on PYTHONPATH. Existing browser tab1 is on Monitoring regions.
+- Remaining current-release work: finish climate integration; review shape metrics; run full regression after all new changes; rebuild and verify wheel (current wheel predates new additions); restart app; rerun real selected-area analysis from existing sources; check climate/shape UI, immutable old export, responsive layout and new export; update validation/matrix/completion plan and final handoff. Reset temporary browser viewport override before finishing.
+- Full proposal remains incomplete. G1 can close only after final checks; G2 hosted ownership/auth/deployment and G3 real independent labels/model validation remain open. Local gaps such as temporal radar/Landsat/fire/activity alignment, recurrent/pretrained comparisons and climate anomaly/drought methods must not be mislabeled externally blocked or complete.
+
+## Earlier checkpoint — October 19
+
+### State at that earlier checkpoint
 
 - Version is now 0.6.0. README updated with normal UI flow; `docs/OPERATOR_GUIDE.md` now covers setup, quotas, backups, restore, local rollout/rollback, notifications and troubleshooting. Final validation/completion docs and wheel/environment record still pending.
 - Full actual workspace backup completed and verified: `data/backups/workspace-20261019`, 11 files (database + source/workflow trees). Do not overwrite it. Existing user data preserved.
