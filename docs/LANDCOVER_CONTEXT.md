@@ -14,4 +14,12 @@ The dataset is CC BY 4.0. Exports retain provider attribution, DOI and license. 
 
 ## Verification
 
+### Patch shape diagnostics
+
+Each four-connected patch now exports its area, observed internal edge length and boundary completeness. For patches entirely surrounded by valid classified pixels, perimeter includes observed nonforest holes and compactness is `4 × π × area / perimeter²`. A square on an approximately square grid has compactness π/4; an equal-area elongated rectangle has a lower value. These are grid geometry measurements, not ecological quality or functional connectivity.
+
+Any patch touching the AOI boundary, an excluded polygon pixel or nodata has an unknown full extent. Its perimeter and compactness are null, while the known internal edge remains available. The dashboard shows complete/censored counts and up to 20 patch rows; exports retain all rows. Grid stair-stepping and chosen sampling resolution affect the values. Tests cover analytic shapes, holes, diagonal adjacency, clipped/unknown boundaries and empty or entirely wooded AOIs. The real all-tree Tapajós crop correctly yields one boundary-clipped patch and withholds compactness.
+
+### Earlier source collection check
+
 On October 18, 2026, 17 tests passed, including a real in-memory Rasterio reprojection check, tile boundaries/seams, nodata, polygon masking, temporal cutoffs and source failure. A bounded actual 64 × 64 crop for `[-55.10,-3.50,-55.08,-3.48]` completed in 1.82 seconds from the official `S06W057` 2021/v200 tile. All 4,096 output samples were valid class-10 tree cover. The saved result is `artifacts/worldcover-real-smoke.json` with source, masks, dates, native/source metadata and sample hash. This confirms provider plumbing for that small AOI; it does not independently verify the classification or establish global geographic accuracy.
