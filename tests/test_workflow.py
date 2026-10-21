@@ -177,6 +177,33 @@ def test_api_rejects_arbitrary_paths_and_exports_selected_manifest(tmp_path, sav
         assert client.get(f"/api/v1/regions/{region['id']}/workflow/export?manifest_id={identifier}").json()["manifest"]["id"] == identifier
 
 
+def test_imported_cover_outside_aoi_keeps_capabilities_unavailable_with_evidence_reason(saved):
+    from forestmind.monitoring.spatial import polygon_mask
+    store, region, observations = saved
+    region["id"] = "triangle-evidence"
+    region["geometry"] = {"type": "Polygon", "coordinates": [[[-55.1, -3.5], [-55.08, -3.5],
+                              [-55.1, -3.48], [-55.1, -3.5]]]}
+    store.put_region(region, observations, analyze_region(region, observations))
+    inside = polygon_mask(region["geometry"], (8, 8))
+    cover = {"geometry": region["geometry"], "observed_at": "2024-02-02", "source": "classified outside sample",
+             "classification": "Reference woodland class", "license": "CC0", "data_kind": "classified_forest_cover",
+             "forest": np.ones((8, 8), dtype=bool).tolist(), "valid_mask": (~inside).tolist()}
+    app = FastAPI()
+    service = install_workflow(app, store)
+    with TestClient(app) as client:
+        assert client.post(f"/api/v1/regions/{region['id']}/forest-cover", json=cover).status_code == 201
+        service.executor.shutdown(wait=True)
+        result = client.get(f"/api/v1/regions/{region['id']}/workflow").json()
+        evidence = result["fragmentation"]
+        assert not evidence["available"] and "No valid classified samples" in evidence["reason"]
+        assert "patch_count" not in evidence and "forest_fraction" not in evidence
+        for key in ("land_cover", "fragmentation"):
+            capability = next(row for row in result["capabilities"] if row["id"] == key)
+            assert not capability["available"] and capability["reason"] == evidence["reason"]
+        exported = client.get(f"/api/v1/regions/{region['id']}/workflow/export?manifest_id={result['manifest']['id']}").json()
+        assert exported["fragmentation"] == evidence
+
+
 def test_interrupted_analysis_is_recoverable_and_preserves_snapshots(saved):
     store, region, _ = saved
     service = WorkflowService(store)
@@ -211,6 +238,40 @@ def test_future_context_does_not_enter_earlier_snapshot(saved):
     assert not result["climate"]["available"] and not result["radar"]["available"]
     assert result["manifest"]["context_sha256"]["climate"] is None
     assert not service.latest(region["id"])["stale"]
+    service.executor.shutdown()
+
+
+def test_cached_daily_climate_rederives_without_network_and_preserves_old_snapshot(saved, monkeypatch):
+    from forestmind.monitoring import climate
+    store, region, _ = saved
+    service = WorkflowService(store)
+    response = {"daily_units": VARIABLES.copy(), "daily": {"time": ["2024-01-02", "2024-02-02"]}}
+    for variable in VARIABLES:
+        response["daily"][variable] = [3., 3.]
+    response["daily"]["precipitation_sum"] = [1., 5.]
+    context = {"available": True, "start": "2024-01-02", "end": "2024-02-02",
+               "geometry_sha256": digest(region["geometry"]), "response_sha256": "original-raw-hash",
+               "retrieved_at": "2026-10-01T00:00:00+00:00", "raw_response": response,
+               "monthly": [{"month": "2024-01", "precipitation_sum": 1.}]}
+    original = deepcopy(context)
+    service.save_context(region["id"], "climate", context)
+    with monkeypatch.context() as prior:
+        prior.setattr(climate, "refresh_climate_diagnostics", deepcopy)
+        old_snapshot = service.run(region["id"])
+    old_id = old_snapshot["manifest"]["id"]
+    with store.connection() as db:
+        old_serialized = db.execute("SELECT payload FROM workflow_snapshots WHERE id=?", (old_id,)).fetchone()[0]
+    monkeypatch.setattr(climate, "acquire_climate", lambda *a, **k: pytest.fail("Cached diagnostic must not call provider"))
+    new_snapshot = service.run(region["id"])
+    assert new_snapshot["manifest"]["id"] != old_id
+    assert new_snapshot["climate"]["monthly"][0]["water_balance"]["sum_mm"] == -2.
+    assert new_snapshot["climate"]["monthly"][1]["water_balance"]["sum_mm"] == 2.
+    for field in ("start", "end", "geometry_sha256", "response_sha256", "retrieved_at", "raw_response"):
+        assert new_snapshot["climate"][field] == original[field]
+    assert context == original
+    assert not service.latest(region["id"])["stale"]
+    with store.connection() as db:
+        assert db.execute("SELECT payload FROM workflow_snapshots WHERE id=?", (old_id,)).fetchone()[0] == old_serialized
     service.executor.shutdown()
 
 
