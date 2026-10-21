@@ -166,7 +166,21 @@ def _patch_shapes(patches, valid, patch_areas, dx, dy):
 def fragmentation_metrics(payload: dict, geometry: dict) -> dict:
     """4-connected forest patch topology from a separately supplied cover raster."""
     cover = np.asarray(payload["forest"], dtype=bool)
-    valid = np.asarray(payload["valid_mask"], dtype=bool) & polygon_mask(geometry, cover.shape)
+    area_mask = polygon_mask(geometry, cover.shape)
+    valid = np.asarray(payload["valid_mask"], dtype=bool) & area_mask
+    area_samples, valid_samples = int(area_mask.sum()), int(valid.sum())
+    base = {"kind": "forest_cover_topology", "source": payload["source"],
+            "observed_at": payload["observed_at"], "classification": payload["classification"],
+            "provider": payload.get("provider", "User-supplied classification"), "license": payload.get("license"),
+            "published_at": payload.get("published_at"), "retrieved_at": payload.get("retrieved_at"),
+            "temporal_role": payload.get("temporal_role", "Dated user-supplied reference; availability history is not independently verified"),
+            "valid_fraction": valid_samples / area_samples if area_samples else 0.,
+            "aoi_sample_count": area_samples, "valid_sample_count": valid_samples}
+    if not valid_samples:
+        return {**base, "available": False,
+                "reason": ("No grid sample centres fall inside the selected area; supply a finer classified grid for this geometry."
+                           if not area_samples else
+                           "No valid classified samples intersect the selected area. Supply classification inside the boundary; unknown pixels are not observed nonforest.")}
     forest = cover & valid
     patches, count = label(forest, structure=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))
     west, south, east, north = geometry_bbox(geometry)
@@ -186,12 +200,7 @@ def fragmentation_metrics(payload: dict, geometry: dict) -> dict:
         centres.append([float((xx * dx[yy]).mean()), float((yy * dy).mean())])
     nearest = cKDTree(centres).query(centres, k=2)[0][:, 1] if count > 1 else np.array([])
     forest_area = float(areas[forest].sum())
-    return {"available": True, "kind": "forest_cover_topology", "source": payload["source"],
-            "observed_at": payload["observed_at"], "classification": payload["classification"],
-            "provider": payload.get("provider", "User-supplied classification"), "license": payload.get("license"),
-            "published_at": payload.get("published_at"), "retrieved_at": payload.get("retrieved_at"),
-            "temporal_role": payload.get("temporal_role", "Dated user-supplied reference; availability history is not independently verified"),
-            "valid_fraction": float(valid.mean()), "patch_count": int(count), "connectivity_rule": "four-neighbour adjacency",
+    return {**base, "available": True, "patch_count": int(count), "connectivity_rule": "four-neighbour adjacency",
             "forest_area_km2": forest_area / 1e6, "valid_area_km2": landscape_area / 1e6,
             "forest_fraction": forest_area / landscape_area if landscape_area else None,
             "patch_area_km2": (patch_areas / 1e6).tolist(), "internal_edge_km": edge / 1000,
