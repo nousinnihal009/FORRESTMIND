@@ -45,8 +45,8 @@ Limits include a 25 km² maximum rectangular AOI, 60 months per acquisition requ
 | --- | --- |
 | Worldwide entry | Explicit attributed place search, interactive map, drawing/coordinates and confirmed bounded area |
 | Connected jobs | Durable acquisition, bounded retries, cancellation, restart recovery, resume and transactional saved-area updates |
-| Multimodal context | Actual orbit-matched Sentinel-1 RTC, ERA5 reanalysis and dated ESA WorldCover, explicitly separate from trained model inputs |
-| Spatial evidence | Common-valid spectral change grid; classified-cover patches, internal edges and centroid connectivity |
+| Multimodal context | Actual orbit-matched Sentinel-1 RTC, ERA5 reanalysis with paired precipitation–reference-ET0 diagnostics and dated ESA WorldCover, separate from trained model inputs |
+| Spatial evidence | Computable common-valid spectral change; classified-cover patches, internal edges, complete-boundary compactness and centroid connectivity |
 | Continuing monitoring | Skip existing months, local schedules, freshness diagnostics, configurable dated alert episodes and review history |
 | Monitoring | Four reproducible demo regions; strict JSON import for dated monthly measurements |
 | Spatial overview | Selectable WGS84 footprints, condition/coverage/alert layers and zoom |
@@ -63,7 +63,7 @@ Limits include a 25 km² maximum rectangular AOI, 60 months per acquisition requ
 | Neural research | Custom ViT, explicit proxy/native pretrained modes, modality masks, temporal model and task heads |
 | Model runs | Validated, persisted inference reports with checkpoint/input hashes, class/driver scores and configured horizons |
 | Reproducible evaluation | JSON metrics, raw predictions and targets, split identity, artifact/code hashes and per-horizon errors |
-| Real-reference experiments | Frozen targets/datasets, buffered geographic and temporal holdouts, identical-example baselines, calibration and event metrics; real reference data must be supplied |
+| Real-reference experiments | Frozen targets/datasets, buffered holdouts, identical-example persistence/seasonal/regularized/random-forest/boosted baselines, calibration and event metrics; independent real reference data must be supplied |
 | Operations | Local HTTP boundary, diagnostics, migrations, database snapshots, verified full workspace backup/restore and opt-in signed webhook outbox |
 
 ## Import observations
