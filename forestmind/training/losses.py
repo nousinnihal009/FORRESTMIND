@@ -14,6 +14,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
+from forestmind.training.targets import supervision_masks, masked_mean
 
 
 class HealthLoss(nn.Module):
@@ -34,6 +35,8 @@ class HealthLoss(nn.Module):
         score_pred: Tensor,
         state_gt: Tensor,
         score_gt: Tensor,
+        state_mask: Tensor | None = None,
+        score_mask: Tensor | None = None,
     ) -> dict[str, Tensor]:
         """
         Args:
@@ -42,11 +45,15 @@ class HealthLoss(nn.Module):
             state_gt: (B,) ground-truth class indices.
             score_gt: (B,) ground-truth continuous score [0, 100].
         """
-        ce = self.ce_loss(logits, state_gt)
+        state_mask = torch.ones_like(state_gt, dtype=torch.bool) if state_mask is None else state_mask
+        score_mask = torch.ones_like(score_gt, dtype=torch.bool) if score_mask is None else score_mask
+        ce = (self.ce_loss(logits[state_mask], state_gt[state_mask].long())
+              if state_mask.any() else logits.reshape(-1)[:0].sum())
         # Scores are reported on a 0-100 scale, while the other tasks use
         # probabilities. Normalize this term so regression does not overwhelm
         # classification and attribution by four orders of magnitude.
-        mse = F.mse_loss(score_pred / 100.0, score_gt / 100.0)
+        mse = (F.mse_loss(score_pred[score_mask] / 100.0, score_gt[score_mask] / 100.0)
+               if score_mask.any() else score_pred.reshape(-1)[:0].sum())
 
         total = self.ce_weight * ce + self.mse_weight * mse
 
@@ -75,6 +82,8 @@ class AttributionLoss(nn.Module):
         strength_pred: Tensor | None,
         drivers_gt: Tensor,
         strength_gt: Tensor | None,
+        drivers_mask: Tensor | None = None,
+        strength_mask: Tensor | None = None,
     ) -> dict[str, Tensor]:
         """
         Args:
@@ -83,7 +92,9 @@ class AttributionLoss(nn.Module):
             drivers_gt: (B, 8) binary ground-truth.
             strength_gt: (B, 8) ground-truth strengths.
         """
-        bce = F.binary_cross_entropy_with_logits(logits, drivers_gt)
+        drivers_mask = torch.ones_like(drivers_gt, dtype=torch.bool) if drivers_mask is None else drivers_mask
+        bce = (F.binary_cross_entropy_with_logits(logits[drivers_mask], drivers_gt[drivers_mask])
+               if drivers_mask.any() else logits.reshape(-1)[:0].sum())
 
         total = self.bce_weight * bce
 
@@ -93,7 +104,9 @@ class AttributionLoss(nn.Module):
         }
 
         if strength_pred is not None and strength_gt is not None:
-            strength_mse = F.mse_loss(strength_pred, strength_gt)
+            strength_mask = torch.ones_like(strength_gt, dtype=torch.bool) if strength_mask is None else strength_mask
+            strength_mse = (F.mse_loss(strength_pred[strength_mask], strength_gt[strength_mask])
+                            if strength_mask.any() else strength_pred.reshape(-1)[:0].sum())
             total = total + self.strength_weight * strength_mse
             result["attribution_strength_mse"] = strength_mse
             result["attribution_total"] = total
@@ -107,7 +120,7 @@ class TrajectoryLoss(nn.Module):
     Optionally uses heteroscedastic loss when uncertainty is predicted:
       L = 0.5 * exp(-logvar) * (y - y_hat)^2 + 0.5 * logvar
     
-    This naturally learns the uncertainty calibration.
+    Learned variance still requires separate calibration and held-out coverage checks.
     """
 
     def __init__(
@@ -126,6 +139,7 @@ class TrajectoryLoss(nn.Module):
         mean_pred: Tensor,
         logvar_pred: Tensor | None,
         trajectory_gt: Tensor,
+        mask: Tensor | None = None,
     ) -> dict[str, Tensor]:
         """
         Args:
@@ -134,11 +148,14 @@ class TrajectoryLoss(nn.Module):
             trajectory_gt: (B, H) ground-truth future health [0, 1].
         """
         # Normalize gt to [0, 1] if needed
-        if trajectory_gt.max() > 1.5:
+        mask = torch.ones_like(trajectory_gt, dtype=torch.bool) if mask is None else mask
+        if mask.any() and trajectory_gt[mask].max() > 1.5:
             trajectory_gt = trajectory_gt / 100.0
-
-        mse = F.mse_loss(mean_pred, trajectory_gt)
-        huber = F.smooth_l1_loss(mean_pred, trajectory_gt)
+        mean_pred, trajectory_gt = mean_pred[mask], trajectory_gt[mask]
+        if logvar_pred is not None:
+            logvar_pred = logvar_pred[mask]
+        mse = F.mse_loss(mean_pred, trajectory_gt) if mask.any() else mean_pred.sum()
+        huber = F.smooth_l1_loss(mean_pred, trajectory_gt) if mask.any() else mean_pred.sum()
 
         result = {
             "trajectory_mse": mse,
@@ -149,7 +166,8 @@ class TrajectoryLoss(nn.Module):
             # Heteroscedastic loss: learns uncertainty
             logvar_pred = logvar_pred.clamp(-10.0, 2.0)
             precision = torch.exp(-logvar_pred)
-            hetero_loss = 0.5 * (precision * (mean_pred - trajectory_gt) ** 2 + logvar_pred).mean()
+            terms = precision * (mean_pred - trajectory_gt) ** 2 + logvar_pred
+            hetero_loss = 0.5 * (terms.mean() if mask.any() else terms.sum())
             total = self.mse_weight * hetero_loss + self.huber_weight * huber
             result["trajectory_hetero"] = hetero_loss
         else:
@@ -206,8 +224,7 @@ class ForestMindLoss(nn.Module):
             Dictionary with all individual and total losses.
         """
         all_losses = {}
-        if "label_valid" in targets and not torch.as_tensor(targets["label_valid"]).all():
-            raise ValueError("Supervised loss requires observed labels, not unlabeled acquisitions")
+        masks = supervision_masks(targets)
 
         # Health loss
         health_losses = self.health_loss(
@@ -215,6 +232,7 @@ class ForestMindLoss(nn.Module):
             score_pred=outputs["health"]["score"],
             state_gt=targets["health_state"],
             score_gt=targets["health_score"],
+            state_mask=masks["health_state"], score_mask=masks["health_score"],
         )
         all_losses.update(health_losses)
 
@@ -224,6 +242,7 @@ class ForestMindLoss(nn.Module):
             strength_pred=outputs["attribution"].get("strength"),
             drivers_gt=targets["drivers"],
             strength_gt=targets.get("driver_strengths"),
+            drivers_mask=masks["drivers"], strength_mask=masks["driver_strengths"],
         )
         all_losses.update(attr_losses)
 
@@ -232,6 +251,7 @@ class ForestMindLoss(nn.Module):
             mean_pred=outputs["trajectory"]["mean"],
             logvar_pred=outputs["trajectory"].get("logvar"),
             trajectory_gt=targets["trajectory"],
+            mask=masks["trajectory"],
         )
         all_losses.update(traj_losses)
 
