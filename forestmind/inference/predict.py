@@ -24,7 +24,8 @@ from forestmind.models.forestmind_model import ForestMindModel
 
 
 INPUT_KEYS = ("optical", "sar", "timestamps", "observation_mask", "optical_mask",
-              "sar_mask", "quality_mask", "climate_context", "activity_context")
+              "sar_mask", "quality_mask", "climate_context", "activity_context",
+              "sar_quality_mask", "climate_mask", "activity_mask")
 REQUIRED_KEYS = INPUT_KEYS[:7]
 NORMALIZATION_KEYS = {"optical_mean", "optical_std", "sar_mean", "sar_std"}
 
@@ -101,6 +102,16 @@ def load_sequence(path: str | Path, config: dict, *, observed_through: str,
                 raise ValueError(f"{name} must contain finite numeric values; store masked pixels as zeros")
     if np.any(optical[~optical_mask]) or np.any(sar[~sar_mask]) or np.any(optical[~quality[:, None].repeat(12, axis=1)]):
         raise ValueError("Missing modality and invalid optical pixels must be explicitly zero filled")
+    if "sar_quality_mask" in sample:
+        sar_quality = _bool_mask(sample, "sar_quality_mask", (steps, height, width))
+        if not np.array_equal(sar_mask, sar_quality.reshape(steps, -1).any(1)):
+            raise ValueError("sar_quality_mask must agree with observed radar timesteps")
+        if np.any(sar[~sar_quality[:, None].repeat(2, axis=1)]):
+            raise ValueError("Invalid SAR pixels must be zero filled")
+    if sar_mask.any() and not synthetic_input:
+        units = _scalar(data, "sar_units") if "sar_units" in data else None
+        if units is None or units != config.get("data", {}).get("sar_units"):
+            raise ValueError("Observed SAR units must match explicit checkpoint data.sar_units")
     timestamps = sample["timestamps"]
     if timestamps.shape != (steps,) or (timestamps < 0).any() or (np.diff(timestamps) < 0).any():
         raise ValueError("timestamps must be nonnegative, ordered day offsets of shape (T,)")
@@ -132,8 +143,26 @@ def load_sequence(path: str | Path, config: dict, *, observed_through: str,
             raise ValueError("observed_through must match the latest actual acquisition date")
         start, basis = effective[0].date().isoformat(), "acquisition_dates"
     for name in ("climate_context", "activity_context"):
-        if name in sample and sample[name].shape != (steps, config.get("foundation", {}).get("embedding_dim", 256)):
-            raise ValueError(f"{name} must contain one checkpoint-sized context vector per timestep")
+        stem = name.removesuffix("_context")
+        dimension = config.get("fusion", {}).get(f"{stem}_dim")
+        width = dimension or config.get("foundation", {}).get("embedding_dim", 256)
+        if name not in sample:
+            if f"{stem}_mask" in sample:
+                raise ValueError(f"{stem} mask supplied without context values")
+            continue
+        if sample[name].shape != (steps, width):
+            raise ValueError(f"{name} must match checkpoint context feature dimensions")
+        if dimension is not None:
+            mask_key = f"{stem}_mask"
+            if mask_key not in sample:
+                raise ValueError(f"Measured {stem} requires an explicit feature mask")
+            feature_mask = _bool_mask(sample, mask_key, (steps, width))
+            if feature_mask[~observed].any() or np.any(sample[name][~feature_mask]):
+                raise ValueError(f"Missing/padded {stem} features must have false masks and zero values")
+            for suffix in ("feature_names", "feature_units"):
+                key = f"{stem}_{suffix}"
+                if key not in data or data[key].tolist() != config.get("data", {}).get(key):
+                    raise ValueError(f"{key} must match the checkpoint feature contract")
     info = {"name": path.name, "sha256": sha256_file(path), "synthetic": synthetic_input,
             "timesteps": steps, "observed_timesteps": int(observed.sum()),
             "optical_timesteps": int(optical_mask.sum()), "sar_timesteps": int(sar_mask.sum()),
@@ -166,8 +195,13 @@ def predict_checkpoint(checkpoint_path: str | Path, input_path: str | Path, *,
         raise ValueError("Unsupported checkpoint backbone")
     if type(proxy) is not bool:
         raise ValueError("Checkpoint foundation use_proxy must be an explicit boolean")
-    if name != "custom_vit" and not proxy:
-        raise ValueError("Native pretrained encoders are not supported by offline inference yet; their current builders may download weights. A verified native runtime, complete local trained checkpoint and strict offline loader are required. See docs/NATIVE_MODEL_AUDIT.md. Explicit proxy checkpoints remain development baselines only.")
+    from forestmind.models.foundation.native import (
+        load_complete_state, offline_native_config, validate_checkpoint_tensors,
+        validate_native_sample,
+    )
+    native = name != "custom_vit" and not proxy
+    model_config = offline_native_config(config) if native else config
+    validate_checkpoint_tensors(checkpoint["model_state_dict"])
     heads = config.get("heads", {})
     if (heads.get("health", {}).get("num_classes", 5) != 5 or
             not heads.get("health", {}).get("continuous_score", True) or
@@ -183,11 +217,13 @@ def predict_checkpoint(checkpoint_path: str | Path, input_path: str | Path, *,
     if not synthetic_input and not complete_stats:
         raise ValueError("Real inputs require explicit checkpoint data.normalization optical_mean/std and sar_mean/std matching input units")
     sample, info = load_sequence(input_path, config, observed_through=observed_through, synthetic_input=synthetic_input)
+    if native:
+        validate_native_sample(config, sample)
     info["normalization"] = "checkpoint_statistics" if complete_stats else "synthetic_defaults"
     transformed = get_eval_transforms(normalization=normalization)(sample)
     inputs = {key: transformed[key].unsqueeze(0).to(device) for key in INPUT_KEYS if key in transformed}
-    model = ForestMindModel(config)
-    model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+    model = ForestMindModel(model_config)
+    load_complete_state(model, checkpoint["model_state_dict"])
     model = model.to(device).eval()
     with torch.inference_mode():
         outputs = model(**inputs)
@@ -207,6 +243,8 @@ def predict_checkpoint(checkpoint_path: str | Path, input_path: str | Path, *,
     ]
     if synthetic_input:
         caveats.append("SYNTHETIC INPUT: this run is a software demonstration, not a real ecological assessment.")
+    if native:
+        caveats.append("Native encoder was constructed without requesting pretrained weights and the complete local ForestMind state was loaded strictly. This does not independently verify its claimed pretrained or training provenance.")
     if trained_on_synthetic:
         caveats.append("SYNTHETIC TRAINING: this checkpoint has not established predictive performance on real forests.")
     elif trained_on_synthetic is None:
