@@ -33,11 +33,16 @@ def _sha256(path: Path) -> str:
 
 def prepare_sequence(cache_dir: str | Path, *, through: str, time_steps: int = 12,
                      bbox=None, min_valid_fraction: float = 0.4,
-                     source_paths: list[str | Path] | None = None) -> PreparedSequence:
+                     source_paths: list[str | Path] | None = None,
+                     radar_context: dict | None = None, climate_context: dict | None = None,
+                     radar_max_age_days: float = 12, radar_min_valid_fraction: float = .4,
+                     climate_window_days: int = 30, climate_lag_days: int = 5,
+                     climate_min_coverage: float = 1.0) -> PreparedSequence:
     """Select the latest eligible dated acquisitions at one AOI without padding.
 
     This is a sequence of acquisitions, not monthly composites. No labels or
     radar measurements are manufactured; absent SAR has an explicit false mask.
+    Explicit saved RTC/climate context can be attached using past-only alignment.
     """
     cutoff = date.fromisoformat(through)
     if cutoff.isoformat() != through:
@@ -128,13 +133,54 @@ def prepare_sequence(cache_dir: str | Path, *, through: str, time_steps: int = 1
         "grid_shape": [height, width], "grid_crs": "EPSG:4326", "band_names": OPTICAL_BANDS,
         "optical_units": "surface_reflectance_0_1", "normalization": "raw",
         "sar_present": False, "labels_present": False, "source_manifest_sha256": manifest_hash,
+        "available_modalities": ["optical"],
         "sources": sources, "skipped_for_quality": skipped,
         "limitations": ["Input consists of individual acquisitions, not monthly composites.",
                         "No missing dates, SAR values or labels are imputed.",
                         "A verified cache contract does not establish ground-truth forest condition.",
                         "Match the checkpoint's temporal sampling, bands, grid and normalization before inference."],
     }
-    return PreparedSequence(arrays, provenance)
+    prepared = PreparedSequence(arrays, provenance)
+    if radar_context is not None or climate_context is not None:
+        prepared = add_sequence_context(prepared, radar_context=radar_context, climate_context=climate_context,
+            radar_max_age_days=radar_max_age_days, radar_min_valid_fraction=radar_min_valid_fraction,
+            climate_window_days=climate_window_days, climate_lag_days=climate_lag_days,
+            climate_min_coverage=climate_min_coverage)
+    return prepared
+
+
+def add_sequence_context(prepared: PreparedSequence, *, radar_context=None, climate_context=None,
+                         radar_max_age_days=12, radar_min_valid_fraction=.4,
+                         climate_window_days=30, climate_lag_days=5,
+                         climate_min_coverage=1.0) -> PreparedSequence:
+    """Create a new sequence with explicit context; never mutate source arrays or evidence.
+
+    Apply once to an optical sequence. Re-align from the original sequence to
+    change inputs or timing rules, preserving the earlier evidence artifact.
+    """
+    from forestmind.data.context_alignment import align_context
+
+    if "alignment" in prepared.provenance:
+        raise ValueError("Sequence already has aligned context; start from its optical sources to re-align")
+    if radar_context is None and climate_context is None:
+        return prepared
+    additions, alignment = align_context(acquisition_dates=prepared.arrays["acquisition_dates"].astype(str).tolist(),
+        bbox=prepared.provenance["bbox"], grid_shape=prepared.provenance["grid_shape"],
+        radar_context=radar_context, climate_context=climate_context,
+        radar_max_age_days=radar_max_age_days, radar_min_valid_fraction=radar_min_valid_fraction,
+        climate_window_days=climate_window_days, climate_lag_days=climate_lag_days,
+        climate_min_coverage=climate_min_coverage)
+    provenance = {**prepared.provenance, "schema_version": 2, "alignment": alignment,
+        "available_modalities": alignment["available_modalities"],
+        "sar_present": "sar" in alignment["available_modalities"],
+        "climate_present": "climate" in alignment["available_modalities"],
+        "limitations": list(prepared.provenance["limitations"]) + alignment["limitations"]}
+    if "sar_units" in additions:
+        provenance["sar_units"] = str(additions["sar_units"].item())
+    if "climate_feature_names" in additions:
+        provenance["climate_feature_names"] = additions["climate_feature_names"].tolist()
+        provenance["climate_feature_units"] = additions["climate_feature_units"].tolist()
+    return PreparedSequence({**prepared.arrays, **additions}, provenance)
 
 
 def write_sequence(prepared: PreparedSequence, output: str | Path) -> tuple[Path, Path]:
