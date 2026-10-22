@@ -26,11 +26,13 @@ from forestmind.models.forestmind_model import ForestMindModel
 from forestmind.training.losses import ForestMindLoss
 from forestmind.training.metrics import ForestMindMetrics
 from forestmind.training.trainer import _get_device
+from forestmind.training.targets import MASK_KEYS, supervision_masks
 
 
 DEFAULT_HORIZONS = [30, 180, 365, 1095, 1825]
 INPUT_KEYS = ("optical", "sar", "timestamps", "observation_mask", "optical_mask",
-              "sar_mask", "quality_mask", "climate_context", "activity_context")
+              "sar_mask", "quality_mask", "sar_quality_mask", "climate_context", "activity_context",
+              "climate_mask", "activity_mask")
 TARGET_KEYS = ("health_state", "health_score", "drivers", "driver_strengths", "trajectory")
 
 
@@ -102,16 +104,16 @@ def _validate_targets(targets: dict, *, samples: int, classes: int, drivers: int
     for name, shape in shapes.items():
         if tuple(targets[name].shape) != shape:
             raise ValueError(f"Target {name} has shape {tuple(targets[name].shape)}, expected {shape}; check dataset and configured horizons")
-    _finite_tensors(targets, "targets")
-    states = targets["health_state"]
+    masks = supervision_masks(targets)
+    states = targets["health_state"][masks["health_state"]]
     if (states < 0).any() or (states >= classes).any() or (states != states.round()).any():
         raise ValueError("health_state labels must be valid integer class indices")
-    if ((targets["health_score"] < 0) | (targets["health_score"] > 100)).any():
+    if ((targets["health_score"][masks["health_score"]] < 0) | (targets["health_score"][masks["health_score"]] > 100)).any():
         raise ValueError("health_score labels must lie in [0, 100]")
-    if not ((targets["drivers"] == 0) | (targets["drivers"] == 1)).all():
+    if not ((targets["drivers"][masks["drivers"]] == 0) | (targets["drivers"][masks["drivers"]] == 1)).all():
         raise ValueError("Driver labels must be binary")
     for name in ("driver_strengths", "trajectory"):
-        if ((targets[name] < 0) | (targets[name] > 1)).any():
+        if ((targets[name][masks[name]] < 0) | (targets[name][masks[name]] > 1)).any():
             raise ValueError(f"Normalized {name} labels must lie in [0, 1]; percent trajectory labels require data.trajectory_target_scale='percent'")
 
 
@@ -182,12 +184,16 @@ def evaluate_checkpoint(
     if len(loader.dataset) == 0:
         raise ValueError(f"Requested {split} dataset has no samples")
     source_manifest = _source_manifest(loader.dataset)
-    model = ForestMindModel(config)
-    model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+    from forestmind.models.foundation.native import offline_native_config, load_complete_state
+    foundation = config.get("foundation", {})
+    native = foundation.get("name") in ("prithvi", "terramind") and not foundation.get(foundation.get("name"), {}).get("use_proxy", False)
+    model = ForestMindModel(offline_native_config(config) if native else config)
+    load_complete_state(model, checkpoint["model_state_dict"])
     model = model.to(device).eval()
     criterion = ForestMindLoss(config.get("training", {}).get("loss_weights", {}))
     metrics = ForestMindMetrics(num_drivers=driver_count, num_horizons=len(horizons))
     weighted_losses: dict[str, float] = {}
+    loss_counts: dict[str, int] = {}
     examples: list[dict] = []
     batches = 0
     sample_count = 0
@@ -201,6 +207,7 @@ def evaluate_checkpoint(
             inputs = {name: batch[name].to(device) for name in INPUT_KEYS if name in batch}
             _finite_tensors(inputs, "inputs")
             original_targets = {name: batch[name].to(device) for name in TARGET_KEYS}
+            original_targets.update({name: batch[name].to(device) for name in MASK_KEYS if name in batch})
             targets = dict(original_targets)
             if trajectory_scale == "percent":
                 targets["trajectory"] = targets["trajectory"] / 100
@@ -213,8 +220,15 @@ def evaluate_checkpoint(
                 raise ValueError("Predicted and target trajectory shapes do not match")
             losses = criterion(outputs, targets)
             _finite_tensors(losses, "losses")
-            for name, value in losses.items():
-                weighted_losses[name] = weighted_losses.get(name, 0.0) + float(value.item()) * batch_count
+            masks = supervision_masks(targets)
+            count_keys = {"health_ce": "health_state", "health_mse": "health_score",
+                          "attribution_bce": "drivers", "attribution_strength_mse": "driver_strengths",
+                          "trajectory_mse": "trajectory", "trajectory_huber": "trajectory", "trajectory_hetero": "trajectory"}
+            for name, target in count_keys.items():
+                if name in losses:
+                    count = int(masks[target].sum())
+                    weighted_losses[name] = weighted_losses.get(name, 0.0) + float(losses[name].item()) * count
+                    loss_counts[name] = loss_counts.get(name, 0) + count
             metrics.update(outputs, targets)
             for index in range(batch_count):
                 sample_index = sample_count + index
@@ -244,6 +258,12 @@ def evaluate_checkpoint(
     result = asdict(metrics.compute())
     errors = np.array([example["predictions"]["trajectory"]["mean"] for example in examples]) - np.array(
         [example["targets"]["trajectory"] for example in examples])
+    trajectory_mask = np.array([example["targets"].get("trajectory_mask", [True] * len(horizons)) for example in examples], dtype=bool)
+    averaged_losses = {name: value / loss_counts[name] if loss_counts[name] else 0.0 for name, value in weighted_losses.items()}
+    averaged_losses["health_total"] = criterion.health_loss.ce_weight * averaged_losses.get("health_ce", 0) + criterion.health_loss.mse_weight * averaged_losses.get("health_mse", 0)
+    averaged_losses["attribution_total"] = criterion.attribution_loss.bce_weight * averaged_losses.get("attribution_bce", 0) + criterion.attribution_loss.strength_weight * averaged_losses.get("attribution_strength_mse", 0)
+    averaged_losses["trajectory_total"] = criterion.trajectory_loss.mse_weight * averaged_losses.get("trajectory_hetero", averaged_losses.get("trajectory_mse", 0)) + criterion.trajectory_loss.huber_weight * averaged_losses.get("trajectory_huber", 0)
+    averaged_losses["total"] = criterion.w_health * averaged_losses["health_total"] + criterion.w_attribution * averaged_losses["attribution_total"] + criterion.w_trajectory * averaged_losses["trajectory_total"]
     synthetic = True if loader.dataset.source == "synthetic" else data_config.get("synthetic")
     if synthetic is not None and not isinstance(synthetic, bool):
         raise ValueError("data.synthetic must be a boolean when declared for a disk dataset")
@@ -282,12 +302,13 @@ def evaluate_checkpoint(
         "metric_units": {"health_mae": "score points [0, 100]", "trajectory_mae": "unit score [0, 1]",
                          "trajectory_rmse": "unit score [0, 1]", "trajectory_per_horizon_mae": "unit score [0, 1]",
                          "aggregate_score": "heuristic weighted combination; not a probability"},
-        "per_horizon": [{"horizon_days": int(day), "n": sample_count,
-                         "mae": float(np.abs(errors[:, index]).mean()),
-                         "rmse": float(np.sqrt(np.mean(errors[:, index] ** 2)))}
+        "per_horizon": [{"horizon_days": int(day), "n": int(trajectory_mask[:, index].sum()),
+                         "mae": float(np.abs(errors[trajectory_mask[:, index], index]).mean()) if trajectory_mask[:, index].any() else None,
+                         "rmse": float(np.sqrt(np.mean(errors[trajectory_mask[:, index], index] ** 2))) if trajectory_mask[:, index].any() else None}
                         for index, day in enumerate(horizons)],
-        "losses": {name: value / sample_count for name, value in weighted_losses.items()},
-        "loss_aggregation": "Sample-weighted mean; incomplete final batches retain their actual sample count",
+        "losses": averaged_losses,
+        "loss_observed_counts": loss_counts,
+        "loss_aggregation": "Observed-label weighted component means; task totals recomposed from configured weights. Unknown labels are excluded.",
         "examples": examples,
         "calibration": {
             "status": "uncalibrated", "fitted": False,
