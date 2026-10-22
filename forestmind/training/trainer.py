@@ -153,7 +153,7 @@ class ForestMindTrainer:
         if not required.issubset(batch):
             raise ValueError(f"Supervised targets are missing: {sorted(required.difference(batch))}")
         for key in ("observation_mask", "optical_mask", "sar_mask", "quality_mask",
-                    "climate_context", "activity_context"):
+                    "sar_quality_mask", "climate_context", "activity_context", "climate_mask", "activity_mask"):
             if key in batch:
                 inputs[key] = batch[key].to(self.device)
         targets = {
@@ -163,6 +163,18 @@ class ForestMindTrainer:
             "driver_strengths": batch["driver_strengths"].to(self.device),
             "trajectory": batch["trajectory"].to(self.device),
         }
+        from forestmind.training.targets import MASK_KEYS
+        for key in MASK_KEYS:
+            if key in batch:
+                targets[key] = batch[key].to(self.device)
+        scale = self.config.get("data", {}).get("trajectory_target_scale", "unit")
+        if scale not in ("unit", "percent"):
+            raise ValueError("trajectory_target_scale must be unit or percent")
+        if scale == "percent":
+            targets["trajectory"] = targets["trajectory"] / 100
+        known = targets["trajectory"][targets.get("trajectory_mask", torch.ones_like(targets["trajectory"], dtype=torch.bool))]
+        if not torch.isfinite(known).all() or ((known < 0) | (known > 1)).any():
+            raise ValueError("Trajectory targets must use the declared scale, normalized to [0, 1]")
         return inputs, targets
 
     def train_epoch(self) -> dict[str, float]:
@@ -243,12 +255,19 @@ class ForestMindTrainer:
 
     def save_checkpoint(self, filename: str = "checkpoint.pt", is_best: bool = False):
         """Save model checkpoint."""
+        from copy import deepcopy
+        saved_config = deepcopy(self.config)
+        foundation = saved_config.get("foundation", {})
+        name = foundation.get("name")
+        if name in ("prithvi", "terramind") and not foundation.get(name, {}).get("use_proxy", False):
+            from forestmind.models.foundation.native import capture_native_runtime
+            foundation["native_runtime"] = capture_native_runtime()
         state = {
             "epoch": self.current_epoch,
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "best_val_score": self.best_val_score,
-            "config": self.config,
+            "config": saved_config,
             "train_history": self.train_history,
             "val_history": self.val_history,
         }
