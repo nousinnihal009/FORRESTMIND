@@ -38,7 +38,7 @@ def validate_native_architecture(name: str, model_name: str, *, pretrained: bool
     """Keep native registry dispatch away from generators, tokenizers and custom code."""
     if type(pretrained) is not bool or type(use_proxy) is not bool:
         raise ValueError("pretrained and use_proxy must be explicit booleans")
-    if not use_proxy and model_name not in NATIVE_MODELS.get(name, ()):
+    if not use_proxy and (not isinstance(model_name, str) or model_name not in NATIVE_MODELS.get(name, ())):
         raise ValueError(f"Unsupported native {name} architecture: {model_name}; use an audited standard encoder")
 
 
@@ -90,7 +90,7 @@ unchanged. The fixed registry arguments have no remote or local weight path.
             raise ValueError(f"Native normalization {key} must contain {count} finite, compatible statistics")
     if name == "terramind":
         modality = options.get("sar_modality", "S1GRD")
-        expected_units = {"S1GRD": "sigma0_db", "S1RTC": "gamma0_db"}.get(modality)
+        expected_units = {"S1GRD": "sigma0_db", "S1RTC": "gamma0_db"}.get(modality) if isinstance(modality, str) else None
         if expected_units is None or data.get("sar_units") != expected_units:
             raise ValueError("TerraMind requires matching sar_modality and data.sar_units: S1RTC/gamma0_db or S1GRD/sigma0_db")
     result = deepcopy(config)
