@@ -19,7 +19,7 @@ def supervision_masks(targets: dict) -> dict:
             raise ValueError(f"{name}_mask must be boolean and match its target shape")
         known = value[mask]
         if not torch.isfinite(known).all():
-            raise ValueError(f"Observed {name} labels must be finite")
+            raise ValueError(f"Non-finite observed labels in targets.{name}")
         if name == "health_state" and ((known < 0) | (known > 4) | (known != known.round())).any():
             raise ValueError("health_state labels must be integer class indices in [0, 4]")
         if name == "health_score" and ((known < 0) | (known > 100)).any():
