@@ -18,7 +18,8 @@ from uuid import uuid4
 import numpy as np
 
 from forestmind import __version__
-from forestmind.data.sequence import prepare_sequence, write_sequence
+from forestmind.data.sequence import prepare_sequence, write_sequence, add_sequence_context
+from forestmind.monitoring.model_inputs import modality_contract_reasons, select_model_sequence
 from forestmind.monitoring.analysis import METHOD, analyze_region
 from forestmind.monitoring.coverage import assess_history
 from forestmind.monitoring.evaluation import backtest_prepared
@@ -32,7 +33,7 @@ MAX_WORKFLOW_METADATA_BYTES = 256 * 1024**2
 MAX_WORKFLOW_ARTIFACT_BYTES = 1024**3
 MAX_WORKFLOW_RECORD_BYTES = 16 * 1024**2
 WORKFLOW_TABLES = ("workflow_snapshots", "workflow_bindings", "workflow_jobs", "workflow_context", "model_runs", "scenarios")
-IMPLEMENTATION_FILES = ("workflow.py", "spatial.py", "climate.py", "projections.py", "landcover.py", "radar.py", "analysis.py", "coverage.py", "evaluation.py", "ingest.py", "../data/sequence.py", "../data/transforms.py", "../inference/predict.py", "../inference/schemas.py")
+IMPLEMENTATION_FILES = ("workflow.py", "model_inputs.py", "spatial.py", "climate.py", "projections.py", "landcover.py", "radar.py", "analysis.py", "coverage.py", "evaluation.py", "ingest.py", "../data/sequence.py", "../data/context_alignment.py", "../data/transforms.py", "../inference/predict.py", "../inference/schemas.py", "../models/forestmind_model.py", "../models/fusion/multimodal.py", "../models/foundation/native.py", "../models/foundation/prithvi.py", "../models/foundation/terramind.py")
 
 
 class WorkflowCapacityError(ValueError):
@@ -158,8 +159,7 @@ def model_eligibility(registry: list[dict], region: dict, prepared) -> tuple[dic
                 reasons.append("Model must explicitly support individual acquisitions; this sequence is not monthly composites.")
             if not contract.get("min_steps", 1) <= count <= contract.get("max_steps", 48):
                 reasons.append(f"Sequence has {count} acquisitions outside the registered length range.")
-            if contract.get("required_modalities", ["optical"]) != ["optical"]:
-                reasons.append("This sequence has optical imagery only; required radar/climate/activity model inputs are absent.")
+            reasons.extend(modality_contract_reasons(contract, prepared))
             if prepared.provenance["observed_through"] <= entry.get("training_through", "9999-12-31"):
                 reasons.append("Observation cutoff must follow the registered training cutoff.")
         checks.append({"id": entry.get("id"), "version": entry.get("version"), "reasons": reasons,
@@ -444,6 +444,17 @@ class WorkflowService:
                 if not radar:
                     radar = {"available": False, "reason": radar_collection_error}
         radar = radar or {"available": False, "reason": "Collect radar context to request a bounded same-platform, same-orbit Sentinel-1 RTC pair. No actual radar context is attached."}
+        alignment_errors, aligned_context = {}, {}
+        if prepared:
+            for name, context in (("radar", radar), ("climate", climate)):
+                if context.get("available"):
+                    try:
+                        add_sequence_context(prepared, **{f"{name}_context": context})
+                        aligned_context[f"{name}_context"] = context
+                    except (ValueError, TypeError, KeyError) as error:
+                        alignment_errors[name] = f"Context cannot enter model inputs: {error}"
+            if aligned_context:
+                prepared = add_sequence_context(prepared, **aligned_context)
         model, eligibility = model_eligibility(self.registry, region, prepared)
         model_result = {"available": False, "eligibility": eligibility, "reason": "; ".join(r for check in eligibility for r in check["reasons"])}
         model_version = None
@@ -457,14 +468,21 @@ class WorkflowService:
                 if data_config.get("source") == "synthetic" or data_config.get("synthetic") is not False:
                     raise ModelContractError("Checkpoint itself must declare data.synthetic=false and a real training source")
                 foundation = config.get("foundation", {})
-                if foundation.get("name") != "custom_vit":
-                    raise ModelContractError("Native pretrained offline loading is not verified; proxy checkpoints are development-only and cannot serve real monitoring")
-                sequence_id = digest({"sources": prepared.provenance["sources"], "model": model["sha256"], "cutoff": cutoff})
+                name = foundation.get("name")
+                if name in ("prithvi", "terramind"):
+                    if foundation.get(name, {}).get("use_proxy", False):
+                        raise ModelContractError("Development proxy checkpoints cannot serve real monitoring")
+                    from forestmind.models.foundation.native import offline_native_config
+                    offline_native_config(config)
+                elif name != "custom_vit":
+                    raise ModelContractError("Unsupported checkpoint architecture")
+                model_prepared = select_model_sequence(prepared, model.get("input", {}))
+                sequence_id = digest({"provenance": model_prepared.provenance, "model": model["sha256"], "cutoff": cutoff})
                 input_path = self.root / f"sequence-{sequence_id}.npz"
                 if not input_path.exists():
                     # Uncompressed arrays plus ZIP/JSON overhead are a conservative write reservation.
-                    self._check_artifacts(sum(array.nbytes for array in prepared.arrays.values()) + 1024**2)
-                    write_sequence(prepared, input_path)
+                    self._check_artifacts(sum(array.nbytes for array in model_prepared.arrays.values()) + 1024**2)
+                    write_sequence(model_prepared, input_path)
                 from forestmind.inference.predict import predict_checkpoint
                 report = predict_checkpoint(model["path"], input_path, region_id=region_id,
                                             observed_through=prepared.provenance["observed_through"], synthetic_input=False)
@@ -486,8 +504,9 @@ class WorkflowService:
         projections = scenario_projection(analysis)
         capabilities = [
             capability("optical", "Optical observations and history", bool(observations), "Dated NDVI, NDMI and NBR; masks and source provenance retained.", evidence={"count": len(observations)}),
-            capability("radar", "Radar structural evidence", radar.get("available", False), radar.get("reason", "Actual same-platform, same-orbit RTC context; radar is not a neural input and changes can reflect moisture and geometry."), ["Two calibrated RTC acquisitions sharing platform/orbit/pass, common grid and valid masks"]),
-            capability("climate", "Rainfall, temperature, water context", climate.get("available", False), climate.get("reason", "Measured-provider ERA5 reanalysis context, separate from neural model inputs."), ["Successful bounded ERA5 request"]),
+            capability("radar", "Radar structural evidence", radar.get("available", False), radar.get("reason", "Actual same-platform, same-orbit RTC context; only matched past scenes can enter a compatible registered model."), ["Two calibrated RTC acquisitions sharing platform/orbit/pass, common grid and valid masks"]),
+            capability("climate", "Rainfall, temperature, water context", climate.get("available", False), climate.get("reason", "ERA5 reanalysis context; dated trailing features can enter a compatible registered model with explicit coverage and vintage limits."), ["Successful bounded ERA5 request"]),
+            capability("aligned_inputs", "Aligned multimodal model inputs", bool(prepared and len(prepared.provenance.get("available_modalities", [])) > 1), "Past-only radar and climate alignment; compatible training and independent evaluation are still required.", evidence={"modalities": prepared.provenance.get("available_modalities", []) if prepared else [], "errors": alignment_errors}),
             capability("condition", "Forest-condition screening", analysis["health_score"] is not None, analysis["health"]["interpretation"], ["Latest NDVI/NDMI/NBR and valid fraction >= 0.4"]),
             capability("disturbance", "Spatial spectral disturbance evidence", spatial["available"], spatial["reason"], ["Two common-grid real acquisitions with common valid pixels"]),
             capability("land_cover", "Forest-cover and clearing evidence", fragmentation["available"], "A dated classified forest-cover raster is attached; change requires a second comparable epoch." if fragmentation["available"] else fragmentation["reason"], ["Dated classified cover raster, separate from spectral indices"]),
@@ -516,6 +535,8 @@ class WorkflowService:
                                                   "climate": climate_collection_error or (climate.get("reason") if not climate.get("available") else None),
                                                   "radar": radar_collection_error or (radar.get("reason") if not radar.get("available") else None),
                                                   "landcover": landcover_error})
+        manifest["alignment_sha256"] = prepared.provenance.get("alignment", {}).get("sha256") if prepared else None
+        manifest["alignment_errors"] = alignment_errors
         manifest["implementation_sha256"] = implementation_hashes()
         manifest["id"] = digest({key: value for key, value in manifest.items() if key != "id"})
         result = {"schema_version": 1, "kind": "forestmind_selected_area_analysis", "created_at": now(),
@@ -524,6 +545,7 @@ class WorkflowService:
                   "forecast": analysis["forecast"], "resilience": analysis["resilience"], "recovery": recovery,
                   "spatial_change": spatial, "fragmentation": fragmentation, "forest_cover": cover,
                   "climate": climate, "radar": radar, "model": model_result,
+                  "alignment_errors": alignment_errors,
                   "collection_errors": {"climate": climate_collection_error, "radar": radar_collection_error, "forest_cover": landcover_error},
                   "alerts": analysis["alerts"], "coverage": assess_history(payload), "evaluation": backtest_prepared(payload),
                   "scenarios": {**projections, "endpoint": f"/api/v1/regions/{region_id}/workflow/scenarios"},
