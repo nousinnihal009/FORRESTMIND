@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "dataset_id": "REPLACE_CANOPY_LOSS_STUDY",
+  "version": "v1",
+  "synthetic": false,
+  "target": {
+    "kind": "continuous",
+    "name": "Annual canopy-loss fraction within a predefined forest mask",
+    "definition": "REPLACE_WITH_PRODUCT_VERSION_FOREST_DEFINITION_SPATIAL_UNIT_AND_NODATA_RULES",
+    "units": "fraction_0_1",
+    "intended_use": "Compare future annual canopy-loss forecasts on protected regions and dates",
+    "horizon_days": 365
+  },
+  "split_policy": {
+    "spatial_buffer_km": 10,
+    "temporal_embargo_days": 30,
+    "protected_test": true
+  },
+  "feature_names": ["ndvi_mean", "ndmi_mean", "nbr_mean"],
+  "examples": [],
+  "_instructions": "Template for scripts/benchmark_references.py, NOT the health trajectory head. Supply at least 10/5/5 real examples for train/calibration/test (software minima only). Annual loss-year data have no exact event day and cannot justify day-level warning lead time. Match cutoff/target dates to the configured day horizon; leap-year windows require their actual horizon. Features and baselines must be available by cutoff. Do not derive labels from the same index threshold being evaluated.",
+  "_example_template": {
+    "id": "REPLACE_UNIQUE_ID",
+    "region_id": "REPLACE_REGION_ID",
+    "bbox": [null, null, null, null],
+    "split": "train",
+    "cutoff": "YYYY-MM-DD",
+    "features_available_at": "YYYY-MM-DD",
+    "target_date": "YYYY-MM-DD",
+    "features": {"ndvi_mean": null, "ndmi_mean": null, "nbr_mean": null},
+    "target": null,
+    "persistence": null,
+    "persistence_available_at": "YYYY-MM-DD",
+    "seasonal": null,
+    "seasonal_available_at": "YYYY-MM-DD",
+    "quality_group": "REPLACE_high_partial_or_low",
+    "label_source": {
+      "independent": true,
+      "reference": "REPLACE_WITH_ACTUAL_REFERENCE_PRODUCT_OR_SURVEY",
+      "version": "REPLACE_VERSION",
+      "uncertainty": "REPLACE_MEASUREMENT_AND_REFERENCE_LIMITATIONS"
+    }
+  }
+}
