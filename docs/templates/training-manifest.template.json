@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "dataset_id": "REPLACE_WITH_STUDY_ID",
+  "version": "v1",
+  "synthetic": false,
+  "intended_use": "REPLACE_WITH_PREDEFINED_RESEARCH_QUESTION",
+  "time_steps": 12,
+  "grid_shape": [64, 64],
+  "horizons_days": [30, 180, 365, 1825],
+  "max_current_label_age_days": 0,
+  "max_feature_age_days": 31,
+  "split_policy": {
+    "spatial_buffer_km": 10,
+    "temporal_embargo_days": 30,
+    "protected_test": true
+  },
+  "target_spec": {
+    "health_state": {
+      "units": "canonical_five_state",
+      "definition": "REPLACE_WITH_BIOME_SPECIFIC_REFERENCE_DEFINITION_FOR_FIVE_STATES",
+      "reference_protocol": "REPLACE_WITH_FIELD_OR_INDEPENDENT_ANNOTATION_PROTOCOL"
+    },
+    "health_score": {
+      "units": "score_0_100",
+      "definition": "REPLACE_WITH_MEASURABLE_CONDITION_SCORE_AND_ITS_ANCHORS",
+      "reference_protocol": "REPLACE_WITH_INDEPENDENT_MEASUREMENT_PROTOCOL"
+    },
+    "drivers": {
+      "units": "binary_presence",
+      "definition": "REPLACE_WITH_EVIDENCE_STANDARD_FOR_EACH_OBSERVED_DRIVER",
+      "reference_protocol": "REPLACE_WITH_DISTURBANCE_REFERENCE_PROTOCOL"
+    },
+    "driver_strengths": {
+      "units": "strength_0_1",
+      "definition": "REPLACE_WITH_MEANING_OF_OBSERVED_DRIVER_STRENGTH",
+      "reference_protocol": "REPLACE_WITH_MEASUREMENT_PROTOCOL_OR_OMIT_THIS_TASK"
+    },
+    "trajectory": {
+      "units": "condition_0_1",
+      "definition": "REPLACE_WITH_FUTURE_FOREST_CONDITION_MEASURE; NOT_CANOPY_LOSS_FRACTION",
+      "reference_protocol": "REPLACE_WITH_LONGITUDINAL_REFERENCE_PROTOCOL"
+    }
+  },
+  "examples": [],
+  "_instructions": "Template only. Add real examples in train, val, test and optionally calibration. Omit unobserved label fields. Replace all placeholders; null is not an observed label. Buffer/embargo values are illustrative choices requiring study review. Remove this helper block after completing the manifest.",
+  "_example_template": {
+    "id": "REPLACE_SAFE_UNIQUE_ID",
+    "region_id": "REPLACE_REGION_ID",
+    "split": "train",
+    "bbox": [null, null, null, null],
+    "sequence": "sequences/REPLACE.npz",
+    "sequence_sha256": "REPLACE_WITH_REVIEWED_FILE_SHA256",
+    "cutoff": "YYYY-MM-DD",
+    "features_available_at": "YYYY-MM-DD",
+    "labels": {
+      "health_state": {
+        "value": null,
+        "date": "YYYY-MM-DD",
+        "source": {
+          "independent": true,
+          "reference": "REPLACE_WITH_SOURCE_RECORD_OR_URL",
+          "version": "REPLACE_WITH_PRODUCT_OR_SURVEY_VERSION",
+          "uncertainty": "REPLACE_WITH_LABEL_ERROR_AND_REVIEW_INFORMATION",
+          "license": "REPLACE_WITH_ACTUAL_USE_TERMS",
+          "available_at": "YYYY-MM-DD"
+        }
+      }
+    }
+  }
+}
