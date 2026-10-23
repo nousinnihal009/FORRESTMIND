@@ -77,6 +77,13 @@ def _nullable_grid(values, shape, name):
     return np.asarray(values, dtype=np.float64)
 
 
+def _coordinates(value, count, name):
+    if (not isinstance(value, (list, tuple)) or len(value) != count or
+            any(type(number) not in (int, float) or not math.isfinite(number) for number in value)):
+        raise ValueError(f"{name} requires {count} finite numeric coordinates")
+    return value
+
+
 def _align_radar(context, dates, bbox, shape, max_age_days, minimum_valid_fraction):
     count = len(dates)
     arrays = {
@@ -102,16 +109,24 @@ def _align_radar(context, dates, bbox, shape, max_age_days, minimum_valid_fracti
     if (context.get("collection") != "sentinel-1-rtc" or context.get("units") != "dB gamma0"
             or context.get("source_units") != "positive linear gamma-naught power"):
         raise ValueError("Radar alignment requires calibrated Sentinel-1 RTC positive linear gamma-naught power")
-    supplied_bbox = validate_bbox(context.get("bbox_wgs84", []))
+    supplied_bbox = validate_bbox(_coordinates(context.get("bbox_wgs84"), 4, "Radar bounding box"))
     if not np.allclose(supplied_bbox, bbox, rtol=0, atol=1e-8):
         raise ValueError("Radar context AOI differs from the optical bounding box")
     if context.get("grid_crs") != "EPSG:4326" or context.get("grid_shape") != list(shape):
         raise ValueError("Radar context must have the exact optical grid and EPSG:4326 CRS; resampling is not implicit")
     expected_spacing = [(bbox[2] - bbox[0]) / shape[1], (bbox[3] - bbox[1]) / shape[0]]
-    spacing = context.get("grid_pixel_size_degrees")
-    if (not isinstance(spacing, list) or len(spacing) != 2 or
-            not np.allclose(spacing, expected_spacing, rtol=0, atol=1e-10)):
+    spacing = _coordinates(context.get("grid_pixel_size_degrees"), 2, "Radar grid spacing")
+    if not np.allclose(spacing, expected_spacing, rtol=0, atol=1e-10):
         raise ValueError("Radar grid spacing does not match the optical pixel grid")
+    if "geometry" in context:
+        from forestmind.api.schemas import Geometry
+        from forestmind.monitoring.spatial import geometry_bbox
+
+        geometry = Geometry.model_validate(context["geometry"]).model_dump()
+        if not np.allclose(geometry_bbox(geometry), bbox, rtol=0, atol=1e-8):
+            raise ValueError("Radar geometry differs from its declared bounding box")
+        if context.get("geometry_sha256") and context["geometry_sha256"] != _digest(geometry):
+            raise ValueError("Radar geometry hash changed")
     if context.get("sha256") and context["sha256"] != _digest({k: v for k, v in context.items() if k != "sha256"}):
         raise ValueError("Radar context hash changed")
     scenes = context.get("scenes")
@@ -200,10 +215,9 @@ def _align_climate(context, dates, bbox, window_days, lag_days, minimum_coverage
         return arrays, evidence
     if context.get("synthetic", False) is not False or context.get("dataset") != "ERA5":
         raise ValueError("Climate alignment requires nonsynthetic ERA5 daily context")
-    requested = context.get("location_requested")
+    requested = _coordinates(context.get("location_requested"), 2, "Climate requested location")
     centroid = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
-    if (not isinstance(requested, list) or len(requested) != 2 or
-            not np.allclose(requested, centroid, rtol=0, atol=1e-8)):
+    if not np.allclose(requested, centroid, rtol=0, atol=1e-8):
         raise ValueError("Climate context requested location differs from the optical AOI centroid")
     response = context.get("raw_response")
     if not isinstance(response, dict):
@@ -211,6 +225,8 @@ def _align_climate(context, dates, bbox, window_days, lag_days, minimum_coverage
     if response.get("utc_offset_seconds") != 0:
         raise ValueError("Climate daily observations must use UTC/GMT")
     daily, units = response.get("daily", {}), response.get("daily_units", {})
+    if not isinstance(daily, dict) or not isinstance(units, dict):
+        raise ValueError("Climate daily observations and units must be objects")
     times = daily.get("time")
     if not isinstance(times, list) or not 1 <= len(times) <= 3660:
         raise ValueError("Climate context requires 1–3660 dated daily rows")
@@ -278,7 +294,9 @@ def align_context(*, acquisition_dates, bbox, grid_shape, radar_context=None, cl
     dates = [_utc(value, "Optical acquisition") for value in acquisition_dates]
     if not 1 <= len(dates) <= 600 or any(right <= left for left, right in zip(dates, dates[1:])):
         raise ValueError("Optical acquisition timestamps must be nonempty, unique and increasing")
-    bbox = validate_bbox(bbox)
+    bbox = validate_bbox(_coordinates(bbox, 4, "Optical bounding box"))
+    if not isinstance(grid_shape, (tuple, list)):
+        raise ValueError("Optical grid_shape must contain two positive bounded integers")
     shape = tuple(grid_shape)
     if len(shape) != 2 or any(type(value) is not int or not 1 <= value <= 4096 for value in shape):
         raise ValueError("Optical grid_shape must contain two positive bounded integers")
