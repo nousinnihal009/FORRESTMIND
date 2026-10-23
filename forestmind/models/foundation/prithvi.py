@@ -1,10 +1,12 @@
 """Prithvi encoder integration using the official TerraTorch backbone registry.
 
-Pretrained mode requires terratorch, cached/downloadable weights, and inputs
+Pretrained initialization requires terratorch, cached/downloadable weights, and inputs
 normalized for that checkpoint. Loading failures are explicit. Set use_proxy=True
 only for an untrained CNN development baseline; it is not the pretrained model.
 Projection and task heads still require supervised training even with a pretrained
 encoder. Model memory requirements depend on the selected registry architecture.
+Offline inference sets pretrained=False and loads a complete local ForestMind
+state afterward; architecture construction by itself has random parameters.
 """
 
 from __future__ import annotations
@@ -198,6 +200,13 @@ class PrithviAdapter(FoundationModelBase):
 
         # Project to target dimension
         return self.projection(embedding)
+
+    def encode_modalities(self, optical: Tensor, sar: Tensor,
+                          optical_mask: Tensor, sar_mask: Tensor) -> Tensor:
+        """Native Prithvi must not silently ignore requested observed radar inputs."""
+        if not self._is_proxy and (not optical_mask.all() or sar_mask.any()):
+            raise ValueError("Native Prithvi supports optical-only observations; SAR input is unsupported")
+        return self.encode(optical)
 
     @property
     def embedding_dim(self) -> int:
