@@ -151,7 +151,7 @@ def load_sequence(path: str | Path, config: dict, *, observed_through: str,
                 raise ValueError(f"{stem} mask supplied without context values")
             continue
         if sample[name].shape != (steps, width):
-            raise ValueError(f"{name} must match checkpoint context feature dimensions")
+            raise ValueError(f"{name} context vector must match checkpoint feature dimensions")
         if dimension is not None:
             mask_key = f"{stem}_mask"
             if mask_key not in sample:
@@ -253,6 +253,18 @@ def predict_checkpoint(checkpoint_path: str | Path, input_path: str | Path, *,
         caveats.append("Input day offsets are anchored to the user-declared observed-through date; absolute acquisition dates were not supplied.")
     if not info["sar_timesteps"]:
         caveats.append("No SAR observations were supplied; the SAR stream is explicitly masked as unavailable.")
+    support = data_config.get("supervised_targets")
+    if support is not None:
+        expected = {"health_state": None, "health_score": None, "drivers": 8,
+                    "driver_strengths": 8, "trajectory": len(horizons)}
+        if not isinstance(support, dict) or set(support) != set(expected):
+            raise ValueError("supervised_targets must declare support for each output head")
+        for key, count in expected.items():
+            value = support[key]
+            if (count is None and type(value) is not bool) or (count is not None and
+                    (not isinstance(value, list) or len(value) != count or any(type(v) is not bool for v in value))):
+                raise ValueError(f"Invalid supervised_targets.{key} support mask")
+        caveats.append("Outputs lacking any training supervision are withheld as null (or empty class scores). A supported output still requires independent validation.")
     report = {
         "schema_version": 1, "kind": "forestmind_inference", "region_id": region_id,
         "observed_through": observed_through, "created_at": datetime.now(timezone.utc).isoformat(),
@@ -271,6 +283,20 @@ def predict_checkpoint(checkpoint_path: str | Path, input_path: str | Path, *,
                            for index, horizon in enumerate(horizons)],
         }, "calibration": "uncalibrated", "caveats": caveats,
     }
+    if support is not None:
+        prediction = report["predictions"]
+        if not support["health_state"]:
+            prediction["health"].update(state=None, class_scores=[])
+        if not support["health_score"]:
+            prediction["health"]["score"] = None
+        for index, driver in enumerate(prediction["drivers"]):
+            if not support["drivers"][index]:
+                driver["score"] = None
+            if not support["driver_strengths"][index]:
+                driver["strength"] = None
+        for index, point in enumerate(prediction["trajectory"]):
+            if not support["trajectory"][index]:
+                point.update(score=None, stddev=None)
     if sha256_file(checkpoint_path) != checkpoint_hash or sha256_file(input_path) != info["sha256"]:
         raise ValueError("A source file changed during inference; rerun with stable input files")
     return InferenceReport.model_validate(report).model_dump(mode="json", exclude_none=False)
