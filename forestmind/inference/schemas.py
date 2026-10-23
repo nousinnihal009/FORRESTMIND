@@ -94,12 +94,16 @@ class NamedScore(ReportModel):
 
 
 class HealthPrediction(ReportModel):
-    state: Literal["Healthy", "Stressed", "Degraded", "Severely Degraded", "Cleared"]
-    score: Score
-    class_scores: list[NamedScore] = Field(min_length=5, max_length=5)
+    state: Literal["Healthy", "Stressed", "Degraded", "Severely Degraded", "Cleared"] | None
+    score: Score | None
+    class_scores: list[NamedScore] = Field(max_length=5)
 
     @model_validator(mode="after")
     def canonical_classes(self):
+        if not self.class_scores:
+            if self.state is not None:
+                raise ValueError("Unsupported class head must have null state and empty class scores")
+            return self
         if tuple(item.name for item in self.class_scores) != HEALTH_NAMES:
             raise ValueError("Class scores must use all five canonical health names in model order")
         if not math.isclose(sum(item.score for item in self.class_scores), 1, abs_tol=1e-5):
@@ -110,13 +114,20 @@ class HealthPrediction(ReportModel):
 
 
 class DriverPrediction(NamedScore):
-    strength: Fraction
+    score: Fraction | None
+    strength: Fraction | None
 
 
 class TrajectoryPrediction(ReportModel):
     horizon_days: PositiveInt
-    score: Score
+    score: Score | None
     stddev: Annotated[Number, Field(ge=0, le=1000)] | None
+
+    @model_validator(mode="after")
+    def supported_uncertainty(self):
+        if self.score is None and self.stddev is not None:
+            raise ValueError("Unsupported trajectory has no uncertainty estimate")
+        return self
 
 
 class Predictions(ReportModel):
