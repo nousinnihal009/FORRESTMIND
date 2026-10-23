@@ -107,6 +107,8 @@ def _read_sequence(path, example, time_steps, grid_shape):
     steps = len(optical)
     if steps < 1 or steps > time_steps or sar is None or sar.shape != (steps, 2, *grid_shape):
         raise ValueError("Sequence exceeds time_steps or SAR/grid dimensions do not match; no scenes are dropped")
+    if optical.dtype.kind not in "fiu" or sar.dtype.kind not in "fiu":
+        raise ValueError("Optical and SAR samples must be numeric arrays")
     observed = _mask(arrays, "observation_mask", (steps,))
     optical_mask = _mask(arrays, "optical_mask", (steps,))
     sar_mask = _mask(arrays, "sar_mask", (steps,))
@@ -176,6 +178,9 @@ def _read_sequence(path, example, time_steps, grid_shape):
         coverage = arrays.get("climate_coverage")
         if coverage is None or coverage.shape != (steps, 4) or (coverage < 0).any() or (coverage > 1).any():
             raise ValueError("Climate coverage must contain a [0,1] fraction per feature and timestep")
+        if (np.any((context[:, 1:3] < 0) & climate_mask[:, 1:3])
+                or np.any(((context[:, 3] < 0) | (context[:, 3] > 1)) & climate_mask[:, 3])):
+            raise ValueError("Observed climate precipitation/ET0 must be nonnegative and soil moisture in [0,1]")
     if "activity_context" in arrays:
         raise ValueError("Activity context needs a versioned physical feature contract before training")
     return arrays
@@ -365,6 +370,7 @@ def audit_training_manifest(manifest_path: str | Path) -> tuple[dict, list[dict]
         for key in TARGET_UNITS:
             if np.any(row["labels"][key + "_mask"] & ~trained[key]):
                 raise ValueError(f"{key} has held-out labels without any matching training supervision")
+    _normalization(rows)  # --check also audits missing training-only normalization support.
     return document, rows, audit
 
 
@@ -460,11 +466,15 @@ def prepare_training_dataset(manifest_path: str | Path, output: str | Path) -> d
     normalization, statistics, sar_units = _normalization(rows)
     climate = "climate_mean" in normalization
     manifest_hash = _hash_json(document)
+    supervised_targets = {key: np.any([row["labels"][key + "_mask"] for row in rows
+                                       if row["example"]["split"] == "train"], axis=0).tolist()
+                          for key in TARGET_UNITS}
     config = {
         "data": {"source": str(destination), "synthetic": False, "time_steps": document["time_steps"],
                  "patch_size": document["grid_shape"][0], "num_bands": 12, "sar_channels": 2,
                  "batch_size": min(4, audit["counts"]["train"]), "num_workers": 0,
                  "normalization": normalization, "target_spec": document["target_spec"],
+                 "supervised_targets": supervised_targets, "optical_units": "surface_reflectance_0_1",
                  "dataset_manifest_sha256": manifest_hash, "sar_units": sar_units},
         "foundation": {"name": "custom_vit", "embedding_dim": 64,
                        "custom_vit": {"patch_embed_size": 16, "depth": 2, "num_heads": 4, "mlp_ratio": 2., "drop_rate": 0.}},
@@ -493,7 +503,7 @@ def prepare_training_dataset(manifest_path: str | Path, output: str | Path) -> d
         arrays = _pad(row["arrays"], document, climate)
         arrays.update(row["labels"], location_id=np.asarray(example["region_id"]),
                       example_id=np.asarray(example["id"]), cutoff=np.asarray(example["cutoff"]),
-                      sar_units=np.asarray(sar_units), source_manifest_sha256=np.asarray(row["sha256"]),
+                      sar_units=np.asarray(sar_units), source_sequence_sha256=np.asarray(row["sha256"]),
                       reference_manifest_sha256=np.asarray(manifest_hash),
                       label_source_json=np.asarray(json.dumps(example["labels"], sort_keys=True, allow_nan=False)))
         path = directory / (example["id"] + ".npz")
@@ -504,6 +514,7 @@ def prepare_training_dataset(manifest_path: str | Path, output: str | Path) -> d
                           "source_sha256": row["sha256"]})
     report = {"schema_version": 1, "kind": "forestmind_training_dataset", "dataset_id": document["dataset_id"],
               "version": document["version"], "synthetic": False, "manifest_sha256": manifest_hash,
+              "source_manifest_path": str(Path(manifest_path).resolve()),
               "target_spec": document["target_spec"], "audit": audit, "normalization": normalization,
               "normalization_evidence": statistics, "normalization_method": "Observed training values only; population std floor 1e-6; absent modalities use neutral 0/1 and false masks",
               "artifacts": artifacts, "implementation_sha256": _hash_file(__file__), "numpy_version": np.__version__,
