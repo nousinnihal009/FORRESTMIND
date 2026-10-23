@@ -5,6 +5,8 @@ normalized for that checkpoint. Loading failures are explicit. Set use_proxy=Tru
 only for an untrained CNN development baseline; it is not the pretrained model.
 Projection and task heads still require supervised training even with a pretrained
 encoder. Model memory requirements depend on the selected registry architecture.
+Offline inference sets pretrained=False, uses only raw observed modalities, and
+then strictly loads a complete local ForestMind state.
 """
 
 from __future__ import annotations
@@ -77,7 +79,7 @@ class TerraMindAdapter(FoundationModelBase):
             self._init_proxy(target_dim, optical_channels, sar_channels)
         elif not loaded:
             raise RuntimeError(
-                f"Could not load pretrained TerraMind '{model_name}'. No proxy was substituted. "
+                f"Could not construct native TerraMind '{model_name}' (pretrained={pretrained}). No proxy was substituted. "
                 "Install terratorch and use a supported registry model, or explicitly set "
                 "use_proxy=true for an untrained development baseline."
             )
