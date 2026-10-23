@@ -66,14 +66,17 @@ def main(argv: list[str] | None = None) -> int:
         ("Trajectory MAE (0-1)", "trajectory_mae"), ("Trajectory RMSE (0-1)", "trajectory_rmse"),
         ("Aggregate Score", "aggregate_score"),
     ):
-        print(f"  {label:23s}: {result[key]:.4f}")
+        rendered = "unavailable" if result[key] is None else f"{result[key]:.4f}"
+        print(f"  {label:23s}: {rendered}")
     print("  Per-horizon MAE (0-1):")
     for horizon in report["per_horizon"]:
-        print(f"    {horizon['horizon_days']:>5d} days: {horizon['mae']:.4f} (n={horizon['n']})")
+        rendered = "unavailable" if horizon['mae'] is None else f"{horizon['mae']:.4f}"
+        print(f"    {horizon['horizon_days']:>5d} days: {rendered} (n={horizon['n']})")
     print("  Per-driver F1:")
     for index, f1 in enumerate(result["attribution_per_driver_f1"]):
         name = DRIVER_NAMES[index] if index < len(DRIVER_NAMES) else f"Driver {index}"
-        print(f"    {name:20s}: {f1:.3f}")
+        rendered = "unavailable" if f1 is None else f"{f1:.3f}"
+        print(f"    {name:20s}: {rendered}")
     if args.output:
         print(f"\n  JSON report: {saved}")
     print()
