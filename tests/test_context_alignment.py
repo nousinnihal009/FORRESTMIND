@@ -108,6 +108,22 @@ def test_radar_falls_back_to_older_usable_scene_and_never_clips_db():
     assert arrays["sar"][0, 0, 0, 0] == pytest.approx(-90.)
 
 
+def test_changed_radar_context_cannot_reuse_old_hash():
+    context = radar()
+    context["sha256"] = hashlib.sha256(json.dumps(context, sort_keys=True,
+        separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    align(radar_context=context)
+    context["scenes"][0]["vv_linear_gamma0"][0][0] *= 2
+    with pytest.raises(ValueError, match="context hash changed"):
+        align(radar_context=context)
+
+
+@pytest.mark.parametrize("dates", [["2024-02-10T10:00:00"], list(reversed(DATES)), [DATES[0], DATES[0]]])
+def test_ambiguous_or_unordered_optical_timestamps_are_rejected(dates):
+    with pytest.raises(ValueError):
+        align_context(acquisition_dates=dates, bbox=BBOX, grid_shape=[2, 2], radar_context=radar())
+
+
 @pytest.mark.parametrize("change,match", [
     ("bbox", "bounding box"), ("shape", "exact optical grid"), ("spacing", "grid spacing"),
     ("units", "calibrated"), ("orbit", "one platform"), ("mask", "boolean"),
