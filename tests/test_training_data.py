@@ -40,7 +40,7 @@ def study(tmp_path, *, climate=False, calibration=False):
                   "acquisition_dates": np.asarray([f"{year}-01-01T12:00:00+00:00", f"{cutoff}T12:00:00+00:00"]),
                   "bbox": np.asarray(bbox)}
         if climate:
-            arrays.update(climate_context=np.asarray([[20., 10., 50., .2], [22., 20., 60., .4]], dtype=np.float32) + (0 if split == "train" else 20),
+            arrays.update(climate_context=np.asarray([[20., 10., 50., .2], [22., 20., 60., .4]], dtype=np.float32) + np.asarray([0, 0, 0, 0] if split == "train" else [20, 20, 20, 0]),
                           climate_mask=np.ones((2, 4), dtype=bool), climate_coverage=np.ones((2, 4), dtype=np.float32),
                           climate_feature_names=np.asarray(CLIMATE_NAMES), climate_feature_units=np.asarray(CLIMATE_UNITS))
         path = tmp_path / (split + ".npz")
