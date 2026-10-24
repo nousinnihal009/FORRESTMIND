@@ -103,6 +103,8 @@ def test_converter_preserves_unknown_targets_and_pads_only_missing_steps(tmp_pat
     assert config["data"]["synthetic"] is False
     assert config["heads"]["trajectory"]["horizons"] == [30, 365]
     assert Path(config["data"]["source"]) == output
+    assert config["data"]["dataset_report_sha256"] == hashlib.sha256((output / "dataset-report.json").read_bytes()).hexdigest()
+    assert report["supervised_targets"] == config["data"]["supervised_targets"]
 
 
 def test_statistics_use_training_observed_pixels_and_context_only(tmp_path):
@@ -231,3 +233,44 @@ def test_cli_check_has_no_output_side_effects(tmp_path):
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["passed"] is True
     assert {p.name for p in tmp_path.iterdir()} == before
+
+
+def test_prepared_partial_targets_train_and_evaluate_end_to_end(tmp_path):
+    """One-epoch plumbing smoke on controlled fixtures, not a real trained model."""
+    import torch
+    from forestmind.data.dataset import create_dataloaders
+    from forestmind.models.forestmind_model import ForestMindModel
+    from forestmind.training.trainer import ForestMindTrainer
+    from forestmind.training.evaluation import evaluate_checkpoint
+
+    path, _ = study(tmp_path, climate=True, calibration=True)
+    output = tmp_path / "prepared"
+    prepare_training_dataset(path, output)
+    config = yaml.safe_load((output / "training-config.yaml").read_text())
+    config["training"].update(epochs=1, save_every=1)
+    assert config["data"]["supervised_targets"]["health_score"] is False
+    assert config["data"]["supervised_targets"]["drivers"] == [False] * 5 + [True, False, False]
+    assert config["data"]["supervised_targets"]["trajectory"] == [True, False]
+    previous = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        train, val, test = create_dataloaders(config, batch_size=1)
+        model = ForestMindModel(config)
+        trainer = ForestMindTrainer(model, config, train, val)
+        result = trainer.train()
+        assert np.isfinite(result["best_val_score"])
+        checkpoint = output / "checkpoints/best_model.pt"
+        assert checkpoint.is_file()
+        report = evaluate_checkpoint(checkpoint, split="test")
+        assert report["counts"]["samples"] == 1
+        assert report["per_horizon"][0]["n"] == 1
+        assert report["per_horizon"][1]["n"] == 0
+        assert report["per_horizon"][1]["mae"] is None
+        assert report["loss_observed_counts"]["health_mse"] == 0
+        assert report["loss_observed_counts"]["attribution_bce"] == 1
+        assert report["examples"][0]["targets"]["trajectory_mask"] == [True, False]
+        assert report["dataset"]["split"] == "test"
+        assert not any("calibration" in row["path"] for row in report["dataset"]["source_manifest"])
+        json.dumps(report, allow_nan=False)
+    finally:
+        torch.set_num_threads(previous)
