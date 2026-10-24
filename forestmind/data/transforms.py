@@ -217,7 +217,7 @@ class ToTensor:
         for key, value in sample.items():
             if isinstance(value, np.ndarray):
                 if value.dtype.kind in "bifu":
-                    tensor = torch.from_numpy(np.ascontiguousarray(value).copy())
+                    tensor = torch.from_numpy(np.array(value, copy=True, order="C"))
                     result[key] = tensor.float() if tensor.is_floating_point() else tensor
                 else:
                     result[key] = value.tolist()
