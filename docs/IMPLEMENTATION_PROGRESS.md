@@ -1,4 +1,17 @@
-# Continuation record — 2026-10-22
+# Continuation record — 2026-10-25
+
+## In-progress research implementation — October 25
+
+User requested building all missing capabilities, then resumed after repeated usage interruptions. This is an unfinished integration, not a release. Preserve real observations, databases, prior snapshots and provider artifacts. Git history may contain automatic app snapshots of edits.
+
+- New aligned model inputs: `data/context_alignment.py`, extended `sequence.py`/CLI, independent SAR pixel masks, four measured climate features with missingness masks, past-only matching and explicit retrospective reanalysis caveats. 48 focused sequence/alignment tests previously passed. Actual cached Tapajos smoke `artifacts/context-alignment-real-smoke-20261023.json` found one SAR-aligned and one fully climate-covered timestep among four optical observations; no new downloads or scientific inference.
+- New real-label converter: `data/training_data.py`, `scripts/prepare_training_data.py`, examples and `docs/TRAINING_DATA.md`. Protected spatial/temporal partitions, independent source metadata, train-only normalization, partial labels and per-task/horizon masks. No real reference labels have been provided or invented. Controlled end-to-end training/evaluation verification is pending.
+- Root added mask-aware losses/metrics/evaluation, measured-context fusion with absent-context identity, independent radar masks through transforms, unsupported predictions withheld, workflow alignment/registered-modality selection. First combined focused run had 115 passes, two error-message mismatches (fixed), and one Windows sandbox hardlink setup failure. Latest full integration and browser checks are pending.
+- Native offline loaders and tests exist in `models/foundation/native.py`, Prithvi/TerraMind adapters and `scripts/verify_native_runtime.py`. Exact pinned runtime, `pretrained=False` construction and complete strict finite state loading. Isolated dependencies installed under `artifacts/native-venv`; no pretrained weights downloaded. Actual native forward evidence remains pending; do not claim a validated operational native checkpoint.
+- Remaining integration: complete end-to-end tests, confirm support masks cannot expose untrained heads, check model eligibility/input contracts, run full regression with raster extras and Windows permissions where needed, inspect actual UI, refresh package/docs/status. Old 671-pass v0.6.0 evidence below predates these changes.
+- Still absent: independent real targets and validated trained models, calibrated spatial future-risk model, causal intervention/tipping evidence, seasonal radar/Landsat/fire/activity acquisition extensions, complete recurrent/pretrained ablations, hosted multi-user deployment. Do not mark the full scientific proposal complete.
+
+## Earlier release record — October 22
 
 ## Final local release checkpoint — October 22
 
