@@ -516,6 +516,7 @@ def prepare_training_dataset(manifest_path: str | Path, output: str | Path) -> d
               "version": document["version"], "synthetic": False, "manifest_sha256": manifest_hash,
               "source_manifest_path": str(Path(manifest_path).resolve()),
               "target_spec": document["target_spec"], "audit": audit, "normalization": normalization,
+              "supervised_targets": supervised_targets,
               "normalization_evidence": statistics, "normalization_method": "Observed training values only; population std floor 1e-6; absent modalities use neutral 0/1 and false masks",
               "artifacts": artifacts, "implementation_sha256": _hash_file(__file__), "numpy_version": np.__version__,
               "scientifically_validated": False}
@@ -523,6 +524,7 @@ def prepare_training_dataset(manifest_path: str | Path, output: str | Path) -> d
         with (destination / name).open("x", encoding="utf-8") as stream:
             json.dump(content, stream, indent=2, allow_nan=False)
             stream.write("\n")
+    config["data"]["dataset_report_sha256"] = _hash_file(destination / "dataset-report.json")
     with (destination / "training-config.yaml").open("x", encoding="utf-8") as stream:
         yaml.safe_dump(config, stream, sort_keys=False)
     return report
