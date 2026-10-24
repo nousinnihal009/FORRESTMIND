@@ -38,6 +38,7 @@ def _build_foundation_model(config: dict) -> FoundationModelBase:
         vit_cfg = config.get("custom_vit", {})
         return CustomViTEncoder(
             in_channels=14,  # 12 optical + 2 SAR
+            img_size=vit_cfg.get("img_size", 128),
             embed_dim=config.get("embedding_dim", 256),
             patch_size=vit_cfg.get("patch_embed_size", 16),
             depth=vit_cfg.get("depth", 6),
