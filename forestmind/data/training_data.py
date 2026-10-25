@@ -266,8 +266,9 @@ def audit_training_manifest(manifest_path: str | Path) -> tuple[dict, list[dict]
     time_steps, grid = document.get("time_steps"), document.get("grid_shape")
     if type(time_steps) is not int or not 1 <= time_steps <= 600:
         raise ValueError("time_steps must be an integer in [1,600]")
-    if not isinstance(grid, list) or len(grid) != 2 or any(type(n) is not int or not 16 <= n <= 1024 for n in grid):
-        raise ValueError("grid_shape must contain two integers from 16 to 1024")
+    if (not isinstance(grid, list) or len(grid) != 2
+            or any(type(n) is not int or not 16 <= n <= 1024 or n % 16 for n in grid)):
+        raise ValueError("grid_shape must contain two multiples of 16 from 16 to 1024; border pixels cannot be dropped")
     horizons = document.get("horizons_days")
     if (not isinstance(horizons, list) or not horizons or len(horizons) > 16
             or any(type(h) is not int or not 1 <= h <= 3653 for h in horizons)
@@ -310,13 +311,15 @@ def audit_training_manifest(manifest_path: str | Path) -> tuple[dict, list[dict]
         if region in regions and regions[region] != split:
             raise ValueError("Region identity crosses protected splits")
         regions[region] = split
-        example["bbox"] = list(validate_bbox(example.get("bbox", [])))
+        validate_bbox(example.get("bbox", []))
         cutoff, available = _date(example.get("cutoff")), _date(example.get("features_available_at"))
         if available > cutoff:
             raise ValueError("Features are not available by the prediction cutoff")
         sequence_path = (path.parent / _text(example.get("sequence"), "sequence")).resolve()
         if not sequence_path.is_relative_to(path.parent):
             raise ValueError("Sequence paths must remain inside the manifest directory")
+        if not sequence_path.is_file() or sequence_path.stat().st_size > MAX_FILE_BYTES:
+            raise ValueError("Sequence must be an existing file at most 512 MiB")
         sequence_hash = _hash_file(sequence_path)
         expected_hash = example.get("sequence_sha256")
         if expected_hash != sequence_hash:
@@ -454,6 +457,8 @@ def _pad(arrays, document, climate):
     # Zero only explicitly invalid pixels. Missingness remains represented by masks.
     result["optical"] = np.where(result["quality_mask"][:, None], result["optical"], 0)
     result["sar"] = np.where(result["sar_quality_mask"][:, None], result["sar"], 0)
+    if climate:
+        result["climate_context"] = np.where(result["climate_mask"], result["climate_context"], 0)
     return result
 
 
@@ -469,15 +474,21 @@ def prepare_training_dataset(manifest_path: str | Path, output: str | Path) -> d
     supervised_targets = {key: np.any([row["labels"][key + "_mask"] for row in rows
                                        if row["example"]["split"] == "train"], axis=0).tolist()
                           for key in TARGET_UNITS}
+    input_contract = {"time_steps": document["time_steps"], "grid_shape": document["grid_shape"],
+                      "horizon_days": document["horizons_days"], "trajectory_target_scale": "unit",
+                      "optical_units": "surface_reflectance_0_1", "sar_units": sar_units,
+                      "climate_feature_names": CLIMATE_NAMES if climate else [],
+                      "climate_feature_units": CLIMATE_UNITS if climate else []}
     config = {
-        "data": {"source": str(destination), "synthetic": False, "time_steps": document["time_steps"],
+        "data": {"source": str(destination), "synthetic": False, **input_contract,
                  "patch_size": document["grid_shape"][0], "num_bands": 12, "sar_channels": 2,
                  "batch_size": min(4, audit["counts"]["train"]), "num_workers": 0,
                  "normalization": normalization, "target_spec": document["target_spec"],
                  "supervised_targets": supervised_targets, "optical_units": "surface_reflectance_0_1",
                  "dataset_manifest_sha256": manifest_hash, "sar_units": sar_units},
         "foundation": {"name": "custom_vit", "embedding_dim": 64,
-                       "custom_vit": {"patch_embed_size": 16, "depth": 2, "num_heads": 4, "mlp_ratio": 2., "drop_rate": 0.}},
+                       "custom_vit": {"patch_embed_size": 16, "img_size": max(document["grid_shape"]),
+                                      "depth": 2, "num_heads": 4, "mlp_ratio": 2., "drop_rate": 0.}},
         "fusion": {"method": "cross_attention", "num_heads": 4, "num_layers": 1, "dropout": 0.},
         "temporal": {"depth": 2, "num_heads": 4, "dim_feedforward": 128, "dropout": 0.,
                      "max_seq_len": document["time_steps"], "use_continuous_pe": True},
@@ -516,7 +527,7 @@ def prepare_training_dataset(manifest_path: str | Path, output: str | Path) -> d
               "version": document["version"], "synthetic": False, "manifest_sha256": manifest_hash,
               "source_manifest_path": str(Path(manifest_path).resolve()),
               "target_spec": document["target_spec"], "audit": audit, "normalization": normalization,
-              "supervised_targets": supervised_targets,
+              "supervised_targets": supervised_targets, "input_contract": input_contract,
               "normalization_evidence": statistics, "normalization_method": "Observed training values only; population std floor 1e-6; absent modalities use neutral 0/1 and false masks",
               "artifacts": artifacts, "implementation_sha256": _hash_file(__file__), "numpy_version": np.__version__,
               "scientifically_validated": False}
