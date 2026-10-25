@@ -5,9 +5,11 @@ from dataclasses import asdict
 
 import pytest
 import torch
+import numpy as np
 
 from forestmind.training.losses import ForestMindLoss
 from forestmind.training.metrics import ForestMindMetrics
+from test_inference import config, raw_sequence
 
 
 def batch():
@@ -65,3 +67,24 @@ def test_no_known_target_is_rejected_and_masks_cannot_be_numeric():
     targets["health_state_mask"] = torch.ones(2)
     with pytest.raises(ValueError, match="boolean"):
         ForestMindLoss()(outputs, targets)
+
+
+def test_inference_withholds_untrained_outputs(tmp_path, config):
+    from forestmind.models.forestmind_model import ForestMindModel
+    from forestmind.inference.predict import predict_checkpoint
+    support = {"health_state": False, "health_score": False,
+               "drivers": [False] * 5 + [True, False, False],
+               "driver_strengths": [False] * 8, "trajectory": [True, False]}
+    checkpoint, sequence = tmp_path / "partial.pt", tmp_path / "sequence.npz"
+    torch.save({"config": config, "model_state_dict": ForestMindModel(config).state_dict(),
+                "epoch": 0, "supervised_targets": support}, checkpoint)
+    np.savez(sequence, **raw_sequence())
+    report = predict_checkpoint(checkpoint, sequence, region_id="fixture", observed_through="2025-06-01", synthetic_input=True)
+    prediction = report["predictions"]
+    assert prediction["health"] == {"state": None, "score": None, "class_scores": []}
+    assert prediction["drivers"][0]["score"] is None
+    assert prediction["drivers"][5]["score"] is not None
+    assert all(row["strength"] is None for row in prediction["drivers"])
+    assert prediction["trajectory"][0]["score"] is not None
+    assert prediction["trajectory"][1]["score"] is None
+    assert prediction["trajectory"][1]["stddev"] is None
