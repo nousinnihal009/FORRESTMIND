@@ -38,6 +38,7 @@ def _build_foundation_model(config: dict) -> FoundationModelBase:
         vit_cfg = config.get("custom_vit", {})
         return CustomViTEncoder(
             in_channels=14,  # 12 optical + 2 SAR
+            img_size=vit_cfg.get("img_size", 128),
             embed_dim=config.get("embedding_dim", 256),
             patch_size=vit_cfg.get("patch_embed_size", 16),
             depth=vit_cfg.get("depth", 6),
@@ -53,6 +54,7 @@ def _build_foundation_model(config: dict) -> FoundationModelBase:
             target_dim=config.get("embedding_dim", 256),
             freeze_backbone=prithvi_cfg.get("freeze", True),
             use_proxy=prithvi_cfg.get("use_proxy", False),
+            pretrained=prithvi_cfg.get("pretrained", True),
         )
     elif name == "terramind":
         from forestmind.models.foundation.terramind import TerraMindAdapter
@@ -62,6 +64,8 @@ def _build_foundation_model(config: dict) -> FoundationModelBase:
             target_dim=config.get("embedding_dim", 256),
             freeze_backbone=terra_cfg.get("freeze", True),
             use_proxy=terra_cfg.get("use_proxy", False),
+            pretrained=terra_cfg.get("pretrained", True),
+            sar_modality=terra_cfg.get("sar_modality", "S1GRD"),
         )
     else:
         raise ValueError(f"Unknown foundation model: {name}")
@@ -118,6 +122,8 @@ class ForestMindModel(nn.Module):
             num_heads=fusion_cfg.get("num_heads", 4),
             num_layers=fusion_cfg.get("num_layers", 2),
             dropout=fusion_cfg.get("dropout", 0.1),
+            climate_dim=fusion_cfg.get("climate_dim"),
+            activity_dim=fusion_cfg.get("activity_dim"),
         )
 
         # ─── Temporal Transformer ──────────────────────────
@@ -171,6 +177,9 @@ class ForestMindModel(nn.Module):
         quality_mask: Tensor | None = None,
         climate_context: Tensor | None = None,
         activity_context: Tensor | None = None,
+        climate_mask: Tensor | None = None,
+        activity_mask: Tensor | None = None,
+        sar_quality_mask: Tensor | None = None,
     ) -> dict[str, dict[str, Tensor]]:
         """Full forward pass through the ForestMind pipeline.
         
@@ -224,6 +233,10 @@ class ForestMindModel(nn.Module):
             if quality_mask.shape != (B, T, H, W):
                 raise ValueError("quality_mask must have shape (B, T, H, W)")
             optical = optical.masked_fill(~quality_mask[:, :, None].bool(), 0)
+        if sar_quality_mask is not None:
+            if sar_quality_mask.shape != (B, T, H, W) or sar_quality_mask.dtype != torch.bool:
+                raise ValueError("sar_quality_mask must be boolean with shape (B, T, H, W)")
+            sar = sar.masked_fill(~sar_quality_mask[:, :, None], 0)
         if not torch.isfinite(optical).all() or not torch.isfinite(sar).all():
             raise ValueError("Observed satellite pixels must be finite; mask missing data explicitly")
         C_opt = optical.shape[2]
@@ -257,6 +270,8 @@ class ForestMindModel(nn.Module):
                 embeddings[:, t],
                 climate_context[:, t] if climate_context is not None else None,
                 activity_context[:, t] if activity_context is not None else None,
+                climate_mask[:, t] if climate_mask is not None else None,
+                activity_mask[:, t] if activity_mask is not None else None,
             )
             fused_embeddings.append(fused_t)
         fused_embeddings = torch.stack(fused_embeddings, dim=1)  # (B, T, D)
