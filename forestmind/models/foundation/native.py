@@ -50,7 +50,7 @@ unchanged. The fixed registry arguments have no remote or local weight path.
 """
     foundation = config.get("foundation", {})
     name = foundation.get("name")
-    if name not in NATIVE_MODELS:
+    if not isinstance(name, str) or name not in NATIVE_MODELS:
         raise ValueError("Native offline inference requires Prithvi or TerraMind")
     options = foundation.get(name, {})
     if not isinstance(options, dict) or options.get("use_proxy", False) is not False:
@@ -108,9 +108,9 @@ def validate_native_sample(config: dict, sample: dict) -> None:
     if height % patch or width % patch:
         raise ValueError(f"Native {model_name} needs height and width divisible by its {patch}-pixel patch size")
     if name == "prithvi":
-        if np.any(sample["observation_mask"] & ~sample["optical_mask"]):
+        if bool((sample["observation_mask"] & ~sample["optical_mask"]).any()):
             raise ValueError("Prithvi cannot encode SAR-only timesteps; every observation needs optical imagery")
-        if np.any(sample["sar_mask"]):
+        if bool(sample["sar_mask"].any()):
             raise ValueError("Prithvi is optical-only; supplied SAR cannot be silently discarded")
 
 
