@@ -99,7 +99,7 @@ unchanged. The fixed registry arguments have no remote or local weight path.
 
 
 def validate_native_sample(config: dict, sample: dict) -> None:
-    """Validate patch geometry and unsupported modality use before model allocation."""
+    """Validate geometry and modalities, including legacy batches without masks."""
     foundation = config["foundation"]
     name = foundation["name"]
     model_name = foundation.get(name, {}).get("model_name", DEFAULT_MODELS[name])
@@ -108,9 +108,17 @@ def validate_native_sample(config: dict, sample: dict) -> None:
     if height % patch or width % patch:
         raise ValueError(f"Native {model_name} needs height and width divisible by its {patch}-pixel patch size")
     if name == "prithvi":
-        if bool((sample["observation_mask"] & ~sample["optical_mask"]).any()):
+        optical = sample["optical"]
+        # The model treats supplied inputs without availability masks as observed.
+        # In particular, missing SAR metadata must never imply absent SAR.
+        available = (torch.ones(optical.shape[0], dtype=torch.bool, device=optical.device)
+                     if isinstance(optical, torch.Tensor) else np.ones(optical.shape[0], dtype=bool))
+        optical_mask = sample.get("optical_mask", available)
+        sar_mask = sample.get("sar_mask", available)
+        observation_mask = sample.get("observation_mask", optical_mask | sar_mask)
+        if bool((observation_mask & ~optical_mask).any()):
             raise ValueError("Prithvi cannot encode SAR-only timesteps; every observation needs optical imagery")
-        if bool(sample["sar_mask"].any()):
+        if bool(sar_mask.any()):
             raise ValueError("Prithvi is optical-only; supplied SAR cannot be silently discarded")
 
 
