@@ -124,3 +124,27 @@ had a complete trailing climate window. All other missing modality/time pairs
 remained masked. The evidence is
 `artifacts/context-alignment-real-smoke-20261023.json`. This verifies measured-input
 plumbing, not a trained multimodal forecast or scientific predictive gain.
+
+## Model selection and dashboard
+
+The current preparation path is anchored to optical acquisition times, so a
+registered model must require optical input. Radar-only inference needs a separate
+sampling timeline. Model eligibility validates the declared input masks, physical
+units, feature order, alignment settings and matching provenance hashes. Required
+climate coverage counts dates with every required feature present; a partial
+feature vector cannot pass as a complete date.
+
+Each eligible model receives only the modalities declared in its registered
+contract. Unused radar and climate arrays and their associated metadata are
+removed or masked, while optical values remain unchanged. This preserves the
+inputs used by older optical-only checkpoints when more evidence is collected.
+
+Connected analysis shows matched radar dates, complete climate dates and dates
+with only some climate measurements. Preparation failures retain their reasons,
+and a failed optical sequence is shown as unavailable rather than a ready input
+with zero observations. Available measurements alone do not imply a prediction.
+Model run details explicitly mark unsupported condition, driver and trajectory
+outputs as unavailable; actual predicted zeros remain visible as zeros.
+
+`tests/test_model_presentation.py` checks these missing-output and coverage display
+contracts, including workflow error fields and escaping of diagnostic messages.
