@@ -115,6 +115,7 @@ class ForestMindTrainer:
         self.best_val_score = float("-inf")
         self.train_history = []
         self.val_history = []
+        self.training_target_counts = {}
 
     def _build_scheduler(self, train_cfg: dict):
         """Build learning rate scheduler."""
@@ -187,6 +188,10 @@ class ForestMindTrainer:
 
         for batch in pbar:
             inputs, targets = self._prepare_batch(batch)
+            from forestmind.training.targets import supervision_masks
+            for key, mask in supervision_masks(targets).items():
+                count = mask.sum(dim=0).detach().cpu()
+                self.training_target_counts[key] = self.training_target_counts.get(key, torch.zeros_like(count)) + count
 
             self.optimizer.zero_grad()
 
@@ -270,7 +275,17 @@ class ForestMindTrainer:
             "config": saved_config,
             "train_history": self.train_history,
             "val_history": self.val_history,
+            "training_target_counts": {key: value.tolist() for key, value in self.training_target_counts.items()},
         }
+        if self.training_target_counts:
+            enabled = {
+                "health_state": self.criterion.w_health * self.criterion.health_loss.ce_weight > 0,
+                "health_score": self.criterion.w_health * self.criterion.health_loss.mse_weight > 0,
+                "drivers": self.criterion.w_attribution * self.criterion.attribution_loss.bce_weight > 0,
+                "driver_strengths": self.criterion.w_attribution * self.criterion.attribution_loss.strength_weight > 0,
+                "trajectory": self.criterion.w_trajectory > 0 and (self.criterion.trajectory_loss.mse_weight > 0 or self.criterion.trajectory_loss.huber_weight > 0),
+            }
+            state["supervised_targets"] = {key: ((value > 0) & enabled[key]).tolist() for key, value in self.training_target_counts.items()}
         if self.scheduler is not None:
             state["scheduler_state_dict"] = self.scheduler.state_dict()
 
@@ -288,6 +303,7 @@ class ForestMindTrainer:
         self.best_val_score = state.get("best_val_score", 0.0)
         self.train_history = state.get("train_history", [])
         self.val_history = state.get("val_history", [])
+        self.training_target_counts = {key: torch.as_tensor(value) for key, value in state.get("training_target_counts", {}).items()}
         if self.scheduler and "scheduler_state_dict" in state:
             self.scheduler.load_state_dict(state["scheduler_state_dict"])
         logger.info(f"Loaded checkpoint from epoch {self.current_epoch}")
