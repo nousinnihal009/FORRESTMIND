@@ -149,7 +149,8 @@ class ForestMindTrainer:
             from forestmind.models.foundation.native import validate_native_sample
             for sample_index in range(batch["optical"].shape[0]):
                 validate_native_sample(self.config, {key: batch[key][sample_index]
-                                                     for key in ("optical", "observation_mask", "optical_mask", "sar_mask")})
+                                                     for key in ("optical", "observation_mask", "optical_mask", "sar_mask")
+                                                     if key in batch})
         inputs = {
             "optical": batch["optical"].to(self.device),
             "sar": batch["sar"].to(self.device),
