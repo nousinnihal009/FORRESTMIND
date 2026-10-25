@@ -1,10 +1,12 @@
 """Prithvi encoder integration using the official TerraTorch backbone registry.
 
-Pretrained mode requires terratorch, cached/downloadable weights, and inputs
+Pretrained initialization requires terratorch, cached/downloadable weights, and inputs
 normalized for that checkpoint. Loading failures are explicit. Set use_proxy=True
 only for an untrained CNN development baseline; it is not the pretrained model.
 Projection and task heads still require supervised training even with a pretrained
 encoder. Model memory requirements depend on the selected registry architecture.
+Offline inference sets pretrained=False and loads a complete local ForestMind
+state afterward; architecture construction by itself has random parameters.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import torch
 from torch import Tensor, nn
 
 from forestmind.models.foundation.base import FoundationModelBase
+from forestmind.models.foundation.native import validate_native_architecture
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +63,10 @@ class PrithviAdapter(FoundationModelBase):
         freeze_backbone: bool = True,
         in_channels: int = 14,
         use_proxy: bool = False,
+        pretrained: bool = True,
     ):
         super().__init__()
+        validate_native_architecture("prithvi", model_name, pretrained=pretrained, use_proxy=use_proxy)
         self._target_dim = target_dim
         self._model_name = model_name
         self._in_channels = in_channels
@@ -72,14 +77,15 @@ class PrithviAdapter(FoundationModelBase):
         if self._is_proxy:
             self._init_proxy(target_dim)
         else:
-            self._init_full(model_name, target_dim, freeze_backbone)
+            self._init_full(model_name, target_dim, freeze_backbone, pretrained)
 
-    def _init_full(self, model_name: str, target_dim: int, freeze_backbone: bool) -> None:
-        """Initialize with actual Prithvi pretrained weights."""
+    def _init_full(self, model_name: str, target_dim: int, freeze_backbone: bool,
+                   pretrained: bool) -> None:
+        """Build the native encoder; offline loading constructs its architecture only."""
         try:
             from terratorch.registry import BACKBONE_REGISTRY
             self.backbone = BACKBONE_REGISTRY.build(
-                model_name, pretrained=True, num_frames=1,
+                model_name, pretrained=pretrained, num_frames=1,
                 bands=["BLUE", "GREEN", "RED", "NIR_NARROW", "SWIR_1", "SWIR_2"],
             )
             self._native_dim = self.backbone.out_channels[-1]
@@ -92,7 +98,7 @@ class PrithviAdapter(FoundationModelBase):
 
         except Exception as e:
             raise RuntimeError(
-                f"Could not load pretrained Prithvi '{model_name}'. No proxy was substituted. "
+                f"Could not construct native Prithvi '{model_name}' (pretrained={pretrained}). No proxy was substituted. "
                 "Install terratorch with a compatible checkpoint, or explicitly set use_proxy=true "
                 "for an untrained development baseline."
             ) from e
@@ -194,6 +200,13 @@ class PrithviAdapter(FoundationModelBase):
 
         # Project to target dimension
         return self.projection(embedding)
+
+    def encode_modalities(self, optical: Tensor, sar: Tensor,
+                          optical_mask: Tensor, sar_mask: Tensor) -> Tensor:
+        """Native Prithvi must not silently ignore requested observed radar inputs."""
+        if not self._is_proxy and (not optical_mask.all() or sar_mask.any()):
+            raise ValueError("Native Prithvi supports optical-only observations; SAR input is unsupported")
+        return self.encode(optical)
 
     @property
     def embedding_dim(self) -> int:
