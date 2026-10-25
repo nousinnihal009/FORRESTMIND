@@ -1,0 +1,91 @@
+"""Presentation contracts for measured coverage and unsupported learned outputs."""
+import json
+from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def render(script):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is required to execute frontend rendering contracts")
+    paths = [str(ROOT / "forestmind" / "web" / name) for name in ("workflow.js", "model-runs.js")]
+    source = f"""
+const vm=require('vm'),fs=require('fs'),elements={{}};
+const context={{esc:s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'),
+numeric:v=>Number.isFinite(v)?String(v):'—',pct:v=>Number.isFinite(v)?String(v*100)+'%':'—',
+badge:s=>String(s),icon:()=>'',dateLabel:s=>String(s),
+$:key=>elements[key]??(elements[key]={{innerHTML:'',addEventListener:()=>{{}}}})}};
+vm.createContext(context);
+for(const path of {json.dumps(paths)})vm.runInContext(fs.readFileSync(path,'utf8'),context);
+process.stdout.write(JSON.stringify(vm.runInContext({json.dumps(script)},context)));
+"""
+    result = subprocess.run([node, "-e", source], capture_output=True, text=True,
+                            encoding="utf-8", check=True, timeout=30)
+    return json.loads(result.stdout)
+
+
+def test_missing_driver_has_no_zero_bar_and_observed_zero_remains_visible():
+    output = render("modelScoreRows([{name:'Missing <driver>',score:null},{name:'Measured zero',score:0}])")
+    assert "Missing &lt;driver&gt;" in output
+    assert "No trained output" in output and "<strong>Unavailable</strong>" in output
+    assert output.count('class="tiny-track"') == 1
+    assert output.count('width:0%') == 1
+    assert "<strong>0</strong>" in output
+
+
+def test_empty_class_scores_show_why_no_classification_exists():
+    output = render("modelScoreRows([])")
+    assert "Unavailable" in output and "no trained output" in output
+    assert "tiny-track" not in output
+
+
+def test_missing_trajectory_and_unestimated_spread_are_distinct_from_zero():
+    output = render("modelTrajectoryRows([{horizon_days:30,score:null,stddev:null},{horizon_days:365,score:0,stddev:null},{horizon_days:1825,score:10,stddev:0}])")
+    assert "Unavailable · no trained output" in output
+    assert "<td>Not estimated</td>" in output
+    assert "<td>365 days</td><td>0</td>" in output
+    assert "<td>1825 days</td><td>10</td><td>0</td>" in output
+
+
+def test_aligned_input_summary_retains_partial_feature_coverage_and_no_prediction():
+    output = render("""renderAlignedInputs({sequence:{selected_acquisitions:4,alignment:{
+      parameters:{climate_window_days:30,climate_lag_days:5},
+      radar:{max_age_days:12,matches:[{scene_id:'one'},{scene_id:null},{scene_id:null},{scene_id:null}]},
+      climate:{windows:[{mask:[false,false,false,false]},{mask:[true,true,true,true]},
+        {mask:[true,false,true,true]},{mask:[false,false,false,false]}]}}},
+      model:{available:false,reason:'No compatible trained model is registered.'}})""")
+    assert "1 / 4 image dates" in output
+    assert "1 / 4 image dates with all measurements" in output
+    assert "1 image date has only some measurements" in output
+    assert "30 days" in output and "5 days before" in output
+    assert "No model prediction was produced" in output
+    assert "historical availability has not been verified" in output
+
+
+def test_alignment_failures_are_escaped_and_not_claimed_as_available_inputs():
+    output = render("""renderAlignedInputs({sequence:{selected_acquisitions:2},radar:{available:true},
+      manifest:{alignment_errors:{radar:'Wrong <grid> or changed source'}}})""")
+    assert "Could not prepare" in output
+    assert "Wrong &lt;grid&gt; or changed source" in output
+    assert "Collect climate context" in output
+    assert "Some evidence could not be used" in output
+
+
+def test_missing_health_head_does_not_show_a_zero_score_or_empty_class_panel():
+    output = render("""(() => {showModelRun({id:'run',verification:'local_registered_execution',report:{
+      region_id:'region',observed_through:'2024-01-01',created_at:'2024-01-02',
+      checkpoint:{name:'model',backbone:'custom_vit',trained_on_synthetic:false,sha256:'hash',training_source:'independent'},
+      input:{name:'sequence',timesteps:3,synthetic:false,sha256:'hash'},
+      predictions:{health:{state:null,score:null,class_scores:[]},drivers:[],
+        trajectory:[{horizon_days:30,score:null,stddev:null}]},caveats:['No trained health output.']}});
+      return $('#model-run-detail').innerHTML;})()""")
+    assert "Condition class unavailable" in output
+    assert "No trained condition-score output" in output
+    assert "/ 100 model score" not in output
+    assert "<strong>Unavailable</strong>" in output
