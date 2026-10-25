@@ -211,7 +211,8 @@ def test_native_sample_validation_supports_tensor_batches():
         native.validate_native_sample(native_config("prithvi"), sample)
 
 
-def test_training_rejects_sar_before_moving_native_prithvi_inputs():
+@pytest.mark.parametrize("explicit_masks", [True, False])
+def test_training_rejects_sar_before_moving_native_prithvi_inputs(explicit_masks):
     from forestmind.training.trainer import ForestMindTrainer
 
     trainer = object.__new__(ForestMindTrainer)
@@ -220,6 +221,8 @@ def test_training_rejects_sar_before_moving_native_prithvi_inputs():
     sample["sar_mask"][0] = True
     batch = {key: torch.from_numpy(value).unsqueeze(0) for key, value in sample.items()
              if key in ("optical", "observation_mask", "optical_mask", "sar_mask")}
+    if not explicit_masks:
+        batch = {"optical": batch["optical"]}
     with pytest.raises(ValueError, match="silently discarded"):
         trainer._prepare_batch(batch)
 
