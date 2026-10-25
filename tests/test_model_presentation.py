@@ -68,13 +68,27 @@ def test_aligned_input_summary_retains_partial_feature_coverage_and_no_predictio
     assert "historical availability has not been verified" in output
 
 
-def test_alignment_failures_are_escaped_and_not_claimed_as_available_inputs():
-    output = render("""renderAlignedInputs({sequence:{selected_acquisitions:2},radar:{available:true},
-      manifest:{alignment_errors:{radar:'Wrong <grid> or changed source'}}})""")
+@pytest.mark.parametrize("error_location", ["top_level", "manifest"])
+def test_alignment_failures_are_escaped_and_not_claimed_as_available_inputs(error_location):
+    report = {"sequence": {"selected_acquisitions": 2}, "radar": {"available": True}}
+    errors = {"alignment_errors": {"radar": "Wrong <grid> or changed source"}}
+    report.update(errors if error_location == "top_level" else {"manifest": errors})
+    output = render(f"renderAlignedInputs({json.dumps(report)})")
     assert "Could not prepare" in output
     assert "Wrong &lt;grid&gt; or changed source" in output
     assert "Collect climate context" in output
     assert "Some evidence could not be used" in output
+    assert "Collected radar evidence could not be used with these images" in output
+
+
+def test_failed_image_preparation_shows_the_reason_without_implying_ready_inputs():
+    output = render("""renderAlignedInputs({sequence:{available:false,reason:'No cached <imagery>'},
+      model:{available:false,reason:'A prepared optical sequence is required.'}})""")
+    assert "Images could not be prepared for a model" in output
+    assert "No cached &lt;imagery&gt;" in output
+    assert "No model prediction was produced" in output
+    assert "A prepared optical sequence is required" in output
+    assert "0 image dates" not in output and "<table>" not in output
 
 
 def test_missing_health_head_does_not_show_a_zero_score_or_empty_class_panel():
