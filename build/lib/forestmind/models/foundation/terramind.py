@@ -5,6 +5,8 @@ normalized for that checkpoint. Loading failures are explicit. Set use_proxy=Tru
 only for an untrained CNN development baseline; it is not the pretrained model.
 Projection and task heads still require supervised training even with a pretrained
 encoder. Model memory requirements depend on the selected registry architecture.
+Offline inference sets pretrained=False, uses only raw observed modalities, and
+then strictly loads a complete local ForestMind state.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import torch
 from torch import Tensor, nn
 
 from forestmind.models.foundation.base import FoundationModelBase
+from forestmind.models.foundation.native import validate_native_architecture
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +54,24 @@ class TerraMindAdapter(FoundationModelBase):
         optical_channels: int = 12,
         sar_channels: int = 2,
         use_proxy: bool = False,
+        pretrained: bool = True,
+        sar_modality: str = "S1GRD",
     ):
         super().__init__()
+        validate_native_architecture("terramind", model_name, pretrained=pretrained, use_proxy=use_proxy)
+        if sar_modality not in {"S1GRD", "S1RTC"}:
+            raise ValueError("TerraMind sar_modality must be S1GRD or S1RTC")
+        if not use_proxy and (optical_channels != 12 or sar_channels != 2):
+            raise ValueError("Native TerraMind requires 12 canonical optical bands and VV/VH SAR")
         self._target_dim = target_dim
         self._model_name = model_name
         self._optical_channels = optical_channels
         self._sar_channels = sar_channels
+        self._sar_modality = sar_modality
 
         # Try to load actual checkpoint
         if not use_proxy:
-            loaded = self._try_load_checkpoint(model_name, target_dim, freeze_backbone)
+            loaded = self._try_load_checkpoint(model_name, target_dim, freeze_backbone, pretrained)
         else:
             loaded = False
 
@@ -68,17 +79,18 @@ class TerraMindAdapter(FoundationModelBase):
             self._init_proxy(target_dim, optical_channels, sar_channels)
         elif not loaded:
             raise RuntimeError(
-                f"Could not load pretrained TerraMind '{model_name}'. No proxy was substituted. "
+                f"Could not construct native TerraMind '{model_name}' (pretrained={pretrained}). No proxy was substituted. "
                 "Install terratorch and use a supported registry model, or explicitly set "
                 "use_proxy=true for an untrained development baseline."
             )
 
     def _try_load_checkpoint(
-        self, model_name: str, target_dim: int, freeze_backbone: bool
+        self, model_name: str, target_dim: int, freeze_backbone: bool, pretrained: bool
     ) -> bool:
         """Attempt to load actual TerraMind checkpoint.
 
-        Returns True only when pretrained weights were loaded successfully.
+        Returns True when the requested native construction succeeds. In offline
+        mode this is architecture only; the caller must strictly load full state.
         """
         try:
             from terratorch.registry import BACKBONE_REGISTRY
@@ -86,7 +98,7 @@ class TerraMindAdapter(FoundationModelBase):
             logger.info(f"Attempting to load TerraMind: {model_name}")
 
             self.backbone = BACKBONE_REGISTRY.build(
-                model_name, pretrained=True, modalities=["S2L2A", "S1GRD"],
+                model_name, pretrained=pretrained, modalities=["S2L2A", self._sar_modality],
                 merge_method="mean",
             )
 
@@ -249,7 +261,7 @@ class TerraMindAdapter(FoundationModelBase):
     def _encode_full(self, optical: Tensor, sar: Tensor) -> Tensor:
         """Full mode encoding with actual TerraMind backbone."""
         # Inputs must already use the checkpoint's per-modality normalization.
-        outputs = self.backbone({"S2L2A": optical, "S1GRD": sar})
+        outputs = self.backbone({"S2L2A": optical, self._sar_modality: sar})
         if not isinstance(outputs, (list, tuple)) or outputs[-1].ndim != 3:
             raise RuntimeError("Unexpected TerraTorch TerraMind output: expected layer token tensors")
         # TerraMind has no CLS token; pool the final layer's spatial tokens.
@@ -269,7 +281,7 @@ class TerraMindAdapter(FoundationModelBase):
             if has_optical:
                 modalities["S2L2A"] = optical[selected]
             if has_sar:
-                modalities["S1GRD"] = sar[selected]
+                modalities[self._sar_modality] = sar[selected]
             outputs = self.backbone(modalities)
             if not isinstance(outputs, (list, tuple)) or outputs[-1].ndim != 3:
                 raise RuntimeError("Unexpected TerraTorch TerraMind output: expected layer token tensors")
