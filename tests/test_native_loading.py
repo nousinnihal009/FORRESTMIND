@@ -117,6 +117,7 @@ def test_terramind_rtc_is_never_relabelled_as_grd(fake_native):
     (lambda c: c["foundation"]["native_runtime"].update(terratorch="999"), "audited terratorch"),
     (lambda c: c["foundation"]["native_runtime"].update(torch="old"), "runtime differs"),
     (lambda c: c["foundation"]["terramind"].update(model_name="terramind_v1_tiny_tim"), "Unsupported native"),
+    (lambda c: c["foundation"]["terramind"].update(model_name=["terramind_v1_tiny"]), "Unsupported native"),
     (lambda c: c["foundation"]["terramind"].update(ckpt_path="https://example.invalid/weights"), "custom constructor"),
     (lambda c: c["foundation"]["terramind"].update(pretrained="false"), "explicit boolean"),
     (lambda c: c["foundation"]["terramind"].update(freeze=1), "explicit boolean"),
@@ -184,3 +185,56 @@ def test_missing_runtime_is_actionable(monkeypatch):
     monkeypatch.setattr(native.metadata, "version", missing)
     with pytest.raises(ValueError, match="requires installed terratorch"):
         native.capture_native_runtime()
+
+
+def test_evaluation_rejects_observed_sar_before_native_prithvi_forward(tmp_path, fake_native, monkeypatch):
+    from forestmind.training.evaluation import evaluate_checkpoint
+
+    config = native_config("prithvi")
+    config["device"] = "cpu"
+    config["data"].update(patch_size=16, time_steps=2, num_train_samples=1,
+                          num_val_samples=1, num_test_samples=1, batch_size=1, num_workers=0)
+    model = ForestMindModel(native.offline_native_config(config))
+    checkpoint = tmp_path / "native-evaluation.pt"
+    torch.save({"config": config, "model_state_dict": model.state_dict()}, checkpoint)
+    monkeypatch.setattr(ForestMindModel, "forward", lambda *args, **kwargs: pytest.fail("Input contract must fail before forward"))
+    with pytest.raises(ValueError, match="Prithvi is optical-only"):
+        evaluate_checkpoint(checkpoint)
+
+
+def test_native_sample_validation_supports_tensor_batches():
+    sample = {key: torch.from_numpy(value) for key, value in sample_sequence().items()
+              if key in ("optical", "observation_mask", "optical_mask", "sar_mask")}
+    native.validate_native_sample(native_config("prithvi"), sample)
+    sample["sar_mask"][0] = True
+    with pytest.raises(ValueError, match="silently discarded"):
+        native.validate_native_sample(native_config("prithvi"), sample)
+
+
+def test_training_rejects_sar_before_moving_native_prithvi_inputs():
+    from forestmind.training.trainer import ForestMindTrainer
+
+    trainer = object.__new__(ForestMindTrainer)
+    trainer.config = native_config("prithvi")
+    sample = sample_sequence()
+    sample["sar_mask"][0] = True
+    batch = {key: torch.from_numpy(value).unsqueeze(0) for key, value in sample.items()
+             if key in ("optical", "observation_mask", "optical_mask", "sar_mask")}
+    with pytest.raises(ValueError, match="silently discarded"):
+        trainer._prepare_batch(batch)
+
+
+def test_verification_network_guard_blocks_connections_and_restores_socket():
+    import importlib.util
+    from pathlib import Path
+    import socket
+
+    spec = importlib.util.spec_from_file_location("verify_native_runtime", Path(__file__).resolve().parents[1] / "scripts" / "verify_native_runtime.py")
+    diagnostic = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(diagnostic)
+    original = socket.create_connection
+    with diagnostic.deny_network() as attempts:
+        with pytest.raises(RuntimeError, match="Network access is disabled"):
+            socket.create_connection(("example.invalid", 443))
+        assert len(attempts) == 1
+    assert socket.create_connection is original
