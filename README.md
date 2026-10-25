@@ -2,7 +2,7 @@
 
 **Forest observation, evidence, and early-warning research in one local workspace.**
 
-ForestMind v0.6 connects worldwide place search, confirmed small-area selection, real satellite acquisition and continuing monitoring in one local application. Inspect dated observations, spatial change, radar and climate context, classified-cover topology, candidate disturbance evidence, exploratory forecasts, alerts and hypothetical scenarios. Compatible, operator-registered real-trained models can run automatically for the selected area; supervised model development remains a research workflow.
+ForestMind v0.7 connects worldwide place search, confirmed small-area selection, real satellite acquisition and continuing monitoring in one local application. It now prepares dated optical, radar and climate inputs, converts independently supplied references into protected training datasets, and supports offline loading of complete native model checkpoints. Inspect measured change, context, exploratory forecasts, alerts and hypothetical scenarios. No independently validated real-trained model is bundled.
 
 The included Amazon regions are **synthetic demonstrations**. The dashboard's condition index, forecast envelopes and scenario coefficients are transparent, uncalibrated baselines. They do not establish ecological tipping points, causal drivers or intervention effectiveness. Imported measurements retain their source and an unverified-provenance label.
 
@@ -45,7 +45,8 @@ Limits include a 25 km² maximum rectangular AOI, 60 months per acquisition requ
 | --- | --- |
 | Worldwide entry | Explicit attributed place search, interactive map, drawing/coordinates and confirmed bounded area |
 | Connected jobs | Durable acquisition, bounded retries, cancellation, restart recovery, resume and transactional saved-area updates |
-| Multimodal context | Actual orbit-matched Sentinel-1 RTC, ERA5 reanalysis with paired precipitation–reference-ET0 diagnostics and dated ESA WorldCover, separate from trained model inputs |
+| Multimodal inputs | Past-only, grid-matched Sentinel-1 RTC and trailing ERA5 features aligned to optical dates, separate pixel/feature masks, unit and coverage checks, and registered model compatibility |
+| Reference datasets | Independent label manifests, spatial buffers and temporal embargoes, train-only normalization, partial supervision and artifact integrity checks |
 | Spatial evidence | Computable common-valid spectral change; classified-cover patches, internal edges, complete-boundary compactness and centroid connectivity |
 | Continuing monitoring | Skip existing months, local schedules, freshness diagnostics, configurable dated alert episodes and review history |
 | Monitoring | Four reproducible demo regions; strict JSON import for dated monthly measurements |
@@ -60,7 +61,7 @@ Limits include a 25 km² maximum rectangular AOI, 60 months per acquisition requ
 | Export | Region JSON, observation CSV, scenario JSON and backtesting JSON with provenance |
 | Satellite pipeline | Sentinel-2/Sentinel-1/Landsat adapters, common-grid caches and optical-cache import preparation |
 | Repeatable acquisition | Frozen monthly Sentinel-2 candidates, bounded downloads, resumable progress and accepted-only exports |
-| Neural research | Custom ViT, explicit proxy/native pretrained modes, modality masks, temporal model and task heads |
+| Neural research | Custom ViT, pinned offline Prithvi/TerraMind checkpoint loading, measured-context fusion, temporal model and task heads; outputs without training support withheld |
 | Model runs | Validated, persisted inference reports with checkpoint/input hashes, class/driver scores and configured horizons |
 | Reproducible evaluation | JSON metrics, raw predictions and targets, split identity, artifact/code hashes and per-horizon errors |
 | Real-reference experiments | Frozen targets/datasets, buffered holdouts, identical-example persistence/seasonal/regularized/random-forest/boosted baselines, calibration and event metrics; independent real reference data must be supplied |
@@ -158,7 +159,15 @@ python scripts/demo_prediction.py
 
 The quick test uses a tiny synthetic dataset and creates a new checkpoint. The no-checkpoint demo uses random weights and says so. Neither synthetic training nor a successful forward pass establishes ecological performance.
 
-For supervised disk data, set `data.source` to a directory containing separate `train/`, `val/` and `test/` subdirectories of labeled NPZ sequences. Real satellite caches contain observations, not health/driver/future labels. Attach justified independent labels before supervised training. Duplicate location IDs or exact bounding boxes across splits are rejected when metadata exists; proper spatial buffers and temporal embargoes remain your responsibility.
+Real satellite caches contain observations, not health/driver/future labels. Use the [training data guide](docs/TRAINING_DATA.md) and its empty reference templates to attach independent, dated labels with source/version and uncertainty. The converter audits spatial buffers, temporal embargoes, input cutoffs and source hashes, then writes protected `train/`, `val/`, optional `calibration/` and `test/` partitions, training-only normalization, an audit report and a runnable configuration:
+
+```powershell
+python scripts/prepare_training_data.py --manifest data/my-training-manifest.json --check
+python scripts/prepare_training_data.py --manifest data/my-training-manifest.json --output data/my-training-dataset
+python scripts/train.py --config data/my-training-dataset/training-config.yaml
+```
+
+The paths above are placeholders for your references. Missing targets remain masked: an unknown driver is not a negative example, and a model output without training support is withheld. Partial supervision can cover any supported head without inventing the other labels. The trajectory head predicts condition on a declared 0–1 scale; canopy loss is a separate event target for the conventional reference experiment. Declaring a source independent does not establish its authenticity. Legacy manually prepared disk datasets remain supported, but lack the converter's stronger split and integrity audit.
 
 ### Pretrained encoders
 
@@ -166,11 +175,11 @@ For supervised disk data, set `data.source` to a directory containing separate `
 python -m pip install -e ".[foundation]"
 ```
 
-Choose `foundation.name: prithvi` or `terramind`. Native adapters use TerraTorch and fail clearly if actual pretrained loading fails. `use_proxy: true` explicitly selects an **untrained development encoder**; a proxy is never silently substituted.
+Choose `foundation.name: prithvi` or `terramind`. Offline prediction/evaluation constructs a pinned native architecture with `pretrained=False`, then requires a complete, finite local ForestMind state with exact keys, shapes and dtypes. Missing weights or an incompatible runtime fail clearly. `use_proxy: true` explicitly selects an **untrained development encoder**; a proxy is never silently substituted and is refused by normal connected analysis.
 
 Native training/evaluation requires explicit `data.normalization` optical/SAR means and positive standard deviations. Match the checkpoint's documented units, band order, normalization and resolution. TerraMind uses native modality keys; Prithvi maps narrow NIR to Sentinel-2 B8A. Landsat does not measure Sentinel-2 red-edge/B8A bands, so unavailable channels are not fabricated. Verify compatibility before using a harmonized stack.
 
-Real pretrained weight downloads, GPU inference and independently labeled benchmarks require validation in the target environment. Older architecture checkpoints may require retraining.
+Actual Prithvi and TerraMind CPU construction, strict checkpoint roundtrip and forward execution were verified with random temporary states and network calls blocked. This verifies execution, not pretrained benefit or ecological accuracy. See the [native model audit](docs/NATIVE_MODEL_AUDIT.md) for exact versions, supported variants and evidence. Licensed pretrained weights, real-trained heads, GPU execution and independently labeled benchmarks still need their own validation. Older architecture checkpoints may require retraining.
 
 ### Connect a trained checkpoint to the dashboard
 
@@ -182,7 +191,7 @@ First prepare an optical sequence from current Sentinel-2 caches:
 python scripts/prepare_sequence.py --cache-dir data/real --region=-55.10,-3.50,-55.08,-3.48 --through 2025-12-31 --time-steps 12 --output data/my-sequence.npz
 ```
 
-This selects up to twelve actual acquisitions at or before the cutoff; it does not create monthly composites or fill missing dates. Poor-coverage acquisitions are skipped and listed. The NPZ contains raw reflectance, exact acquisition timestamps, masks, and no labels. SAR is absent and masked. A provenance sidecar records source hashes, coverage and the last actual acquisition date. Match the checkpoint's sampling frequency, grid, bands and normalization before using the sequence.
+This selects up to twelve actual acquisitions at or before the cutoff; it does not create monthly composites or fill missing dates. Poor-coverage acquisitions are skipped and listed. The NPZ contains raw reflectance, exact acquisition timestamps, masks, and no labels. Without optional context, SAR is absent and masked. The [multimodal input guide](docs/MULTIMODAL_INPUTS.md) covers radar/climate arguments and exact matching rules. Connected analysis applies the same alignment to saved valid context and reports missing coverage. ERA5 remains retrospective reanalysis, without proof it was available at a historical forecast time. A provenance sidecar records sources, units, matching policy and dates. A registered model receives only the modalities and coverage its contract accepts.
 
 With a compatible trained checkpoint, use the region ID shown in **Model runs** and the last actual acquisition date printed by the preparation command:
 
@@ -192,13 +201,13 @@ python scripts/predict.py --checkpoint checkpoints/my-study/best_model.pt --inpu
 
 The study checkpoint and date above are placeholders for your own artifacts. Real inputs require all four normalization arrays (`optical_mean`, `optical_std`, `sar_mean`, `sar_std`) in the checkpoint's `data.normalization`. Synthetic inputs require `--synthetic-input`; embedded metadata must agree. Missing masks, inconsistent dates, unsafe object arrays, unsupported dimensions and nonfinite values are rejected. No synthetic imagery is generated by inference.
 
-The offline prediction command currently supports local `custom_vit` and explicitly configured proxy checkpoints. It rejects native TerraMind/Prithvi builders because they currently download weights during construction. Native pretrained inference still needs a verified offline loading path; proxy success is not evidence of pretrained-model performance.
+The offline prediction command supports local `custom_vit`, explicit development proxies and audited native Prithvi/TerraMind configurations with complete local checkpoints and a matching pinned runtime. Native support does not relax the connected workflow's independent evaluation, geography, units, input-quality or real-training requirements.
 
-Reports retain all five health-class scores, all eight driver scores and the checkpoint's forecast horizons. Scores remain uncalibrated. Forecast standard deviations are model outputs, not validated confidence intervals. A report hash identifies an artifact; it does not authenticate a source or establish ecological accuracy.
+Reports retain the canonical health/driver names and configured horizons. Unsupported outputs are null; an unsupported health-class head has no class scores. Supported scores remain uncalibrated. Forecast standard deviations are model outputs, not validated confidence intervals. A report hash identifies an artifact; it does not authenticate a source or establish ecological accuracy.
 
 ### Evaluation artifacts
 
-`evaluate.py --output` saves metrics together with every example's predictions and labels, checkpoint/effective-config hashes, input and target hashes, source manifests, implementation hashes, runtime versions, configured horizon errors, and sample-weighted losses. The report distinguishes development (`val`) and held-out (`test`) partitions. A config override cannot silently relabel trained forecast horizons. Common credential fields and signed URL queries are redacted from the shareable config record.
+`evaluate.py --output` saves metrics together with every example's predictions, labels and target masks, checkpoint/effective-config hashes, input and target hashes, source manifests, implementation hashes, runtime versions, configured horizon errors, and losses weighted by observed labels. Unobserved metrics are null with zero observed counts. The report distinguishes development (`val`) and held-out (`test`) partitions. A config override cannot silently relabel trained forecast horizons. Common credential fields and signed URL queries are redacted from the shareable config record.
 
 This output supports subsequent comparisons and calibration experiments; the command does not fit a calibrator or establish model validity. Synthetic evaluation is explicitly identified as a software check.
 
