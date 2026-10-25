@@ -14,6 +14,9 @@ function collectionErrors(report) {
 function renderAlignedInputs(report) {
   const sequence=report.sequence || report.sections?.sequence;
   if(!sequence)return '';
+  const model=report.model || report.sections?.model;
+  const modelStatus=model?`<p class="form-help"><strong>${model.available?'A model result was saved.':'No model prediction was produced.'}</strong> ${esc(model.reason || '')}</p>`:'';
+  if(sequence.available===false)return `<section class="spatial-evidence"><h3>Measured inputs available to a model</h3><p class="observations-empty"><strong>Images could not be prepared for a model.</strong> ${esc(sequence.reason || 'No usable image sequence is available for this area.')}</p>${modelStatus}</section>`;
   const alignment=sequence.alignment || {},parameters=alignment.parameters || {};
   const dates=Number.isInteger(sequence.selected_acquisitions)?sequence.selected_acquisitions:(sequence.sources || []).length;
   const radar=alignment.radar,climate=alignment.climate;
@@ -21,15 +24,13 @@ function renderAlignedInputs(report) {
   const windows=climate?.windows || [];
   const climateDates=windows.filter(row=>Array.isArray(row.mask)&&row.mask.length>0&&row.mask.every(Boolean)).length;
   const partialDates=windows.filter(row=>Array.isArray(row.mask)&&row.mask.some(Boolean)&&!row.mask.every(Boolean)).length;
-  const errors=report.manifest?.alignment_errors || {};
+  const errors={...(report.manifest?.alignment_errors || {}),...(report.alignment_errors || {})};
   const errorDetails=Object.entries(errors).filter(([,reason])=>reason).map(([name,reason])=>`<p><strong>${esc(name==='radar'?'Radar':name==='climate'?'Climate':name)}:</strong> ${esc(reason)}</p>`).join('');
   const radarStatus=errors.radar?'Could not prepare':radar?`${radarDates} / ${dates} image dates`:'No matched inputs in this saved record';
   const climateStatus=errors.climate?'Could not prepare':climate?`${climateDates} / ${dates} image dates with all measurements`:'No matched inputs in this saved record';
-  const radarReason=radar?`Radar must be from the same time or earlier, within ${numeric(radar.max_age_days)} days. ${dates-radarDates} image dates have no usable match.`:report.radar?.available?'Radar evidence has been collected. Run selected-area analysis to check matching dates and coverage.':'Collect radar context to look for compatible observations.';
-  const climateReason=climate?`${partialDates?partialDates+' image '+(partialDates===1?'date has':'dates have')+' only some measurements. ':''}Temperature, rainfall, reference evaporation and surface soil moisture retain separate coverage checks.`:report.climate?.available?'Climate evidence has been collected. Run selected-area analysis to check matching dates and coverage.':'Collect climate context to prepare dated measurements.';
+  const radarReason=errors.radar?'Collected radar evidence could not be used with these images. The reason is shown below.':radar?`Radar must be from the same time or earlier, within ${numeric(radar.max_age_days)} days. ${dates-radarDates} image dates have no usable match.`:report.radar?.available?'Radar evidence has been collected. Run selected-area analysis to check matching dates and coverage.':'Collect radar context to look for compatible observations.';
+  const climateReason=errors.climate?'Collected climate evidence could not be used with these images. The reason is shown below.':climate?`${partialDates?partialDates+' image '+(partialDates===1?'date has':'dates have')+' only some measurements. ':''}Temperature, rainfall, reference evaporation and surface soil moisture retain separate coverage checks.`:report.climate?.available?'Climate evidence has been collected. Run selected-area analysis to check matching dates and coverage.':'Collect climate context to prepare dated measurements.';
   const timing=climate?`Climate windows cover ${numeric(parameters.climate_window_days)} days and end ${numeric(parameters.climate_lag_days)} days before each image. Reanalysis can be revised later; historical availability has not been verified.`:'';
-  const model=report.model || report.sections?.model;
-  const modelStatus=model?`<p class="form-help"><strong>${model.available?'A model result was saved.':'No model prediction was produced.'}</strong> ${esc(model.reason || '')}</p>`:'';
   return `<section class="spatial-evidence"><h3>Measured inputs available to a model</h3><p class="form-help">This summary shows which measurements can accompany each optical image. Missing dates remain missing. A compatible trained model and sufficient coverage are required before prediction.</p><div class="table-scroll"><table><thead><tr><th>Input</th><th>Coverage</th><th>What is available</th></tr></thead><tbody><tr><td>Optical imagery</td><td>${numeric(dates)} image dates</td><td>Dated satellite images with valid-pixel masks.</td></tr><tr><td>Radar</td><td>${esc(radarStatus)}</td><td>${esc(radarReason)}</td></tr><tr><td>Climate</td><td>${esc(climateStatus)}</td><td>${esc(climateReason)}</td></tr></tbody></table></div>${timing?`<p class="form-help">${esc(timing)}</p>`:''}${errorDetails?`<div class="collection-errors" role="status"><strong>Some evidence could not be used as model input</strong>${errorDetails}</div>`:''}${modelStatus}</section>`;
 }
 function renderSpatialEvidence(data) {
