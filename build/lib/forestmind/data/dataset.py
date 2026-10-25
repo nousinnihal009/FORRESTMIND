@@ -13,6 +13,8 @@ format regardless of the underlying data source.
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -28,6 +30,67 @@ logger = logging.getLogger(__name__)
 
 # Sentinel source identifiers that trigger real-data adapters
 REAL_DATA_SOURCES = {"sentinel2", "sentinel1", "landsat", "multi"}
+
+
+def audit_prepared_dataset(root: Path, config: dict):
+    """Verify the frozen converter report, statistics and all split artifacts."""
+    expected = config.get("dataset_manifest_sha256")
+    if expected is None:
+        return  # Legacy datasets still require the explicit split audit below.
+    report_path = root / "dataset-report.json"
+    def sha(path):
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+    if not report_path.is_file() or sha(report_path) != config.get("dataset_report_sha256"):
+        raise ValueError("Prepared dataset report is missing or differs from its configured hash")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    if (report.get("schema_version") != 1 or report.get("kind") != "forestmind_training_dataset"
+            or report.get("synthetic") is not False or report.get("audit", {}).get("passed") is not True):
+        raise ValueError("Prepared dataset report must describe an audited real reference dataset")
+    if report.get("manifest_sha256") != expected:
+        raise ValueError("Prepared reference manifest differs from the training configuration")
+    manifest_path = root / "manifest.json"
+    if not manifest_path.is_file():
+        raise ValueError("Prepared reference manifest is missing")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_hash = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    if manifest_hash != expected:
+        raise ValueError("Prepared reference manifest changed after its audit")
+    for key in ("normalization", "target_spec", "supervised_targets"):
+        if report.get(key) != config.get(key):
+            raise ValueError(f"Prepared dataset {key} differs from its audited configuration")
+    contract = report.get("input_contract")
+    if not isinstance(contract, dict) or set(contract) != {
+        "time_steps", "grid_shape", "horizon_days", "trajectory_target_scale", "optical_units",
+        "sar_units", "climate_feature_names", "climate_feature_units",
+    }:
+        raise ValueError("Prepared dataset lacks a complete input/horizon/unit contract")
+    for key, value in contract.items():
+        if config.get(key) != value:
+            raise ValueError(f"Prepared dataset {key} differs from its audited input/horizon/unit contract")
+    root = root.resolve()
+    expected_paths = set()
+    counts = {name: 0 for name in ("train", "val", "calibration", "test")}
+    for record in report.get("artifacts", []):
+        path = (root / record["path"]).resolve()
+        if (not path.is_relative_to(root) or path.parent.name not in ("train", "val", "calibration", "test")
+                or path.parent.parent != root or path.suffix != ".npz" or path in expected_paths):
+            raise ValueError("Prepared dataset artifact path is invalid or duplicated")
+        if record.get("split") != path.parent.name or record.get("id") != path.stem:
+            raise ValueError("Prepared dataset artifact split/identity differs from its path")
+        if not path.is_file() or sha(path) != record.get("sha256"):
+            raise ValueError("Prepared dataset sample changed after its reference/split audit")
+        expected_paths.add(path)
+        counts[path.parent.name] += 1
+    actual_paths = {path.resolve() for split in ("train", "val", "calibration", "test")
+                    for path in (root / split).glob("*.npz")}
+    if not expected_paths or actual_paths != expected_paths:
+        raise ValueError("Prepared dataset contains missing or unaudited additional samples")
+    if counts != report.get("audit", {}).get("counts"):
+        raise ValueError("Prepared dataset split counts differ from their audited report")
 
 
 class ForestMindDataset(Dataset):
@@ -379,6 +442,7 @@ def create_dataloaders(
             "files in geographically independent train/val/test directories first."
         )
     else:
+        audit_prepared_dataset(source_p, data_cfg)
         split_paths = [source_p / split for split in ("train", "val", "test")]
         if not all(path.is_dir() for path in split_paths):
             raise ValueError(
