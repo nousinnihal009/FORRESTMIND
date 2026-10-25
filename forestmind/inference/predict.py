@@ -253,7 +253,7 @@ def predict_checkpoint(checkpoint_path: str | Path, input_path: str | Path, *,
         caveats.append("Input day offsets are anchored to the user-declared observed-through date; absolute acquisition dates were not supplied.")
     if not info["sar_timesteps"]:
         caveats.append("No SAR observations were supplied; the SAR stream is explicitly masked as unavailable.")
-    support = data_config.get("supervised_targets")
+    support = checkpoint.get("supervised_targets", data_config.get("supervised_targets"))
     if support is not None:
         expected = {"health_state": None, "health_score": None, "drivers": 8,
                     "driver_strengths": 8, "trajectory": len(horizons)}
