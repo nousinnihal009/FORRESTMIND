@@ -239,7 +239,8 @@ def test_cli_check_has_no_output_side_effects(tmp_path):
     assert {p.name for p in tmp_path.iterdir()} == before
 
 
-def test_prepared_partial_targets_train_and_evaluate_end_to_end(tmp_path):
+@pytest.mark.parametrize("climate,disable_attribution", [(False, False), (True, False), (True, True)])
+def test_prepared_partial_targets_train_and_evaluate_end_to_end(tmp_path, climate, disable_attribution):
     """One-epoch plumbing smoke on controlled fixtures, not a real trained model."""
     import torch
     from forestmind.data.dataset import create_dataloaders
@@ -247,11 +248,13 @@ def test_prepared_partial_targets_train_and_evaluate_end_to_end(tmp_path):
     from forestmind.training.trainer import ForestMindTrainer
     from forestmind.training.evaluation import evaluate_checkpoint
 
-    path, _ = study(tmp_path, climate=True, calibration=True)
+    path, _ = study(tmp_path, climate=climate, calibration=True)
     output = tmp_path / "prepared"
     prepare_training_dataset(path, output)
     config = yaml.safe_load((output / "training-config.yaml").read_text())
     config["training"].update(epochs=1, save_every=1)
+    if disable_attribution:
+        config["training"]["loss_weights"] = {"task_attribution": 0.0}
     assert config["data"]["supervised_targets"]["health_score"] is False
     assert config["data"]["supervised_targets"]["drivers"] == [False] * 5 + [True, False, False]
     assert config["data"]["supervised_targets"]["trajectory"] == [True, False]
@@ -265,6 +268,16 @@ def test_prepared_partial_targets_train_and_evaluate_end_to_end(tmp_path):
         assert np.isfinite(result["best_val_score"])
         checkpoint = output / "checkpoints/best_model.pt"
         assert checkpoint.is_file()
+        saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
+        assert saved["training_target_counts"] == {
+            "health_state": 1, "health_score": 0,
+            "drivers": [0, 0, 0, 0, 0, 1, 0, 0],
+            "driver_strengths": [0] * 8, "trajectory": [1, 0],
+        }
+        expected_support = deepcopy(config["data"]["supervised_targets"])
+        if disable_attribution:
+            expected_support["drivers"] = [False] * 8
+        assert saved["supervised_targets"] == expected_support
         report = evaluate_checkpoint(checkpoint, split="test")
         assert report["counts"]["samples"] == 1
         assert report["per_horizon"][0]["n"] == 1
@@ -336,3 +349,21 @@ def test_grid_that_would_drop_encoder_border_pixels_is_rejected(tmp_path):
     save(path, document)
     with pytest.raises(ValueError, match="border pixels cannot be dropped"):
         audit_training_manifest(path)
+
+
+@pytest.mark.parametrize("shape,turns", [((16, 32), 2), ((16, 16), 1)])
+def test_spatial_augmentation_preserves_rectangular_batch_shape_and_masks(monkeypatch, shape, turns):
+    from forestmind.data.transforms import SpatialFlipRotate
+
+    pixels = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
+    sample = {"optical": np.broadcast_to(pixels, (2, 12, *shape)).copy(),
+              "sar": np.broadcast_to(pixels + 100, (2, 2, *shape)).copy(),
+              "quality_mask": np.broadcast_to(pixels % 3 == 0, (2, *shape)).copy(),
+              "sar_quality_mask": np.broadcast_to(pixels % 7 == 0, (2, *shape)).copy()}
+    original = deepcopy(sample)
+    monkeypatch.setattr(np.random, "random", lambda: 0.)
+    monkeypatch.setattr(np.random, "randint", lambda low, high: 1)
+    result = SpatialFlipRotate()(sample)
+    for key in original:
+        assert result[key].shape == original[key].shape
+        np.testing.assert_array_equal(result[key], np.rot90(original[key], turns, axes=(-2, -1)))
