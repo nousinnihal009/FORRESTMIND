@@ -105,6 +105,8 @@ def test_converter_preserves_unknown_targets_and_pads_only_missing_steps(tmp_pat
     assert Path(config["data"]["source"]) == output
     assert config["data"]["dataset_report_sha256"] == hashlib.sha256((output / "dataset-report.json").read_bytes()).hexdigest()
     assert report["supervised_targets"] == config["data"]["supervised_targets"]
+    assert config["foundation"]["custom_vit"]["img_size"] == 16
+    assert report["input_contract"]["horizon_days"] == [30, 365]
 
 
 def test_statistics_use_training_observed_pixels_and_context_only(tmp_path):
@@ -126,6 +128,8 @@ def test_statistics_use_training_observed_pixels_and_context_only(tmp_path):
     assert report["normalization_evidence"]["climate"]["observed_training_count"] == [1, 2, 2, 2]
     config = yaml.safe_load((tmp_path / "prepared/training-config.yaml").read_text())
     assert config["fusion"]["climate_dim"] == 4
+    with np.load(tmp_path / "prepared/train/train-patch.npz") as prepared:
+        assert prepared["climate_context"][0, 0] == 0
 
 
 @pytest.mark.parametrize("change,match", [
@@ -274,3 +278,61 @@ def test_prepared_partial_targets_train_and_evaluate_end_to_end(tmp_path):
         json.dumps(report, allow_nan=False)
     finally:
         torch.set_num_threads(previous)
+
+
+@pytest.mark.parametrize("mutation,match", [
+    ("sample", "sample changed"),
+    ("manifest", "manifest changed"),
+    ("report", "configured hash"),
+    ("additional", "unaudited additional"),
+    ("normalization", "normalization differs"),
+    ("supervision", "supervised_targets differs"),
+    ("horizons", "horizon_days differs"),
+    ("units", "sar_units differs"),
+    ("scale", "trajectory_target_scale differs"),
+    ("climate", "climate_feature_names differs"),
+])
+def test_prepared_dataset_loader_rejects_mutated_evidence_or_contract(tmp_path, mutation, match):
+    from forestmind.data.dataset import create_dataloaders
+
+    path, _ = study(tmp_path, climate=True, calibration=True)
+    output = tmp_path / "prepared"
+    prepare_training_dataset(path, output)
+    config = yaml.safe_load((output / "training-config.yaml").read_text())
+    if mutation == "sample":
+        # Calibration files are also audited even though the trainer never reads them.
+        target = output / "calibration/calibration-patch.npz"
+        with target.open("ab") as stream:
+            stream.write(b"altered")
+    elif mutation == "manifest":
+        target = output / "manifest.json"
+        document = json.loads(target.read_text())
+        document["examples"][0]["labels"]["health_state"]["value"] = "healthy"
+        target.write_text(json.dumps(document))
+    elif mutation == "report":
+        with (output / "dataset-report.json").open("a") as stream:
+            stream.write(" ")
+    elif mutation == "additional":
+        (output / "test/extra.npz").write_bytes((output / "test/test-patch.npz").read_bytes())
+    elif mutation == "normalization":
+        config["data"]["normalization"]["optical_mean"][0] += .01
+    elif mutation == "supervision":
+        config["data"]["supervised_targets"]["health_score"] = True
+    elif mutation == "horizons":
+        config["heads"]["trajectory"]["horizons"] = [60, 365]
+    elif mutation == "units":
+        config["data"]["sar_units"] = "gamma0_db"
+    elif mutation == "scale":
+        config["data"]["trajectory_target_scale"] = "percent"
+    elif mutation == "climate":
+        config["data"]["climate_feature_names"] = list(reversed(CLIMATE_NAMES))
+    with pytest.raises(ValueError, match=match):
+        create_dataloaders(config)
+
+
+def test_grid_that_would_drop_encoder_border_pixels_is_rejected(tmp_path):
+    path, document = study(tmp_path)
+    document["grid_shape"] = [17, 16]
+    save(path, document)
+    with pytest.raises(ValueError, match="border pixels cannot be dropped"):
+        audit_training_manifest(path)
