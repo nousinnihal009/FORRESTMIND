@@ -77,7 +77,8 @@ class CrossAttentionFusion(nn.Module):
             for _ in range(num_layers)
         ])
 
-    def forward(self, primary: Tensor, contexts: list[Tensor] | None = None) -> Tensor:
+    def forward(self, primary: Tensor, contexts: list[Tensor] | None = None,
+                context_mask: Tensor | None = None) -> Tensor:
         """Fuse primary embedding with context streams.
         
         Args:
@@ -102,22 +103,31 @@ class CrossAttentionFusion(nn.Module):
 
         # Stack contexts as key/value sequence: (B, num_contexts, D)
         context_seq = torch.stack(projected_contexts, dim=1)
+        present = (torch.ones(context_seq.shape[:2], dtype=torch.bool, device=primary.device)
+                   if context_mask is None else context_mask)
+        usable = present.any(1)
+        if not usable.any():
+            return primary
+        context_seq = context_seq[usable]
+        present = present[usable]
 
         # Primary as query: (B, 1, D)
-        x = primary.unsqueeze(1)
+        x = primary[usable].unsqueeze(1)
 
         # Cross-attention layers
         for layer in self.cross_attn_layers:
             # Cross-attend to context
             q = layer["norm_q"](x)
             kv = layer["norm_kv"](context_seq)
-            attn_out, _ = layer["cross_attn"](q, kv, kv)
+            attn_out, _ = layer["cross_attn"](q, kv, kv, key_padding_mask=~present)
             x = x + attn_out
 
             # Feedforward
             x = x + layer["feedforward"](layer["norm_ff"](x))
 
-        return x.squeeze(1)  # (B, D)
+        result = primary.clone()
+        result[usable] = x.squeeze(1)
+        return result
 
 
 class GatedFusion(nn.Module):
@@ -152,7 +162,8 @@ class GatedFusion(nn.Module):
         ])
         self.output_norm = nn.LayerNorm(embed_dim)
 
-    def forward(self, primary: Tensor, contexts: list[Tensor] | None = None) -> Tensor:
+    def forward(self, primary: Tensor, contexts: list[Tensor] | None = None,
+                context_mask: Tensor | None = None) -> Tensor:
         if contexts is None or len(contexts) == 0:
             return primary
 
@@ -161,9 +172,13 @@ class GatedFusion(nn.Module):
             if i < len(self.gates):
                 gate = self.gates[i](torch.cat([x, ctx], dim=-1))
                 projected = self.projections[i](ctx)
-                x = x + gate * projected
+                update = gate * projected
+                if context_mask is not None:
+                    update = update.masked_fill(~context_mask[:, i, None], 0)
+                x = x + update
 
-        return self.output_norm(x)
+        result = self.output_norm(x)
+        return result if context_mask is None else torch.where(context_mask.any(1)[:, None], result, primary)
 
 
 class ConcatFusion(nn.Module):
@@ -190,27 +205,31 @@ class ConcatFusion(nn.Module):
         )
         self.embed_dim = embed_dim
 
-    def forward(self, primary: Tensor, contexts: list[Tensor] | None = None) -> Tensor:
+    def forward(self, primary: Tensor, contexts: list[Tensor] | None = None,
+                context_mask: Tensor | None = None) -> Tensor:
         if contexts is None or len(contexts) == 0:
             return primary
 
         # Pad if fewer contexts than expected
         all_embeds = [primary]
-        for ctx in contexts:
+        for index, ctx in enumerate(contexts):
+            if context_mask is not None:
+                ctx = ctx.masked_fill(~context_mask[:, index, None], 0)
             all_embeds.append(ctx)
         while len(all_embeds) < 3:  # primary + 2 contexts
             all_embeds.append(torch.zeros_like(primary))
 
         concatenated = torch.cat(all_embeds, dim=-1)
-        return self.projection(concatenated)
+        result = self.projection(concatenated)
+        return result if context_mask is None else torch.where(context_mask.any(1)[:, None], result, primary)
 
 
 class MultimodalFusion(nn.Module):
     """Factory wrapper that selects the fusion method.
     
-    Also includes lightweight encoders for deriving climate stress
-    and human activity context from the primary embedding.
-    These could later be replaced with actual external data feeds.
+    Independently supplied context is encoded with its feature-presence mask.
+    Explicit dimensions select measured tabular features; omitted dimensions
+    preserve the legacy checkpoint-sized context interface.
     
     Args:
         embed_dim: Embedding dimension.
@@ -227,22 +246,25 @@ class MultimodalFusion(nn.Module):
         num_heads: int = 4,
         num_layers: int = 2,
         dropout: float = 0.1,
+        climate_dim: int | None = None,
+        activity_dim: int | None = None,
     ):
         super().__init__()
         self.embed_dim = embed_dim
 
-        # Context stream encoders
-        # These derive climate and human-activity signals from the primary embedding.
-        # In a full system, these would ingest separate data sources.
+        self.context_dims = {"climate": climate_dim, "activity": activity_dim}
+        for name, dimension in self.context_dims.items():
+            if dimension is not None and (type(dimension) is not int or not 1 <= dimension <= 128):
+                raise ValueError(f"{name}_dim must be an integer in [1, 128]")
         self.climate_encoder = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim),
+            nn.Linear(embed_dim if climate_dim is None else climate_dim * 2, embed_dim),
             nn.GELU(),
             nn.Linear(embed_dim, embed_dim),
             nn.LayerNorm(embed_dim),
         )
 
         self.activity_encoder = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim),
+            nn.Linear(embed_dim if activity_dim is None else activity_dim * 2, embed_dim),
             nn.GELU(),
             nn.Linear(embed_dim, embed_dim),
             nn.LayerNorm(embed_dim),
@@ -263,6 +285,8 @@ class MultimodalFusion(nn.Module):
     def forward(
         self, embedding: Tensor, climate_context: Tensor | None = None,
         activity_context: Tensor | None = None,
+        climate_mask: Tensor | None = None,
+        activity_mask: Tensor | None = None,
     ) -> Tensor:
         """Produce fused embedding from primary foundation model output.
         
@@ -276,10 +300,31 @@ class MultimodalFusion(nn.Module):
             return embedding
         # Context must be independently supplied; transformed image features
         # are not observations of climate or human activity.
-        contexts = []
-        for context, encoder in ((climate_context, self.climate_encoder),
-                                 (activity_context, self.activity_encoder)):
-            if context is not None and context.shape != embedding.shape:
-                raise ValueError("Context streams must match the primary (B, D) embedding")
-            contexts.append(encoder(context) if context is not None else torch.zeros_like(embedding))
-        return self.fusion(embedding, contexts)
+        contexts, present = [], []
+        for name, context, mask, encoder in (
+                ("climate", climate_context, climate_mask, self.climate_encoder),
+                ("activity", activity_context, activity_mask, self.activity_encoder)):
+            dimension = self.context_dims[name]
+            if context is None:
+                if mask is not None and mask.any():
+                    raise ValueError(f"{name}_mask declares observations without values")
+                contexts.append(torch.zeros_like(embedding))
+                present.append(torch.zeros(len(embedding), dtype=torch.bool, device=embedding.device))
+                continue
+            if context.shape != (len(embedding), dimension or self.embed_dim):
+                raise ValueError(f"{name} context shape must match configured feature dimension")
+            if mask is None:
+                if dimension is not None:
+                    raise ValueError(f"Measured {name} context requires an explicit feature mask")
+                mask = torch.ones_like(context, dtype=torch.bool)
+            if mask.shape != context.shape or mask.dtype != torch.bool:
+                raise ValueError(f"{name}_mask must be boolean and match context shape")
+            if not torch.isfinite(context[mask]).all():
+                raise ValueError(f"Observed {name} context must be finite")
+            values = context.masked_fill(~mask, 0)
+            if dimension is not None:
+                values = torch.cat((values, mask.to(values.dtype)), dim=-1)
+            available = mask.any(1)
+            contexts.append(encoder(values).masked_fill(~available[:, None], 0))
+            present.append(available)
+        return self.fusion(embedding, contexts, torch.stack(present, dim=1))
