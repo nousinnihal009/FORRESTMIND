@@ -11,6 +11,27 @@ function collectionErrors(report) {
   const errors=Object.entries(report.collection_errors || {}).filter(([,value])=>value);
   return errors.length?`<div class="collection-errors" role="status"><strong>Some requested evidence could not be updated</strong>${errors.map(([key,value])=>`<p><strong>${esc(names[key] || key)}:</strong> ${esc(workflowText(value))}</p>`).join('')}<p>Any earlier successful context remains dated in this record. Use the corresponding collection action to retry; unavailable data has not been filled in.</p></div>`:'';
 }
+function renderAlignedInputs(report) {
+  const sequence=report.sequence || report.sections?.sequence;
+  if(!sequence)return '';
+  const alignment=sequence.alignment || {},parameters=alignment.parameters || {};
+  const dates=Number.isInteger(sequence.selected_acquisitions)?sequence.selected_acquisitions:(sequence.sources || []).length;
+  const radar=alignment.radar,climate=alignment.climate;
+  const radarDates=radar?(radar.matches || []).filter(row=>row.scene_id).length:0;
+  const windows=climate?.windows || [];
+  const climateDates=windows.filter(row=>Array.isArray(row.mask)&&row.mask.length>0&&row.mask.every(Boolean)).length;
+  const partialDates=windows.filter(row=>Array.isArray(row.mask)&&row.mask.some(Boolean)&&!row.mask.every(Boolean)).length;
+  const errors=report.manifest?.alignment_errors || {};
+  const errorDetails=Object.entries(errors).filter(([,reason])=>reason).map(([name,reason])=>`<p><strong>${esc(name==='radar'?'Radar':name==='climate'?'Climate':name)}:</strong> ${esc(reason)}</p>`).join('');
+  const radarStatus=errors.radar?'Could not prepare':radar?`${radarDates} / ${dates} image dates`:'No matched inputs in this saved record';
+  const climateStatus=errors.climate?'Could not prepare':climate?`${climateDates} / ${dates} image dates with all measurements`:'No matched inputs in this saved record';
+  const radarReason=radar?`Radar must be from the same time or earlier, within ${numeric(radar.max_age_days)} days. ${dates-radarDates} image dates have no usable match.`:report.radar?.available?'Radar evidence has been collected. Run selected-area analysis to check matching dates and coverage.':'Collect radar context to look for compatible observations.';
+  const climateReason=climate?`${partialDates?partialDates+' image '+(partialDates===1?'date has':'dates have')+' only some measurements. ':''}Temperature, rainfall, reference evaporation and surface soil moisture retain separate coverage checks.`:report.climate?.available?'Climate evidence has been collected. Run selected-area analysis to check matching dates and coverage.':'Collect climate context to prepare dated measurements.';
+  const timing=climate?`Climate windows cover ${numeric(parameters.climate_window_days)} days and end ${numeric(parameters.climate_lag_days)} days before each image. Reanalysis can be revised later; historical availability has not been verified.`:'';
+  const model=report.model || report.sections?.model;
+  const modelStatus=model?`<p class="form-help"><strong>${model.available?'A model result was saved.':'No model prediction was produced.'}</strong> ${esc(model.reason || '')}</p>`:'';
+  return `<section class="spatial-evidence"><h3>Measured inputs available to a model</h3><p class="form-help">This summary shows which measurements can accompany each optical image. Missing dates remain missing. A compatible trained model and sufficient coverage are required before prediction.</p><div class="table-scroll"><table><thead><tr><th>Input</th><th>Coverage</th><th>What is available</th></tr></thead><tbody><tr><td>Optical imagery</td><td>${numeric(dates)} image dates</td><td>Dated satellite images with valid-pixel masks.</td></tr><tr><td>Radar</td><td>${esc(radarStatus)}</td><td>${esc(radarReason)}</td></tr><tr><td>Climate</td><td>${esc(climateStatus)}</td><td>${esc(climateReason)}</td></tr></tbody></table></div>${timing?`<p class="form-help">${esc(timing)}</p>`:''}${errorDetails?`<div class="collection-errors" role="status"><strong>Some evidence could not be used as model input</strong>${errorDetails}</div>`:''}${modelStatus}</section>`;
+}
 function renderSpatialEvidence(data) {
   if(!data)return '';
   const values=data.layers?.ndvi?.values;
@@ -114,7 +135,7 @@ async function ensureWorkflowSnapshot(id) {
 function renderWorkflowSections(report) {
   const sections=report.sections || report.results || report;
   const names={observations:'Multimodal observation record',condition:'Observed condition and disturbance',drivers:'Candidate drivers and competing explanations',forecast:'Temporal forecasts',resilience:'Resilience diagnostics',recovery:'Observed recovery',fragmentation:'Fragmentation and connectivity',model:'Checkpoint inference',scenarios:'Five-year hypothetical scenarios',climate:'Climate reanalysis context',radar:'Measured radar context',alerts:'Prioritized alerts',evaluation:'Historical baseline comparison'};
-  return renderSpatialEvidence(sections.spatial_change || report.spatial_change)+renderClimateContext(sections.climate)+renderRadarContext(sections.radar)+renderRecoveryEvidence(sections.recovery)+renderFragmentation(sections.fragmentation)+renderFiveYearScenarios(sections.scenarios)+coverImportForm()+Object.entries(names).filter(([key])=>sections[key]).map(([key,title])=>`<details class="workflow-section model-hashes"><summary>${esc(title)} · saved computation</summary><pre>${esc(JSON.stringify(sections[key],null,2))}</pre></details>`).join('');
+  return renderAlignedInputs(report)+renderSpatialEvidence(sections.spatial_change || report.spatial_change)+renderClimateContext(sections.climate)+renderRadarContext(sections.radar)+renderRecoveryEvidence(sections.recovery)+renderFragmentation(sections.fragmentation)+renderFiveYearScenarios(sections.scenarios)+coverImportForm()+Object.entries(names).filter(([key])=>sections[key]).map(([key,title])=>`<details class="workflow-section model-hashes"><summary>${esc(title)} · saved computation</summary><pre>${esc(JSON.stringify(sections[key],null,2))}</pre></details>`).join('');
 }
 async function renderWorkflow(id) {
   const request=++workflowRequest;
