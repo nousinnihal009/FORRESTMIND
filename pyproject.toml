@@ -1,6 +1,6 @@
 [project]
 name = "forestmind"
-version = "0.6.0"
+version = "0.7.0"
 description = "Forest monitoring, multimodal research, and evidence-based early-warning workflows"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -37,10 +37,12 @@ real-data = [
     "shapely>=2.0",
 ]
 foundation = [
-    "terratorch>=1.1",
-    "transformers>=4.35",
-    "safetensors>=0.4",
-    "huggingface-hub>=0.20",
+    "terratorch==1.2.13",
+    "torch==2.10.0",
+    "torchvision==0.25.0",
+    "timm==1.0.30",
+    "safetensors==0.8.0",
+    "huggingface-hub==1.33.0",
 ]
 all = [
     "forestmind[geo,real-data,foundation,web]",
