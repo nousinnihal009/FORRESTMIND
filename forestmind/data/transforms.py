@@ -66,7 +66,7 @@ class SpectralJitter:
 
 
 class SpatialFlipRotate:
-    """Random spatial flips and 90° rotations, applied consistently across time."""
+    """Spatial transforms preserve the grid shape and align every sensor mask."""
 
     def __call__(self, sample: dict) -> dict:
         # Random horizontal flip
@@ -87,8 +87,10 @@ class SpatialFlipRotate:
             if "sar_quality_mask" in sample:
                 sample["sar_quality_mask"] = np.flip(sample["sar_quality_mask"], axis=-2).copy()
 
-        # Random 90° rotation (0, 90, 180, 270)
-        k = np.random.randint(0, 4)
+        # Quarter turns preserve square grids. Rectangles use half turns so
+        # independently augmented samples still stack on the declared H/W grid.
+        height, width = sample["optical"].shape[-2:]
+        k = np.random.randint(0, 4) if height == width else 2 * np.random.randint(0, 2)
         if k > 0:
             sample["optical"] = np.rot90(sample["optical"], k=k, axes=(-2, -1)).copy()
             sample["sar"] = np.rot90(sample["sar"], k=k, axes=(-2, -1)).copy()
