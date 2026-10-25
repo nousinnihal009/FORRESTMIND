@@ -27,6 +27,8 @@ class TemporalJitter:
         self.drop_prob = drop_prob
 
     def __call__(self, sample: dict) -> dict:
+        if "synthetic" in sample and not bool(sample["synthetic"]):
+            return sample  # Real acquisition dates also anchor aligned context and targets.
         T = sample["optical"].shape[0]
         if T > 2 and "timestamps" in sample:
             jitter = np.random.uniform(-self.max_offset_days, self.max_offset_days, size=T)
@@ -64,7 +66,7 @@ class SpectralJitter:
 
 
 class SpatialFlipRotate:
-    """Random spatial flips and 90° rotations, applied consistently across time."""
+    """Spatial transforms preserve the grid shape and align every sensor mask."""
 
     def __call__(self, sample: dict) -> dict:
         # Random horizontal flip
@@ -73,6 +75,8 @@ class SpatialFlipRotate:
             sample["sar"] = np.flip(sample["sar"], axis=-1).copy()
             if "quality_mask" in sample:
                 sample["quality_mask"] = np.flip(sample["quality_mask"], axis=-1).copy()
+            if "sar_quality_mask" in sample:
+                sample["sar_quality_mask"] = np.flip(sample["sar_quality_mask"], axis=-1).copy()
 
         # Random vertical flip
         if np.random.random() > 0.5:
@@ -80,14 +84,20 @@ class SpatialFlipRotate:
             sample["sar"] = np.flip(sample["sar"], axis=-2).copy()
             if "quality_mask" in sample:
                 sample["quality_mask"] = np.flip(sample["quality_mask"], axis=-2).copy()
+            if "sar_quality_mask" in sample:
+                sample["sar_quality_mask"] = np.flip(sample["sar_quality_mask"], axis=-2).copy()
 
-        # Random 90° rotation (0, 90, 180, 270)
-        k = np.random.randint(0, 4)
+        # Quarter turns preserve square grids. Rectangles use half turns so
+        # independently augmented samples still stack on the declared H/W grid.
+        height, width = sample["optical"].shape[-2:]
+        k = np.random.randint(0, 4) if height == width else 2 * np.random.randint(0, 2)
         if k > 0:
             sample["optical"] = np.rot90(sample["optical"], k=k, axes=(-2, -1)).copy()
             sample["sar"] = np.rot90(sample["sar"], k=k, axes=(-2, -1)).copy()
             if "quality_mask" in sample:
                 sample["quality_mask"] = np.rot90(sample["quality_mask"], k=k, axes=(-2, -1)).copy()
+            if "sar_quality_mask" in sample:
+                sample["sar_quality_mask"] = np.rot90(sample["sar_quality_mask"], k=k, axes=(-2, -1)).copy()
 
         return sample
 
@@ -110,6 +120,8 @@ class RandomCrop:
         sample["sar"] = sample["sar"][:, :, y:y+self.crop_size, x:x+self.crop_size]
         if "quality_mask" in sample:
             sample["quality_mask"] = sample["quality_mask"][:, y:y+self.crop_size, x:x+self.crop_size]
+        if "sar_quality_mask" in sample:
+            sample["sar_quality_mask"] = sample["sar_quality_mask"][:, y:y+self.crop_size, x:x+self.crop_size]
         return sample
 
 
@@ -125,6 +137,8 @@ class Normalize:
         optical_std: np.ndarray | None = None,
         sar_mean: np.ndarray | None = None,
         sar_std: np.ndarray | None = None,
+        climate_mean=None, climate_std=None,
+        activity_mean=None, activity_std=None,
     ):
         # Default statistics (approximated from spectral profiles)
         self.optical_mean = optical_mean if optical_mean is not None else np.array(
@@ -149,6 +163,16 @@ class Normalize:
             if name.endswith("std") and (values <= 0).any():
                 raise ValueError(f"{name} values must be positive")
             setattr(self, name, values)
+        self.context_stats = {}
+        for name, mean, std in (("climate", climate_mean, climate_std), ("activity", activity_mean, activity_std)):
+            if (mean is None) != (std is None):
+                raise ValueError(f"Both {name} mean and std are required")
+            if mean is not None:
+                mean, std = np.asarray(mean, dtype=np.float32), np.asarray(std, dtype=np.float32)
+                if (mean.ndim != 1 or not 1 <= len(mean) <= 128 or mean.shape != std.shape
+                        or not np.isfinite(mean).all() or not np.isfinite(std).all() or (std <= 0).any()):
+                    raise ValueError(f"{name} normalization needs matching finite means and positive standard deviations")
+            self.context_stats[name] = (mean, std)
 
     def __call__(self, sample: dict) -> dict:
         # Normalize optical: (T, C, H, W), stats broadcast over (T, 1, H, W)
@@ -165,6 +189,25 @@ class Normalize:
                 sample[modality][~sample[f"{modality}_mask"]] = 0
         if "quality_mask" in sample:
             sample["optical"] = np.where(sample["quality_mask"][:, None], sample["optical"], 0)
+        if "sar_quality_mask" in sample:
+            sample["sar"] = np.where(sample["sar_quality_mask"][:, None], sample["sar"], 0)
+        for name in ("climate", "activity"):
+            key = f"{name}_context"
+            if key not in sample:
+                continue
+            mean, std = self.context_stats[name]
+            if mean is None:
+                if f"{name}_mask" in sample:
+                    raise ValueError(f"Measured {name} requires training/checkpoint normalization statistics")
+                continue
+            values = np.asarray(sample[key])
+            mask = sample.get(f"{name}_mask")
+            if (values.ndim != 2 or values.shape[1] != len(mean) or mask is None
+                    or mask.shape != values.shape or mask.dtype.kind != "b"):
+                raise ValueError(f"{name} values/mask do not match normalization features")
+            if not np.isfinite(values[mask]).all():
+                raise ValueError(f"Observed {name} must be finite")
+            sample[key] = np.where(mask, (np.where(mask, values, mean) - mean) / std, 0).astype(np.float32)
         return sample
 
 
@@ -176,7 +219,7 @@ class ToTensor:
         for key, value in sample.items():
             if isinstance(value, np.ndarray):
                 if value.dtype.kind in "bifu":
-                    tensor = torch.from_numpy(np.ascontiguousarray(value).copy())
+                    tensor = torch.from_numpy(np.array(value, copy=True, order="C"))
                     result[key] = tensor.float() if tensor.is_floating_point() else tensor
                 else:
                     result[key] = value.tolist()
