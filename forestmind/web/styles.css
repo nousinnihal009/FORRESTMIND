@@ -28,3 +28,4 @@
 .collection-errors{background:#fff4df;border:1px solid #e6cda5;padding:14px;border-radius:6px;margin-bottom:15px;font-size:11px;color:#754d20}.collection-errors p{margin-top:7px;color:#754d20;overflow-wrap:anywhere}
 
 .monitor-form input[type="number"]{display:block;width:150px;max-width:100%;padding:8px;margin-top:5px;border:1px solid #c9d4c5;border-radius:5px;background:#fcfdf9;color:var(--ink);font-size:12px}canvas[tabindex]:focus-visible,svg[tabindex]:focus-visible,[role="tabpanel"]:focus-visible{outline:2px solid #7a9642;outline-offset:4px}
+.model-score-row.model-output-missing{grid-template-columns:minmax(0,1fr) auto}.model-output-missing small{display:block;margin-top:3px;color:var(--muted);font-size:10px}.model-output-missing>span{min-width:0;overflow-wrap:anywhere}
