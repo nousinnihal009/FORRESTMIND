@@ -184,7 +184,7 @@ def evaluate_checkpoint(
     if len(loader.dataset) == 0:
         raise ValueError(f"Requested {split} dataset has no samples")
     source_manifest = _source_manifest(loader.dataset)
-    from forestmind.models.foundation.native import offline_native_config, load_complete_state
+    from forestmind.models.foundation.native import offline_native_config, load_complete_state, validate_native_sample
     foundation = config.get("foundation", {})
     native = foundation.get("name") in ("prithvi", "terramind") and not foundation.get(foundation.get("name"), {}).get("use_proxy", False)
     model = ForestMindModel(offline_native_config(config) if native else config)
@@ -199,6 +199,10 @@ def evaluate_checkpoint(
     sample_count = 0
     with torch.inference_mode():
         for batch in loader:
+            if native:
+                for sample_index in range(batch["optical"].shape[0]):
+                    validate_native_sample(config, {name: batch[name][sample_index]
+                                                   for name in ("optical", "observation_mask", "optical_mask", "sar_mask")})
             if "label_valid" in batch and not torch.as_tensor(batch["label_valid"]).all():
                 raise ValueError("Evaluation requires observed labels; unlabeled acquisitions cannot be evaluated")
             missing = [name for name in TARGET_KEYS if name not in batch]
