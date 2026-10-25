@@ -143,6 +143,13 @@ class ForestMindTrainer:
 
     def _prepare_batch(self, batch: dict) -> tuple[dict, dict]:
         """Move batch to device and split into inputs/targets."""
+        foundation = self.config.get("foundation", {})
+        name = foundation.get("name")
+        if name in ("prithvi", "terramind") and not foundation.get(name, {}).get("use_proxy", False):
+            from forestmind.models.foundation.native import validate_native_sample
+            for sample_index in range(batch["optical"].shape[0]):
+                validate_native_sample(self.config, {key: batch[key][sample_index]
+                                                     for key in ("optical", "observation_mask", "optical_mask", "sar_mask")})
         inputs = {
             "optical": batch["optical"].to(self.device),
             "sar": batch["sar"].to(self.device),
