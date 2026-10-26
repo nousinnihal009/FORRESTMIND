@@ -2,14 +2,18 @@
 'use strict';
 let modelImportRegion = null;
 let modelRequest = 0;
+let modelImportReport = null;
+let modelImportRead = 0;
 
 function modelRunHeader(id) {
-  return `<div class="observations-caption"><div><strong>Saved neural predictions</strong><p class="chart-caveat">Checkpoint-specific results, with their input record and observation cutoff.</p></div><button class="button secondary" id="open-model-import">${icon('upload',14)}Import model run</button></div><p class="chart-caveat">Region ID: <code>${esc(id)}</code> · Automatic eligible inference is available in Connected analysis. Imported reports retain their declared cutoff.</p>`;
+  return `<div class="observations-caption"><div><strong>Saved model predictions</strong><p class="chart-caveat">Results for this monitoring region, with their model, observation dates, and evidence source.</p></div><button class="button secondary" id="open-model-import">${icon('upload',14)}Import model run</button></div><p class="chart-caveat">Connected analysis can run a compatible installed model when sufficient measurements are available. Imported reports retain their declared observation dates.</p>`;
 }
 
 function modelProvenance(report, run) {
   const checkpoint = report.checkpoint, input = report.input;
-  return `<dl class="model-provenance"><div><dt>Checkpoint</dt><dd>${esc(checkpoint.name)}<small>${esc(checkpoint.backbone)} · ${checkpoint.trained_on_synthetic ? 'Synthetic training data' : checkpoint.trained_on_synthetic === null ? 'Training data origin unknown' : 'Training provenance declared by report'}</small></dd></div><div><dt>Input sequence</dt><dd>${esc(input.name)}<small>${input.synthetic ? 'Synthetic input' : 'Declared observed input'} · ${numeric(input.timesteps)} timesteps</small></dd></div><div><dt>Observed through</dt><dd>${esc(dateLabel(report.observed_through))}<small>Report created ${esc(dateLabel(report.created_at))}</small></dd></div><div><dt>Provenance status</dt><dd>${run?.verification==='local_registered_execution'?'Locally registered checkpoint execution':'User-provided · unverified'}<small>Hashes identify artifacts; they do not verify ecological accuracy.</small></dd></div></dl><details class="model-hashes"><summary>Artifact fingerprints and training source</summary><p>Checkpoint SHA-256 <code>${esc(checkpoint.sha256)}</code></p><p>Input SHA-256 <code>${esc(input.sha256)}</code></p><p>Training source: ${esc(checkpoint.training_source)}</p></details>`;
+  const backbone={custom_vit:'ForestMind image model',prithvi_proxy:'Prithvi-style research model',terramind_proxy:'TerraMind-style research model',prithvi:'Prithvi',terramind:'TerraMind'}[checkpoint.backbone] || humanLabel(checkpoint.backbone);
+  const training=checkpoint.trained_on_synthetic===true?'Synthetic training data':checkpoint.trained_on_synthetic===false?'Training source declared by the report':'Training data origin unknown';
+  return `<dl class="model-provenance"><div><dt>Model</dt><dd>${esc(checkpoint.name)}<small>${esc(backbone)} · ${esc(training)}</small></dd></div><div><dt>Input measurements</dt><dd>${input.synthetic ? 'Synthetic input' : 'Declared observed input'}<small>${numeric(input.timesteps)} prepared time steps${Number.isInteger(input.observed_timesteps)?' · '+numeric(input.observed_timesteps)+' with observations':''}</small></dd></div><div><dt>Observed through</dt><dd>${esc(dateLabel(report.observed_through))}<small>Report created ${esc(dateLabel(report.created_at))}</small></dd></div><div><dt>How this result was added</dt><dd>${run?.verification==='local_registered_execution'?'Run locally with a registered model':'User-provided · unverified'}<small>Neither saving a report nor running a model verifies its ecological accuracy.</small></dd></div></dl><details class="model-hashes"><summary>Training source and reproducibility</summary><p>Training source: ${esc(checkpoint.training_source==='unknown'?'Not supplied':checkpoint.training_source==='synthetic'?'Synthetic demonstration data':checkpoint.training_source)}</p><p class="form-help">The exported report includes the original model and input file names, their fingerprints, and all saved limitations so the result can be traced.</p></details>`;
 }
 
 function modelScoreRows(scores, unit = 'score') {
@@ -35,7 +39,7 @@ async function renderModelRuns(id, preferredRun) {
     const result = await api('/regions/'+encodeURIComponent(id)+'/model-runs');
     if(request !== modelRequest || state.selected !== id || state.tab !== 'models')return;
     const runs = result.runs || [];
-    $('#detail-body').innerHTML = modelRunHeader(id) + (runs.length ? `<div class="model-picker"><label class="field-label" for="model-run-select">Saved run</label><select id="model-run-select">${runs.map(run=>`<option value="${esc(run.id)}">${esc(run.report.checkpoint.name)} · ${esc(dateLabel(run.report.observed_through))} · ${esc(run.id)}</option>`).join('')}</select></div><div id="model-run-detail"></div>` : '<div class="empty-state model-empty"><span class="large-symbol">↗</span><h3>No eligible saved model prediction yet</h3><p>Open Connected analysis to run an eligible installed checkpoint on the selected area’s acquired sequence. It explains missing inputs or unsupported checkpoint scope. Every saved run retains its model and input fingerprints.</p><p class="chart-caveat">No trained neural model is used by the observation baseline. Saved automatic and imported model runs appear here.</p></div>');
+    $('#detail-body').innerHTML = modelRunHeader(id) + (runs.length ? `<div class="model-picker"><label class="field-label" for="model-run-select">Saved run</label><select id="model-run-select">${runs.map((run,index)=>`<option value="${esc(run.id)}">Run ${index+1} · ${esc(run.report.checkpoint.name)} · observed through ${esc(dateLabel(run.report.observed_through))}</option>`).join('')}</select></div><div id="model-run-detail"></div>` : '<div class="empty-state model-empty"><span class="large-symbol">↗</span><h3>No saved model prediction yet</h3><p>Open Connected analysis to check whether this area has enough measurements for a compatible installed model. Missing measurements or a missing trained model will be explained there.</p><p class="chart-caveat">The observation baseline remains available without a trained model. Saved automatic and imported model runs appear here.</p></div>');
     $('#open-model-import').addEventListener('click',()=>openModelImport(id));
     if(runs.length){
       const picker = $('#model-run-select');
@@ -45,40 +49,73 @@ async function renderModelRuns(id, preferredRun) {
     }
   } catch(error) {
     if(request === modelRequest && state.selected === id && state.tab === 'models'){
-      $('#detail-body').innerHTML = `<p class="observations-empty">${esc(error.message)} Try selecting Model runs again.</p>`;
+      $('#detail-body').innerHTML = `<p class="observations-empty">${esc(userMessage(error))} Try selecting Model runs again.</p>`;
     }
   }
 }
 
 function openModelImport(id) {
+  ++modelImportRead;
+  modelImportReport = null;
   modelImportRegion = id;
-  $('#model-import-region').textContent = state.region?.name || id;
+  $('#model-import-form').reset();
+  $('#model-import-region').textContent = state.region?.name || 'the selected monitoring region';
   $('#model-import-error').hidden = true;
+  $('#model-import-preview').hidden = true;
+  $('#model-file-name').textContent = 'ForestMind model report (.json) · maximum 2 MB';
+  $('#submit-model-import').disabled = true;
   $('#model-import-dialog').showModal();
 }
 
-$('#close-model-import').addEventListener('click',()=>$('#model-import-dialog').close());
-$('#model-import-json').addEventListener('input',()=>{$('#model-import-error').hidden=true;});
-$('#model-import-file').addEventListener('change',async event=>{
-  const file=event.target.files[0];if(!file)return;
+function modelFilePreview(report,regionId) {
+  if(!report||typeof report!=='object'||Array.isArray(report)||report.kind!=='forestmind_inference'||report.schema_version!==1)throw new Error('Choose a ForestMind model report. This file uses a different format.');
+  if(report.region_id!==regionId)throw new Error('This report belongs to a different monitoring region. Select that region before importing its report.');
+  const {checkpoint,input,predictions}=report;
+  if(!checkpoint||typeof checkpoint.name!=='string'||!checkpoint.name.trim()||!input||typeof input.synthetic!=='boolean'||!Number.isInteger(input.timesteps)||input.timesteps<1||!predictions?.health||!Array.isArray(predictions.health.class_scores)||!Array.isArray(predictions.drivers)||!Array.isArray(predictions.trajectory))throw new Error('This report is missing its model, input measurements, or prediction results. Choose a complete exported report.');
+  const validDate=date=>typeof date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(date)&&Number.isFinite(Date.parse(date))&&new Date(date).toISOString().slice(0,10)===date;
+  if(!validDate(report.observed_through)||(input.observed_start!==undefined&&input.observed_start!==null&&(!validDate(input.observed_start)||input.observed_start>report.observed_through)))throw new Error('This report has an invalid observation period. Ask the report provider to correct it.');
+  const targets=[];
+  if(Number.isFinite(predictions.health.score))targets.push('Condition score');
+  if(predictions.health.class_scores.some(item=>Number.isFinite(item?.score)))targets.push('Condition classes');
+  const drivers=predictions.drivers.filter(item=>Number.isFinite(item?.score)).length,forecasts=predictions.trajectory.filter(item=>Number.isFinite(item?.score)).length;
+  if(drivers)targets.push(drivers+' candidate driver '+(drivers===1?'score':'scores'));
+  if(forecasts)targets.push(forecasts+' forecast '+(forecasts===1?'horizon':'horizons'));
+  const synthetic=input.synthetic||checkpoint.trained_on_synthetic===true;
+  return {name:checkpoint.name,period:(input.observed_start?dateLabel(input.observed_start)+' – ':'Through ')+dateLabel(report.observed_through),targets:targets.length?targets.join(' · '):'No trained outputs in this report',source:synthetic?'Synthetic research data · not evidence of real forest condition':checkpoint.trained_on_synthetic===false?'Declared observed inputs · training source unverified':'Declared observed inputs · training data origin unknown'};
+}
+
+async function loadModelFile(event) {
+  const request=++modelImportRead,regionId=modelImportRegion,file=event.target.files[0];
+  modelImportReport=null;$('#submit-model-import').disabled=true;$('#model-import-preview').hidden=true;$('#model-import-error').hidden=true;
+  $('#model-file-name').textContent=file?.name || 'ForestMind model report (.json) · maximum 2 MB';
+  if(!file)return;
   try{
-    if(file.size>2*1024*1024)throw new Error('Choose a JSON report smaller than 2 MB.');
-    $('#model-import-json').value=await file.text();$('#model-file-name').textContent=file.name;
-    $('#model-import-error').hidden=true;
-  }catch(error){$('#model-import-error').textContent=error.message;$('#model-import-error').hidden=false;}
-});
-$('#model-import-form').addEventListener('submit',async event=>{
+    if(file.size>2*1024*1024)throw new Error('Choose a model report smaller than 2 MB.');
+    let report;try{report=JSON.parse(await file.text());}catch{throw new Error('This file could not be read as a model report. Choose a valid JSON report exported by ForestMind.');}
+    const preview=modelFilePreview(report,regionId);
+    if(request!==modelImportRead||regionId!==modelImportRegion)return;
+    modelImportReport=report;
+    for(const [field,value] of Object.entries(preview))$('#model-preview-'+field).textContent=value;
+    $('#model-import-preview').hidden=false;$('#submit-model-import').disabled=false;
+  }catch(error){if(request!==modelImportRead||regionId!==modelImportRegion)return;$('#model-import-error').textContent=userMessage(error,'This file could not be read. Please choose it again.');$('#model-import-error').hidden=false;}
+}
+
+async function importModelRun(event) {
   event.preventDefault();const button=$('#submit-model-import');button.disabled=true;
-  const id=modelImportRegion;$('#model-import-error').hidden=true;
+  const id=modelImportRegion,request=modelImportRead;$('#model-import-error').hidden=true;
   try{
-    const raw=$('#model-import-json').value;
-    if(new TextEncoder().encode(raw).length>2*1024*1024)throw new Error('Keep the JSON report below 2 MB.');
-    let report;try{report=JSON.parse(raw);}catch{throw new Error('This is not valid JSON. Paste a report generated by the prediction command.');}
-    if(report.region_id!==id)throw new Error('The report region_id must match the selected region: '+id);
+    const report=modelImportReport;
+    if(!report)throw new Error('Choose a model report and review its summary before saving.');
+    if(state.selected!==id||report.region_id!==id)throw new Error('The selected monitoring region changed. Close this dialog and open the import again for the intended region.');
     const result=await api('/regions/'+encodeURIComponent(id)+'/model-runs',{method:'POST',body:JSON.stringify(report)});
-    $('#model-import-dialog').close();
+    if(request===modelImportRead)$('#model-import-dialog').close();
     if(state.selected===id&&state.tab==='models')await renderModelRuns(id,result.id);
-    toast('Model run saved with unverified provenance.');
-  }catch(error){$('#model-import-error').textContent=error.message;$('#model-import-error').hidden=false;}
-  finally{button.disabled=false;}
-});
+    toast('Model run saved. Its predictions and source remain unverified.');
+  }catch(error){if(request===modelImportRead){$('#model-import-error').textContent=userMessage(error);$('#model-import-error').hidden=false;}}
+  finally{if(request===modelImportRead)button.disabled=!modelImportReport;}
+}
+
+$('#close-model-import').addEventListener('click',()=>$('#model-import-dialog').close());
+$('#model-import-dialog').addEventListener('close',()=>{++modelImportRead;modelImportReport=null;$('#submit-model-import').disabled=true;});
+$('#model-import-file').addEventListener('change',loadModelFile);
+$('#model-import-form').addEventListener('submit',importModelRun);
