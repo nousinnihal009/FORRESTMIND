@@ -2,7 +2,7 @@
 
 ## Execution paths
 
-The application uses `transparent-indicator-baseline-v1`. It never calls an untrained neural model. The neural pipeline is a separate workflow requiring labels, training and evaluation. Neither path provides a calibrated ecological tipping probability.
+The observation dashboard uses `transparent-indicator-baseline-v1`. Connected analysis can also run an eligible registered neural checkpoint with real-training declarations, independent evaluation and a compatible input/geographic contract. No such checkpoint is bundled. The research training pipeline requires independent labels; controlled synthetic tests do not approve a model for real observations. Neither path establishes a calibrated ecological tipping probability.
 
 ## Observations
 
