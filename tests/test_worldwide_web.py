@@ -89,7 +89,7 @@ def test_readiness_details_and_failed_context_remain_explicit():
 def test_radar_render_keeps_missing_values_and_context_interpretation():
     rendered = _workflow("renderRadarContext({available:true,dataset:'Sentinel-1 RTC',comparison:{vv_change_db:null,vh_change_db:1.25,common_valid_fraction:.8,vv_change_map_db:[[null,1]],vh_change_map_db:[[null,2]]},scenes:[],limitations:['Not a causal estimate']})")
     assert 'id="radar-change-map"' in rendered
-    assert "not automatically fused" in rendered
+    assert "does not identify a structural cause or supply a model prediction" in rendered
     assert "<strong>—</strong>" in rendered
     assert "Not a causal estimate" in rendered
 
