@@ -1,6 +1,6 @@
 # Climate context and paired climatic balance
 
-The **Collect climate context** action requests actual ERA5 reanalysis for the selected area's centroid and the accepted observation window. It retains daily provider values, units, requested and returned coordinates, dates, retrieval time and the raw-response SHA256. This is a coarse model-based contextual record, not a forest-only measurement or a trained neural input. Provider details and terms are in the [Open-Meteo historical API documentation](https://open-meteo.com/en/docs/historical-weather-api).
+The **Collect climate context** action requests actual ERA5 reanalysis for the selected area's centroid and the accepted observation window. It retains daily provider values, units, requested and returned coordinates, dates, retrieval time and the raw-response SHA256. This is a coarse model-based record, not a forest-only measurement. Original daily values can supply lagged trailing features to a compatible registered neural model with explicit feature masks, normalization and coverage; the monthly table itself is descriptive. Historical reanalysis vintage availability remains unverified. See [MULTIMODAL_INPUTS.md](MULTIMODAL_INPUTS.md). Provider details and terms are in the [Open-Meteo historical API documentation](https://open-meteo.com/en/docs/historical-weather-api).
 
 ## Paired precipitation minus reference evapotranspiration
 
