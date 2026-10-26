@@ -29,3 +29,4 @@
 
 .monitor-form input[type="number"]{display:block;width:150px;max-width:100%;padding:8px;margin-top:5px;border:1px solid #c9d4c5;border-radius:5px;background:#fcfdf9;color:var(--ink);font-size:12px}canvas[tabindex]:focus-visible,svg[tabindex]:focus-visible,[role="tabpanel"]:focus-visible{outline:2px solid #7a9642;outline-offset:4px}
 .model-score-row.model-output-missing{grid-template-columns:minmax(0,1fr) auto}.model-output-missing small{display:block;margin-top:3px;color:var(--muted);font-size:10px}.model-output-missing>span{min-width:0;overflow-wrap:anywhere}
+.aligned-input-table{width:100%;min-width:560px;table-layout:fixed}.aligned-input-table th,.aligned-input-table td{white-space:normal;vertical-align:top;overflow-wrap:anywhere}.aligned-input-table th:first-child{width:20%}.aligned-input-table th:nth-child(2){width:28%}
