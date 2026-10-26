@@ -224,7 +224,7 @@ def acquire_radar(geometry: dict, *, start: str, end: str, patch_size: int = 64,
             "Two dates are contextual evidence, not a seasonally calibrated radar history or a forest-only average.",
             "RTC source pixel spacing is distinct from instrument resolution. Native range/azimuth resolution and source raster spacing are retained when declared; resampling adds no detail.",
             "No independently verified layover/shadow mask or local uncertainty calibration is supplied; finite positive values and nodata masks alone cannot establish ecological reliability.",
-            "This separately dated context is not inserted into optical model inputs or monthly observations. A paired trained multimodal model remains a separate requirement.",
+            "Individual radar scenes can be prepared for a compatible trained model after date, area and coverage checks. The pair comparison remains descriptive evidence, and monthly optical observations remain unchanged.",
         ]}
     result["sha256"] = _digest(result)
     return result
