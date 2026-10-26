@@ -157,10 +157,75 @@ async function ensureWorkflowSnapshot(id) {
   if(job.status!=='completed')throw new Error(job.error || 'Analysis is still running. Reopen Connected analysis before comparing assumptions.');
   return api('/regions/'+encodeURIComponent(id)+'/workflow');
 }
+function renderWorkflowManifest(report,region={}) {
+  const manifest=report.manifest || report.context || {},points=manifest.geometry?.coordinates?.[0] || [];
+  const extent=points.length?`West ${workflowNumber(Math.min(...points.map(point=>point[0])),5)}° · East ${workflowNumber(Math.max(...points.map(point=>point[0])),5)}° · South ${workflowNumber(Math.min(...points.map(point=>point[1])),5)}° · North ${workflowNumber(Math.max(...points.map(point=>point[1])),5)}°`:'Area boundary not supplied';
+  const sourceNames=Object.entries(manifest.context_sha256 || {}).filter(([,value])=>value).map(([key])=>key==='forest_cover'?'Forest-cover reference':workflowLabel(key));
+  return `<section class="workflow-manifest"><h3>${esc(region.name || 'Selected area')} · analysis record</h3>${workflowFacts([
+    ['Latest observation',manifest.observed_through || report.observed_through || region.latest_date || 'No observations'],
+    ['Analysis cutoff',manifest.observation_cutoff || 'Not specified'],['Dated observations',manifest.observation_count ?? 'Not recorded'],
+    ['Saved',report.created_at || 'Analysis has not run yet'],['Evidence type',manifest.synthetic===true?'Synthetic demonstration':manifest.synthetic===false?'Real observations; scientific validity remains unverified':'Not declared'],
+    ['Additional evidence',sourceNames.length?sourceNames.join(' · '):'None recorded'],['Model used',manifest.model?.name || manifest.model?.id || 'No model result recorded']
+  ])}<p class="form-help">${report.stale?'The inputs, methods or model configuration have changed. Run selected-area analysis to refresh these results.':'Results apply to the dates and area shown here.'}</p><details><summary>Area and record history</summary><p>${esc(extent)}</p><p class="form-help">${manifest.software_version?'Analysis software version '+esc(manifest.software_version)+'. ':''}The downloadable record retains the exact boundary, source identifiers and file fingerprints needed to trace this analysis. These records do not establish ecological accuracy.</p></details></section>`;
+}
+function renderObservationEvidence(rows,coverage) {
+  if(!Array.isArray(rows))return '';
+  if(!rows.length)return workflowUnavailable('Observation history',null,'Collect dated satellite observations to begin.');
+  const counts=coverage?.counts,shown=rows.slice(-36);
+  const measures=['ndvi','ndmi','nbr'];
+  return `<section class="spatial-evidence"><h3>Observation history and coverage</h3>${workflowFacts([
+    ['Observed dates',`${rows[0].date} → ${rows.at(-1).date}`],['Recorded observations',rows.length],
+    ['Usable months',counts?.usable ?? 'Not assessed'],['Missing months',counts?.missing ?? 'Not assessed'],
+    ['Months with low coverage',counts?.low_coverage ?? 'Not assessed'],['Months missing measurements',counts?.missing_indices ?? 'Not assessed'],
+    ['Consecutive usable months through the ending month',coverage?.trailing_usable_run ?? 'Not assessed']
+  ])}<p class="form-help">Vegetation (NDVI), moisture (NDMI) and burn-sensitive (NBR) measurements are spectral indices. Missing measurements remain unavailable. ${rows.length>shown.length?'Showing the latest 36 observations; the export includes the full history.':''}</p><details><summary>Review dated measurements</summary>${workflowTable(['Observation date','Vegetation index','Moisture index','Burn-sensitive index','Usable image pixels'],shown.map(row=>[row.date,...measures.map(key=>workflowNumber(row[key],3)),workflowPercent(row.valid_fraction)]))}</details>${workflowList(coverage?.reasons || [])}</section>`;
+}
+function renderConditionEvidence(data) {
+  if(!data)return '';
+  return `<section class="spatial-evidence"><h3>Observed condition indicator</h3>${workflowFacts([
+    ['Condition index',workflowNumber(data.score,2,' / 100')],['Screening category',workflowLabel(data.status)],
+    ['Recent change from baseline',workflowNumber(data.change,2,' index points')],['Recent annual trend',workflowNumber(data.trend_per_year,2,' index points per year')],['Recent image coverage',workflowPercent(data.coverage)]
+  ])}<p class="form-help">${esc(data.interpretation || 'This spectral screening index is not a field-validated forest-health diagnosis.')}</p>${data.components?.length?workflowTable(['Measurement','Latest index'],data.components.map(item=>[item.name,workflowNumber(item.value,3)])):''}</section>`;
+}
+function renderDriverEvidence(rows) {
+  if(!Array.isArray(rows))return '';
+  return `<section class="spatial-evidence"><h3>Possible drivers and competing explanations</h3><p class="form-help">Evidence scores compare screening signals. They are not probabilities, causal contributions or proof of a disturbance.</p><div class="workflow-summary-grid">${rows.map(row=>`<article class="workflow-summary-card"><h4>${esc(row.name || workflowLabel(row.id))}</h4><strong>${Number.isFinite(row.evidence_score)?workflowNumber(row.evidence_score,2,' / 100 evidence score'):'Evidence unavailable'}</strong><p>${esc(workflowReason(row.evidence || 'No supporting evidence supplied.'))}</p><p class="form-help">${esc(workflowLabel(row.direction))} · confidence has not been calibrated.</p></article>`).join('') || '<p>No driver assessment is saved.</p>'}</div></section>`;
+}
+function renderIndicatorForecast(data) {
+  if(!data)return '';
+  if(!data.points?.length)return workflowUnavailable('Illustrative indicator forecast',data,'At least 12 consecutive usable months are required.');
+  return `<section class="spatial-evidence"><h3>Illustrative indicator forecast</h3><p class="form-help">${esc(data.caveat || 'Historical trend extrapolation; no ecological event prediction or calibrated confidence interval.')}</p>${workflowTable(['Date','Horizon','Indicator / 100','Lower envelope','Upper envelope'],data.points.map(row=>[row.date,workflowNumber(row.horizon_days,0,' days'),workflowNumber(row.score),workflowNumber(row.lower),workflowNumber(row.upper)]))}<p class="form-help">Lower and upper values are heuristic residual envelopes. Disturbances and interventions are not predicted.</p></section>`;
+}
+function renderResilienceEvidence(data) {
+  if(!data)return '';
+  return `<section class="spatial-evidence"><h3>Resilience research diagnostics</h3>${workflowFacts([['Assessment',workflowLabel(data.status)],['Lag-one correlation',workflowNumber(data.ar1,3)],['Residual variance',workflowNumber(data.variance,3)],['Change across comparison windows',data.trend || 'Not available']])}${workflowList(data.evidence || [])}<p class="form-help">${esc(data.caveat || 'Descriptive diagnostics do not establish ecological stability or a tipping point.')} No validated tipping probability or transition date is available.</p></section>`;
+}
+function renderWorkflowEvaluation(data) {
+  if(!data)return '';
+  const rows=[];
+  for(const [method,result] of Object.entries(data.methods || {}))for(const [horizon,metrics] of Object.entries(result.by_horizon || {all:result.aggregate || {}}))rows.push([
+    workflowLabel(method),horizon==='all'?'All horizons':`${horizon} month${horizon==='1'?'':'s'}`,metrics.n ?? 0,workflowNumber(metrics.mae),workflowNumber(metrics.rmse),workflowPercent(metrics.coverage),
+    metrics.skipped_missing_target ?? 0,metrics.skipped_unusable_target ?? 0,metrics.outside_observation_period ?? 0
+  ]);
+  const scored=Object.values(data.methods || {}).some(result=>Number.isFinite(result.aggregate?.n)&&result.aggregate.n>0);
+  return `<section class="spatial-evidence"><h3>Historical baseline comparison</h3><p class="form-help">${scored?'Predictions were compared with later spectral observations, using only earlier observations at each cutoff.':'No predictions could be scored against a usable later observation in this record.'} These results do not validate forest health, canopy loss or a trained model.</p>${data.synthetic_warning?`<p class="collection-errors">${esc(data.synthetic_warning)}</p>`:''}${rows.length?workflowTable(['Baseline','Horizon','Scored cases','Mean absolute error','Root mean squared error','Envelope coverage','Missing targets','Unusable targets','Beyond observed period'],rows):''}<p class="form-help">Errors use indicator points on a 0–100 scale. Envelope coverage is empirical and uncalibrated. Missing targets remain skipped, and an unavailable metric is not a zero error.</p>${workflowList(data.limitations || [])}</section>`;
+}
+function renderWorkflowModel(data) {
+  if(!data)return '';
+  if(!data.available)return workflowUnavailable('Trained model result',{reason:workflowReason(data.reason)},'No compatible trained model result is available.');
+  const report=data.report || {},prediction=report.predictions || {},health=prediction.health || {};
+  return `<section class="spatial-evidence"><h3>Trained model result</h3><p class="form-help">${esc(workflowReason(data.reason || 'A compatible registered model produced a saved research result.'))}</p>${workflowFacts([
+    ['Model',report.checkpoint?.name || 'Name not supplied'],['Observed through',report.observed_through || 'Not supplied'],['Result saved',report.created_at || 'Not supplied'],
+    ['Condition class',health.state?workflowLabel(health.state):'No trained output'],['Condition score',Number.isFinite(health.score)?workflowNumber(health.score,2,' / 100'):'No trained output']
+  ])}${prediction.drivers?.length?workflowTable(['Candidate driver','Uncalibrated model score'],prediction.drivers.map(row=>[row.name,Number.isFinite(row.score)?workflowNumber(row.score,3):'No trained output'])):''}${prediction.trajectory?.length?workflowTable(['Horizon','Model score / 100','Model spread, score points'],prediction.trajectory.map(row=>[workflowNumber(row.horizon_days,0,' days'),Number.isFinite(row.score)?workflowNumber(row.score):'No trained output',Number.isFinite(row.stddev)?workflowNumber(row.stddev):'Not estimated'])):''}${workflowList(report.caveats || [])}<p class="form-help">Open Model runs to review the complete saved prediction and its training and input provenance.</p></section>`;
+}
+function renderWorkflowAlerts(alerts) {
+  if(!Array.isArray(alerts))return '';
+  return `<section class="spatial-evidence"><h3>Evidence alerts</h3>${alerts.length?alerts.map(alert=>`<article class="workflow-summary-card"><h4>${esc(alert.title)}</h4><p>${esc(alert.message || 'Review the dated source observations.')}</p>${workflowFacts([['Observation date',alert.date || 'Not supplied'],['Priority',workflowLabel(alert.severity)],['Review status',workflowLabel(alert.status || 'open')]])}</article>`).join(''):'<p class="form-help">No screening alerts are recorded for this assessment. This does not establish ecological stability.</p>'}<p class="form-help">Use Observations to review supporting measurements and acknowledge or resolve an alert.</p></section>`;
+}
 function renderWorkflowSections(report) {
   const sections=report.sections || report.results || report;
-  const names={observations:'Multimodal observation record',condition:'Observed condition and disturbance',drivers:'Candidate drivers and competing explanations',forecast:'Temporal forecasts',resilience:'Resilience diagnostics',recovery:'Observed recovery',fragmentation:'Fragmentation and connectivity',model:'Checkpoint inference',scenarios:'Five-year hypothetical scenarios',climate:'Climate reanalysis context',radar:'Measured radar context',alerts:'Prioritized alerts',evaluation:'Historical baseline comparison'};
-  return renderAlignedInputs(report)+renderSpatialEvidence(sections.spatial_change || report.spatial_change)+renderClimateContext(sections.climate)+renderRadarContext(sections.radar)+renderRecoveryEvidence(sections.recovery)+renderFragmentation(sections.fragmentation)+renderFiveYearScenarios(sections.scenarios)+coverImportForm()+Object.entries(names).filter(([key])=>sections[key]).map(([key,title])=>`<details class="workflow-section model-hashes"><summary>${esc(title)} · saved computation</summary><pre>${esc(JSON.stringify(sections[key],null,2))}</pre></details>`).join('');
+  return renderObservationEvidence(sections.observations,sections.coverage)+renderConditionEvidence(sections.condition)+renderAlignedInputs(report)+renderSpatialEvidence(sections.spatial_change || report.spatial_change)+renderClimateContext(sections.climate)+renderRadarContext(sections.radar)+renderDriverEvidence(sections.drivers)+renderIndicatorForecast(sections.forecast)+renderResilienceEvidence(sections.resilience)+renderRecoveryEvidence(sections.recovery)+renderFragmentation(sections.fragmentation)+renderWorkflowModel(sections.model)+renderFiveYearScenarios(sections.scenarios)+renderWorkflowAlerts(sections.alerts)+renderWorkflowEvaluation(sections.evaluation)+coverImportForm();
 }
 async function renderWorkflow(id) {
   const request=++workflowRequest;
