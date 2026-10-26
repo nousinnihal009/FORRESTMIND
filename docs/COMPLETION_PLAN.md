@@ -1,6 +1,6 @@
 # Completing ForestMind
 
-Updated October 25, 2026 for the **v0.7.0 research bridge**. The bounded local monitoring application passed its v0.6 acceptance checks. This build adds measured multimodal inputs, independent-reference dataset preparation, partial supervision and offline native execution. The full ecological early-warning proposal is not complete. Software behavior, deployment readiness and scientific predictive validity have separate acceptance gates. Current verification and its limits are recorded in `VALIDATION.md`.
+Updated October 26, 2026 for the **v0.7.0 research bridge**. The bounded local monitoring application passed its v0.6 acceptance checks. This build adds measured multimodal inputs, independent-reference dataset preparation, partial supervision and offline native execution; 814 regression checks and 42 final presentation/radar checks passed. The full ecological early-warning proposal is not complete. The user confirmed no verified reference data is available yet. Software behavior, deployment readiness and scientific predictive validity have separate acceptance gates. Current verification and its limits are recorded in `VALIDATION.md`.
 
 ## Three acceptance gates
 
