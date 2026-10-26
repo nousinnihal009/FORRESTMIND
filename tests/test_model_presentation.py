@@ -59,12 +59,14 @@ def test_aligned_input_summary_retains_partial_feature_coverage_and_no_predictio
       radar:{max_age_days:12,matches:[{scene_id:'one'},{scene_id:null},{scene_id:null},{scene_id:null}]},
       climate:{windows:[{mask:[false,false,false,false]},{mask:[true,true,true,true]},
         {mask:[true,false,true,true]},{mask:[false,false,false,false]}]}}},
-      model:{available:false,reason:'No compatible trained model is registered.'}})""")
+      model:{available:false,reason:'No trusted local model is registered. Supply a real-trained compatible checkpoint and independent evaluation evidence in FORESTMIND_MODEL_REGISTRY.'}})""")
     assert "1 / 4 image dates" in output
     assert "1 / 4 image dates with all measurements" in output
     assert "1 image date has only some measurements" in output
     assert "30 days" in output and "5 days before" in output
     assert "No model prediction was produced" in output
+    assert "No compatible trained model is registered for this area" in output
+    assert "FORESTMIND_MODEL_REGISTRY" not in output
     assert "historical availability has not been verified" in output
 
 
@@ -103,3 +105,19 @@ def test_missing_health_head_does_not_show_a_zero_score_or_empty_class_panel():
     assert "No trained condition-score output" in output
     assert "/ 100 model score" not in output
     assert "<strong>Unavailable</strong>" in output
+
+
+def test_saved_radar_caveat_is_clarified_without_changing_evidence_or_real_zero():
+    legacy = "This separately dated context is not inserted into optical model inputs or monthly observations. A paired trained multimodal model remains a separate requirement."
+    record = {"available": True, "sha256": "saved-source-hash", "scenes": [],
+              "comparison": {"vv_change_db": 0, "vh_change_db": None},
+              "limitations": [legacy, "Unverified <terrain> coverage"]}
+    result = render(f"""(() => {{const data={json.dumps(record)},before=JSON.stringify(data);
+      const html=renderRadarContext(data);return {{html,unchanged:before===JSON.stringify(data)}};}})()""")
+    assert result["unchanged"] is True
+    assert legacy not in result["html"]
+    assert "Individual radar scenes can be prepared for a compatible trained model" in result["html"]
+    assert "pair comparison remains descriptive evidence" in result["html"]
+    assert "Unverified &lt;terrain&gt; coverage" in result["html"]
+    assert "<strong>0</strong>" in result["html"]
+    assert "<strong>—</strong>" in result["html"]
