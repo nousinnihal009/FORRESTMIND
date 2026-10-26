@@ -8,7 +8,7 @@ The provider grid has approximately 10 m spacing; the source's range and azimuth
 
 Results include actual timestamps, orbit identity, unrounded aligned linear-power samples, dB maps, masks, sample/source-metadata hashes, source URLs, units, search bounds and the CC BY 4.0 license. Unsigned STAC metadata is retained. SAS tokens remain in memory, and errors redact signed access queries. Only documented catalog and asset hosts are permitted. Full remote scenes are not downloaded or represented as locally hashed full files.
 
-The context is separate from optical input sequences and monthly index observations. Radar changes may reflect moisture, canopy/ground structure, terrain, speckle or registration effects; they do not identify forest loss or its cause. The two-date comparison is not a seasonal radar model, calibrated uncertainty, or a trained multimodal input. Nodata and positive-power masks do not independently validate local layover/shadow correction or ecological reliability.
+The paired comparison remains descriptive and does not modify monthly optical index observations. Original radar scenes can also be aligned to optical acquisition dates under an explicit grid, unit, age and coverage contract; only a compatible registered model receives those inputs. See [MULTIMODAL_INPUTS.md](MULTIMODAL_INPUTS.md). Radar changes may reflect moisture, canopy/ground structure, terrain, speckle or registration effects; they do not identify forest loss or its cause. Two dates are not a seasonal radar model or calibrated uncertainty. Nodata and positive-power masks do not independently validate local layover/shadow correction or ecological reliability.
 
 ## Operations
 
