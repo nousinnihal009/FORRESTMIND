@@ -301,7 +301,8 @@ function regionFilePreview(payload) {
   const dates=payload.observations.map(row=>row?.date);
   if(dates.some(date=>typeof date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date))throw new Error('Every observation needs a valid calendar date. Ask the data provider to correct the file.');
   dates.sort();
-  return {name:payload.name,count:payload.observations.length,period:dateLabel(dates[0])+' – '+dateLabel(dates.at(-1)),source:isDemo(payload)?'Synthetic example · not real observations':'User-provided observations · not independently verified'};
+  if(payload.synthetic!==undefined&&typeof payload.synthetic!=='boolean')throw new Error('The file must state whether its measurements are synthetic using the supported observation format.');
+  return {name:payload.name,count:payload.observations.length,period:dateLabel(dates[0])+' – '+dateLabel(dates.at(-1)),source:payload.synthetic===true?'Synthetic example · not real observations':`${payload.source || 'User-provided observations'} · not independently verified`};
 }
 async function loadRegionFile(event) {
   const request=++regionImportRead,file=event.target.files[0];regionImportFile=null;
@@ -324,7 +325,7 @@ async function importRegion(event) {
     if(!regionImportFile)throw new Error('Choose an observation file and review its summary before importing.');
     const body=regionImportFile;
     const result=await api('/regions/import',{method:'POST',body:JSON.stringify(body)});
-    $('#import-dialog').close();location.hash='overview';await loadWorkspace(result.id || result.region_id);toast(isDemo(body)?'Synthetic example imported. It remains labeled as demonstration data.':'Region imported and analyzed. Its supplied source is recorded.');
+    $('#import-dialog').close();location.hash='overview';await loadWorkspace(result.id || result.region_id);toast(body.synthetic===true?'Synthetic example imported. It remains labeled as demonstration data.':'Region imported and analyzed. Its supplied source is recorded.');
   }catch(error){$('#import-error').textContent=userMessage(error);$('#import-error').hidden=false;}
   finally{button.disabled=!regionImportFile;}
 }
