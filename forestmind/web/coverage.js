@@ -41,7 +41,7 @@ async function loadCoverage(id, start, end) {
   }catch(error){
     if(request !== coverageRequest || state.selected !== id || state.tab !== 'coverage')return;
     $('#coverage-results').replaceChildren();
-    $('#coverage-error').textContent = error.message;
+    $('#coverage-error').textContent = userMessage(error);
     $('#coverage-error').hidden = false;
   }
 }
