@@ -1,10 +1,29 @@
 /* The selected-area analysis record and alert lifecycle. All output comes from the API. */
 'use strict';
 let workflowRequest=0;
-function workflowText(value) {return typeof value==='string'?value:typeof value==='number'?numeric(value,3):Array.isArray(value)?value.map(workflowText).join(' · '):value?JSON.stringify(value):'Not available';}
+function workflowText(value) {return typeof value==='string'?value:typeof value==='number'?numeric(value,3):typeof value==='boolean'?(value?'Yes':'No'):Array.isArray(value)?value.filter(item=>item===null||typeof item!=='object').map(workflowText).join(' · '):'Not available';}
+function workflowLabel(value) {
+  const labels={sar:'Radar',optical:'Optical imagery',climate:'Climate',activity:'Human activity',insufficient_data:'Insufficient observations',review_signal:'Review suggested',no_joint_increase:'No joint increase detected',candidate_pressure:'Candidate pressure',unresolved:'Unresolved',right_censored:'Still unresolved',censored_missing_months:'Follow-up interrupted by missing months',observed_return:'Return observed',persistence:'Last observed value',seasonal_naive:'Same season last year',damped_trend:'Damped historical trend',active:'Open',low_coverage:'Low image coverage',missing_indices:'Missing spectral measurements'};
+  return labels[value] || (typeof humanLabel==='function'?humanLabel(value):String(value || 'Not available').replaceAll('_',' '));
+}
+function workflowReason(value) {
+  return workflowText(value).replace('No trusted local model is registered. Supply a real-trained compatible checkpoint and independent evaluation evidence in FORESTMIND_MODEL_REGISTRY.','No compatible trained model is registered for this area. A model trained on real observations and independently evaluated for this use is required.');
+}
+function workflowNumber(value,digits=2,unit='') {return Number.isFinite(value)?numeric(value,digits)+unit:'Not available';}
+function workflowPercent(value) {return Number.isFinite(value)?pct(value):'Not available';}
+function workflowFacts(items) {return `<dl class="workflow-facts">${items.map(([label,value])=>`<div><dt>${esc(label)}</dt><dd>${esc(workflowText(value))}</dd></div>`).join('')}</dl>`;}
+function workflowList(items) {return items?.length?`<ul class="workflow-evidence-list">${items.map(value=>`<li>${esc(workflowReason(value))}</li>`).join('')}</ul>`:'';}
+function workflowTable(headings,rows) {return `<div class="table-scroll"><table class="workflow-results-table"><thead><tr>${headings.map(label=>`<th>${esc(label)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(value=>`<td>${esc(workflowText(value))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;}
+function workflowUnavailable(title,data,fallback) {return `<section class="spatial-evidence"><h3>${esc(title)}</h3><p class="observations-empty"><strong>Not available.</strong> ${esc(workflowReason(data?.reason || data?.caveat || fallback))}</p></section>`;}
+function workflowCapabilityEvidence(item) {
+  const evidence=item.evidence;if(!evidence)return '';
+  if(item.id==='optical'&&Number.isFinite(evidence.count))return `<p>${numeric(evidence.count)} dated observations retained.</p>`;
+  if(item.id==='aligned_inputs')return `<p>${esc(evidence.modalities?.length?evidence.modalities.map(workflowLabel).join(' · '):'No model-ready measurements yet.')}</p>${workflowList(Object.entries(evidence.errors || {}).filter(([,reason])=>reason).map(([name,reason])=>workflowLabel(name)+': '+workflowReason(reason)))}`;
+  return typeof evidence==='string'?`<p>${esc(evidence)}</p>`:'';
+}
 function workflowCapabilities(items) {
   const available=items.filter(item=>item.available).length;
-  return `<details class="workflow-readiness model-hashes"><summary>Analysis readiness and missing evidence · ${available} with output · ${items.length-available} need more evidence</summary><div class="workflow-capabilities">${items.map(item=>`<article class="capability-card"><div><h3>${esc(item.name || item.id)}</h3>${badge(item.status || (item.available?'Available':'Unavailable'))}</div><p>${esc(item.reason || item.description || '')}</p>${item.requires?.length?`<details><summary>Required evidence</summary><ul>${item.requires.map(value=>`<li>${esc(workflowText(value))}</li>`).join('')}</ul></details>`:''}${item.evidence?`<details><summary>Evidence and computation</summary><p>${esc(workflowText(item.evidence))}</p></details>`:''}</article>`).join('')}</div></details>`;
+  return `<details class="workflow-readiness"><summary>Analysis readiness and missing evidence · ${available} with output · ${items.length-available} need more evidence</summary><div class="workflow-capabilities">${items.map(item=>`<article class="capability-card"><div><h3>${esc(item.name || workflowLabel(item.id))}</h3>${badge(workflowLabel(item.status || (item.available?'Available':'Unavailable')))}</div><p>${esc(workflowReason(item.reason || item.description || 'No assessment recorded.'))}</p>${workflowCapabilityEvidence(item)}${item.requires?.length?`<details><summary>Required evidence</summary>${workflowList(item.requires)}</details>`:''}</article>`).join('')}</div></details>`;
 }
 function collectionErrors(report) {
   const names={climate:'Climate context',radar:'Radar context',forest_cover:'Forest-cover reference'};
