@@ -31,14 +31,49 @@ function observationSource(region) {return isDemo(region)?'Synthetic observation
 function statusClass(value) {const s = String(value).toLowerCase(); return /severe|critical|degrad|high/.test(s) ? 'critical' : /stress|watch|warning|elevat/.test(s) ? 'warning' : /unknown|insuff|unavail/.test(s) ? 'neutral' : '';}
 function badge(value) {return `<span class="status ${statusClass(value)}">${esc(String(value || 'Unavailable').replaceAll('_', ' '))}</span>`;}
 function pct(value) {return typeof value === 'number' && Number.isFinite(value) ? numeric(value * 100) + '%' : '—';}
+function humanLabel(value) {
+  const names={ndvi:'Vegetation index (NDVI)',ndmi:'Moisture index (NDMI)',nbr:'Burn-sensitive index (NBR)',valid_fraction:'Usable pixels',geometry:'Area boundary',observed_at:'Observation date',observed_through:'Last observation',region_id:'Monitoring region',pressure_reduction:'Human pressure reduction',fire_reduction:'Fire pressure reduction',climate_stress:'Additional climate stress',restoration:'Restoration intensity',uncalibrated:'Accuracy not calibrated',not_available:'Unavailable',local_registered_execution:'Run locally',imported_unverified:'Imported · unverified',damped_trend:'Damped trend baseline',seasonal_naive:'Same month in the previous year',persistence:'Last observed value'};
+  const text=String(value ?? '').trim();
+  return names[text] || text.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]+/g,' ').replace(/^./,c=>c.toUpperCase()) || 'Not provided';
+}
+function readableValue(value) {
+  if(value===null||value===undefined)return 'Not available';
+  if(typeof value==='boolean')return value?'Yes':'No';
+  if(typeof value==='number')return numeric(value,3);
+  if(typeof value==='string')return value;
+  if(Array.isArray(value))return value.length?value.map(readableValue).join(' · '):'None recorded';
+  return value.description || value.reason || value.label || value.name || 'Full details are included in the downloaded report.';
+}
+function userMessage(error, fallback='This action could not be completed. Please try again.') {
+  const message=typeof error==='string'?error:error?.message;
+  if(!message)return fallback;
+  if(/failed to fetch|networkerror|network request failed|load failed/i.test(message))return 'The local workspace could not be reached. Check that ForestMind is running, then try again.';
+  if(/FORESTMIND_MODEL_REGISTRY/.test(message))return 'No compatible trained model is registered for this area.';
+  if(/traceback|\bat \S+ \(.+:\d+:\d+\)|[A-Za-z]:[\\/]|\b(?:TypeError|ReferenceError|SyntaxError|KeyError|ValueError|RuntimeError|HTTPError|HTTPSConnectionPool)\b|\bFORESTMIND_[A-Z_]+\b|<!doctype|<html|\[object Object\]/i.test(message)||/^\s*[\[{]/.test(message))return fallback;
+  return message;
+}
+function validationMessage(detail) {
+  return detail.slice(0,5).map(item=>{
+    const parts=(item.loc || []).filter(p=>!['body','query','path'].includes(p));
+    const label=parts.map(part=>typeof part==='number'?'record '+(part+1):humanLabel(part)).join(' · ');
+    let message=String(item.msg || 'Check this value.').replace(/^Value error, /,'');
+    if(item.type==='missing')message='This information is required.';
+    else if(item.type==='extra_forbidden')message='This field is not supported by this import format.';
+    else message=userMessage(message,'Check this value and try again.');
+    return (label?label+': ':'')+message;
+  }).join('\n')+(detail.length>5?'\nMore fields need attention. Review the file against the import guide.':'');
+}
 function toast(message) {const node = $('#toast'); node.textContent = message; node.hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => {node.hidden = true;}, 5000);}
-function reportError(error) {const node = $('#error-banner'); node.replaceChildren(document.createTextNode(error.message || 'The request failed.')); const retry = document.createElement('button'); retry.textContent = 'Retry connection'; retry.addEventListener('click', loadWorkspace); node.append(retry); node.hidden = false;}
+function reportError(error) {const node = $('#error-banner'); node.replaceChildren(document.createTextNode(userMessage(error))); const retry = document.createElement('button'); retry.textContent = 'Refresh workspace'; retry.addEventListener('click', loadWorkspace); node.append(retry); node.hidden = false;}
 async function api(path, options = {}) {
-  const response = await fetch('/api/v1' + path, {headers: {'Content-Type': 'application/json'}, ...options});
+  let response;
+  try {response = await fetch('/api/v1' + path, {headers: {'Content-Type': 'application/json'}, ...options});}
+  catch(error){throw new Error(userMessage(error,'The local workspace could not be reached. Please try again.'));}
   if (!response.ok) {
     let body; try {body = await response.json();} catch {body = {};}
     const detail = body.detail;
-    const message = Array.isArray(detail) ? detail.map(item => `${(item.loc || []).filter(p => p !== 'body').join('.')}: ${item.msg}`).join('\n') : typeof detail === 'string' ? detail : `Request failed (${response.status}).`;
+    const fallback=response.status>=500?'ForestMind could not complete this request. Please retry; if it continues, the local service needs attention.':response.status===404?'This saved item is no longer available. Refresh the workspace.':response.status===413?'This file is too large. Choose a file smaller than the displayed limit.':'This request could not be accepted. Check the supplied information and try again.';
+    const message = response.status>=500?fallback:Array.isArray(detail) ? validationMessage(detail) : userMessage(detail,fallback);
     throw new Error(message);
   }
   return response.json();
@@ -221,7 +256,7 @@ async function runAnalysis() {
     let job=await api('/analysis',{method:'POST',body:JSON.stringify({region_id:id})});
     for(let n=0;n<120&&!['completed','failed'].includes(job.status);n++){await new Promise(resolve=>setTimeout(resolve,500));job=await api('/analysis/'+encodeURIComponent(job.id));}
     if(job.status==='failed')throw new Error(job.error || 'Analysis failed. Check the observation record.');
-    if(job.status!=='completed')throw new Error('Analysis is still running. Job '+job.id+' can be checked in the API.');
+    if(job.status!=='completed')throw new Error('Analysis is still running. Refresh the workspace shortly to view its result.');
     await loadWorkspace(id);toast('Analysis complete. Evidence and forecasts refreshed.');
   }catch(error){reportError(error);}
   finally{button.disabled=false;button.innerHTML=icon('refresh',14)+' Run analysis';}
@@ -237,13 +272,13 @@ async function runScenario(event) {
       const snapshot=await ensureWorkflowSnapshot(values.region_id);
       const parameters={...values,manifest_id:snapshot.manifest.id};delete parameters.region_id;
       result=await api('/regions/'+encodeURIComponent(values.region_id)+'/workflow/scenarios',{method:'POST',body:JSON.stringify(parameters)});
-      result={...result,scenario:result.comparisons[0].points,caveat:result.limitations.join(' '),historical:snapshot.forecast.historical};
+      result={...result,scenario:result.comparisons[0]?.points || [],caveat:result.limitations.join(' '),historical:snapshot.forecast.historical};
     }else result=await api('/scenarios',{method:'POST',body:JSON.stringify(values)});
     const region=await api('/regions/'+encodeURIComponent(values.region_id));
     state.scenario=result;
     if(!result.baseline.length){$('#scenario-results').innerHTML='<div class="empty-state"><h2>More observations are needed</h2><p>This region has no eligible forecast. No scenario projection was produced. Supply twelve consecutive usable monthly records, including the latest month.</p></div>';return;}
     const b=result.baseline.at(-1),s=result.scenario.at(-1),delta=b&&s?s.score-b.score:null;
-    const assumptions=Array.isArray(result.assumptions)?result.assumptions:Object.entries(result.assumptions||{}).map(([k,v])=>`${k}: ${typeof v==='object'?JSON.stringify(v):v}`);
+    const assumptions=Array.isArray(result.assumptions)?result.assumptions.map(readableValue):Object.entries(result.assumptions||{}).map(([k,v])=>`${humanLabel(k)}: ${readableValue(v)}`);
     $('#scenario-results').innerHTML=`<div class="panel-heading"><div><div class="eyebrow">EXPLICIT ASSUMPTIONS · ILLUSTRATIVE OUTPUT</div><h2>${esc(region.name)}</h2></div>${badge('Uncalibrated')}</div><div class="scenario-result-body"><div class="scenario-metrics"><div class="scenario-metric"><small>Baseline · ${b?.horizon_days || '—'} days</small><strong>${numeric(b?.score,1)}</strong></div><div class="scenario-metric"><small>Scenario · same horizon</small><strong>${numeric(s?.score,1)}</strong></div><div class="scenario-metric"><small>Condition-point difference</small><strong>${typeof delta==='number'&&delta>0?'+':''}${numeric(delta,1)}</strong></div></div><div class="chart-topline"><div class="chart-legend"><span><i class="legend-line"></i>Observed</span><span><i class="legend-line dashed"></i>Baseline</span><span><i class="legend-line" style="border-color:#b3935c"></i>Scenario</span></div></div>${chart((result.historical || region.forecast.historical).slice(-12),result.baseline,{alternative:result.scenario,label:'Baseline and hypothetical scenario condition trajectories'})}<div class="evidence-disclaimer">${esc(result.caveat)}</div><div class="scenario-assumptions"><strong>Assumptions saved with this comparison</strong><ul>${assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul><button id="export-scenario" class="button secondary">${icon('download',14)}Export comparison</button></div></div>`;
     $('#export-scenario').addEventListener('click',()=>downloadJSON(state.scenario,'forestmind-scenario-'+state.scenario.id+'.json'));
     toast('Scenario comparison saved.');
@@ -251,18 +286,45 @@ async function runScenario(event) {
   finally{button.disabled=false;}
 }
 function downloadJSON(data, filename) {const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-function openImport() {$('#import-error').hidden=true;$('#import-dialog').showModal();}
-async function fillTemplate() {try {$('#import-error').hidden=true;$('#import-json').value=JSON.stringify(await api('/import-example'),null,2);$('#file-name').textContent='Example template · replace with your observations';}catch(e){toast(e.message);}}
+let regionImportFile=null,regionImportRead=0;
+function openImport() {
+  ++regionImportRead;regionImportFile=null;$('#import-form').reset();$('#import-error').hidden=true;$('#import-preview').hidden=true;
+  $('#file-name').textContent='Prepared observations · maximum 2 MB';$('#submit-import').disabled=true;$('#import-dialog').showModal();
+}
+function regionFilePreview(payload) {
+  if(!payload||typeof payload!=='object'||Array.isArray(payload))throw new Error('Choose a ForestMind observation file containing a region and its dated observations.');
+  if(typeof payload.name!=='string'||!payload.name.trim())throw new Error('This file is missing the monitoring region name.');
+  if(payload.geometry?.type!=='Polygon'||!Array.isArray(payload.geometry.coordinates))throw new Error('This file is missing the monitoring area boundary.');
+  if(!Array.isArray(payload.observations)||!payload.observations.length)throw new Error('This file has no dated observations to import.');
+  const dates=payload.observations.map(row=>row?.date);
+  if(dates.some(date=>typeof date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date))throw new Error('Every observation needs a valid calendar date. Ask the data provider to correct the file.');
+  dates.sort();
+  return {name:payload.name,count:payload.observations.length,period:dateLabel(dates[0])+' – '+dateLabel(dates.at(-1)),source:isDemo(payload)?'Synthetic example · not real observations':'User-provided observations · not independently verified'};
+}
+async function loadRegionFile(event) {
+  const request=++regionImportRead,file=event.target.files[0];regionImportFile=null;
+  $('#submit-import').disabled=true;$('#import-preview').hidden=true;$('#import-error').hidden=true;$('#file-name').textContent=file?.name || 'Prepared observations · maximum 2 MB';
+  if(!file)return;
+  try {
+    if(file.size>2*1024*1024)throw new Error('Choose an observation file smaller than 2 MB.');
+    let payload;try{payload=JSON.parse(await file.text());}catch{throw new Error('This file could not be read as a ForestMind observation file. Choose a valid JSON file from your data provider.');}
+    const preview=regionFilePreview(payload);if(request!==regionImportRead)return;
+    regionImportFile=payload;
+    $('#import-preview-region').textContent=preview.name;$('#import-preview-period').textContent=preview.period;
+    $('#import-preview-count').textContent=numeric(preview.count);$('#import-preview-source').textContent=preview.source;
+    $('#import-preview').hidden=false;$('#submit-import').disabled=false;
+  }catch(error){if(request!==regionImportRead)return;$('#import-error').textContent=userMessage(error,'This file could not be read. Please choose it again.');$('#import-error').hidden=false;}
+}
+async function downloadObservationTemplate(){try{downloadJSON(await api('/import-example'),'forestmind-observation-example.json');toast('Example downloaded. Its measurements are synthetic; replace them with your own dated evidence before using it as real data.');}catch(error){toast(userMessage(error));}}
 async function importRegion(event) {
   event.preventDefault();const button=$('#submit-import');button.disabled=true;$('#import-error').hidden=true;
   try{
-    const raw=$('#import-json').value;
-    if(new TextEncoder().encode(raw).length>2*1024*1024)throw new Error('Keep the JSON payload below 2 MB.');
-    let body;try{body=JSON.parse(raw);}catch{throw new Error('This is not valid JSON. Check commas, quotation marks, and brackets.');}
+    if(!regionImportFile)throw new Error('Choose an observation file and review its summary before importing.');
+    const body=regionImportFile;
     const result=await api('/regions/import',{method:'POST',body:JSON.stringify(body)});
-    $('#import-dialog').close();location.hash='overview';await loadWorkspace(result.id || result.region_id);toast('Region imported and analyzed. Source recorded as user-provided.');
-  }catch(error){$('#import-error').textContent=error.message;$('#import-error').hidden=false;}
-  finally{button.disabled=false;}
+    $('#import-dialog').close();location.hash='overview';await loadWorkspace(result.id || result.region_id);toast(isDemo(body)?'Synthetic example imported. It remains labeled as demonstration data.':'Region imported and analyzed. Its supplied source is recorded.');
+  }catch(error){$('#import-error').textContent=userMessage(error);$('#import-error').hidden=false;}
+  finally{button.disabled=!regionImportFile;}
 }
 hydrateIcons();route();
 window.addEventListener('hashchange',route);
@@ -285,9 +347,8 @@ $$('input[type="range"]').forEach(el=>el.addEventListener('input',invalidateScen
 $$('.import-trigger').forEach(el=>el.addEventListener('click',openImport));
 $('#close-import').addEventListener('click',()=>$('#import-dialog').close());
 $('#import-form').addEventListener('submit',importRegion);
-$('#import-json').addEventListener('input',()=>{$('#import-error').hidden=true;});
-$('#fill-template').addEventListener('click',fillTemplate);
-$('#download-template').addEventListener('click',async()=>{try{downloadJSON(await api('/import-example'),'forestmind-observation-template.json');}catch(error){toast(error.message);}});
-$('#import-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;if(file.size>2*1024*1024){$('#import-error').textContent='Choose a JSON file smaller than 2 MB.';$('#import-error').hidden=false;return;}$('#import-json').value=await file.text();$('#file-name').textContent=file.name;$('#import-error').hidden=true;});
+$('#download-template').addEventListener('click',downloadObservationTemplate);
+$('#download-import-template').addEventListener('click',downloadObservationTemplate);
+$('#import-file').addEventListener('change',loadRegionFile);
 $('#refresh-data').addEventListener('click',async()=>{await loadWorkspace();toast('Workspace refreshed.');});
 loadWorkspace();
