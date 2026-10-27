@@ -1,4 +1,15 @@
-# Continuation record — 2026-10-26
+# Continuation record — 2026-10-28
+
+## Readable interface cleanup — October 28
+
+The current user request is to fix the raw data and code-like controls shown in screenshots, then review the rest of the interface. Saved changes replace connected-analysis JSON panels with readable summaries, measurement tables, dates and explicit unavailable states. Observation, forest-cover and model-report imports now use file selection and readable previews instead of code editors. Service, acquisition and notification status use understandable messages; full technical records remain available as downloads.
+
+- Preview validation clears rejected or replaced files, guards against stale asynchronous reads and a changed selected region, and checks dates and forest-cover geometry. Missing values remain distinct from genuine zero values. Five-year scenarios with insufficient history no longer dereference an absent comparison.
+- Full regression completed: **857 passed in 132.30 seconds**, `artifacts/regression-ui-20261027.txt`. All web JavaScript files passed `node --check` on October 28. New checks cover readable errors, imports, workflow summaries, missing outputs, operations and unchanged downloads.
+- The running verification preview at `http://127.0.0.1:8001/` uses **`artifacts/research-preview-20261025.db`, a copy of the workspace database**. Do not assume edits there update the original workspace. The historical packaged v0.7.0 wheel below predates this interface cleanup; current verification concerns the source preview.
+- Browser review at desktop 1280×900 and mobile 390×844 expanded every connected-analysis disclosure: no raw `pre`, `code` or `textarea` elements, and document widths matched scroll widths (1265/1265 and 375/375). Screenshots: `artifacts/ui-readable-measurements-20261028.png` and `artifacts/ui-mobile-measurements-20261028.png`. Browser export `artifacts/ui-workflow-export-20261028.json` retains SHA256 `e9880c34b0c12a5fdff2bc152047539a3cf54d2db6a9b03eac7ae7719b4b918d`, exactly matching the prior saved record.
+- Final browser review found one additional scenario error-state issue: insufficient-history failures used the global error area and left stale results. A contextual error-state fix and focused regression check are in progress. Confirm their results and the final preview database before handing off.
+- This interface repair does not complete the original scientific proposal. The user has **no independently verified reference data yet**; a trained, independently validated real model and validated tipping-point predictions remain unavailable. Continue to preserve the evidence limitations listed in `COMPLETION_PLAN.md` and `TRAINING_DATA.md`.
 
 ## Verified v0.7 research bridge — October 26
 
