@@ -115,3 +115,22 @@ def test_static_markup_has_no_code_editors_or_json_output_blocks():
         assert 'id="import-json"' not in text, path.name
         assert 'id="model-import-json"' not in text, path.name
         assert 'id="cover-import-json"' not in text, path.name
+
+
+@pytest.mark.parametrize("native_error", [False, True])
+def test_failed_scenario_clears_old_result_and_keeps_feedback_in_comparison(native_error):
+    error = "new TypeError('Cannot read properties of undefined')" if native_error else "new Error('Twelve usable months are required.')"
+    result = run_js(f"""(async()=>{{
+      state.scenario={{id:'old'}};
+      $('#scenario-results').innerHTML='Old comparison and export';
+      $('#error-banner').hidden=true;
+      api=async()=>{{throw {error};}};
+      await runScenario({{preventDefault(){{}}}});
+      return {{html:$('#scenario-results').innerHTML,retained:state.scenario,
+        enabled:!$('#compare-scenario').disabled,globalHidden:$('#error-banner').hidden}};}})()""")
+    assert result["retained"] is None
+    assert result["enabled"] and result["globalHidden"]
+    assert "Comparison unavailable" in result["html"]
+    assert "Old comparison" not in result["html"]
+    assert "TypeError" not in result["html"]
+    assert ("Please try again" if native_error else "Twelve usable months") in result["html"]
