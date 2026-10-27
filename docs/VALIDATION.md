@@ -1,5 +1,19 @@
 # Build verification
 
+## Readable interface cleanup — October 28, 2026
+
+The source preview replaces raw JSON result panels with readable cards, tables, dates and unavailable states. Observation, forest-cover and model-report imports have file previews rather than editable code. Acquisition and service status, notification messages and validation errors use plain language. Downloaded records retain the complete technical data.
+
+- Full regression: **857 passed in 132.30 seconds**, no failures or skips. Evidence: `artifacts/regression-ui-20261027.txt`. All web JavaScript files also passed `node --check` on October 28.
+- Regression coverage includes rejected/replaced/stale file selections, calendar dates, exact forest-cover geometry independent of property order, changed-region import guards, synthetic provenance, actual zero versus missing values, readable API/native errors, empty five-year comparisons, independent service failures, existing monitoring intervals and original download payloads.
+- Verification uses the copied database `artifacts/research-preview-20261025.db` at `http://127.0.0.1:8001/`. This section describes the updated source preview; the packaged v0.7.0 wheel recorded below predates these UI changes.
+
+Browser review at desktop 1280×900 and mobile 390×844 expanded every connected-analysis disclosure. Both views had no raw `pre`, `code` or `textarea` elements, and document widths equaled scroll widths (1265/1265 and 375/375). Screenshots are saved in `artifacts/ui-readable-measurements-20261028.png` and `artifacts/ui-mobile-measurements-20261028.png`. The browser-downloaded record, `artifacts/ui-workflow-export-20261028.json`, has SHA256 `e9880c34b0c12a5fdff2bc152047539a3cf54d2db6a9b03eac7ae7719b4b918d`, exactly matching the previously saved record.
+
+The final browser review also identified a remaining scenario error-state issue: an insufficient-history response used the global error area and left stale scenario results visible. Its contextual error-state fix and focused check are in progress; the full regression count above predates that final adjustment. Final preview database selection is also pending handoff confirmation.
+
+No new training evidence is supplied by this UI work. The user has no independently verified reference data, and no real-trained, independently validated forest model or validated tipping-point forecast is claimed.
+
 ## v0.7 research bridge — October 26, 2026
 
 This build adds measured optical/radar/climate input alignment, a protected independent-reference dataset converter, partial target supervision, unsupported-output withholding and pinned offline native checkpoint execution. The user confirmed on October 26 that **no verified reference data is available yet**. No real-trained model, ecological forecast accuracy, causal attribution or tipping-point prediction is claimed. Remaining implementation and evidence dependencies are listed in `COMPLETION_PLAN.md`.
