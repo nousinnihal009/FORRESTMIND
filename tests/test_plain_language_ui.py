@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run_js(script):
+def run_js(script, extra_scripts=()):
     node = shutil.which("node")
     if not node:
         pytest.skip("Node.js is required for interactive presentation checks")
@@ -22,6 +22,7 @@ const context={{document:{{querySelector:element,querySelectorAll:()=>[]}},conso
  location:{{hash:''}},setTimeout,clearTimeout}};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync({json.dumps(str(ROOT/'forestmind/web/app.js'))},'utf8').split('hydrateIcons();route();')[0],context);
+for(const path of {json.dumps([str(ROOT/'forestmind/web'/name) for name in extra_scripts])})vm.runInContext(fs.readFileSync(path,'utf8'),context);
 Promise.resolve(vm.runInContext({json.dumps(script)},context)).then(value=>process.stdout.write(JSON.stringify(value))).catch(error=>{{console.error(error);process.exit(1);}});
 """
     result = subprocess.run([node, "-e", source], text=True, encoding="utf-8", capture_output=True, check=True, timeout=30)
