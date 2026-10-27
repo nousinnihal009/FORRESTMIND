@@ -49,6 +49,15 @@ def test_api_server_error_does_not_render_internal_exception_details():
     assert "traceback" not in result
 
 
+def test_native_exceptions_use_context_but_network_errors_remain_actionable():
+    result = run_js("""[userMessage(new TypeError("Cannot read properties of undefined (reading 'points')"),'Could not prepare this result.'),
+      userMessage(new ReferenceError('missing is not defined')),
+      userMessage(new TypeError('Failed to fetch'))]""")
+    assert result[0] == 'Could not prepare this result.'
+    assert result[1] == 'This action could not be completed. Please try again.'
+    assert 'local workspace could not be reached' in result[2]
+
+
 def test_import_preview_preserves_demo_label_and_missing_measurements():
     result = run_js("""regionFilePreview({name:'Example',geometry:{type:'Polygon',coordinates:[]},
       observations:[{date:'2024-02-01',ndvi:null},{date:'2024-01-01',ndvi:0}],synthetic:true})""")
