@@ -47,11 +47,12 @@ function readableValue(value) {
   return value.description || value.reason || value.label || value.name || 'Full details are included in the downloaded report.';
 }
 function userMessage(error, fallback='This action could not be completed. Please try again.') {
+  if(['TypeError','ReferenceError','SyntaxError','RangeError'].includes(error?.name)&&!/failed to fetch|networkerror|network request failed|load failed/i.test(error.message || ''))return fallback;
   const message=typeof error==='string'?error:error?.message;
   if(!message)return fallback;
   if(/failed to fetch|networkerror|network request failed|load failed/i.test(message))return 'The local workspace could not be reached. Check that ForestMind is running, then try again.';
   if(/FORESTMIND_MODEL_REGISTRY/.test(message))return 'No compatible trained model is registered for this area.';
-  if(/traceback|\bat \S+ \(.+:\d+:\d+\)|[A-Za-z]:[\\/]|\b(?:TypeError|ReferenceError|SyntaxError|KeyError|ValueError|RuntimeError|HTTPError|HTTPSConnectionPool)\b|\bFORESTMIND_[A-Z_]+\b|<!doctype|<html|\[object Object\]/i.test(message)||/^\s*[\[{]/.test(message))return fallback;
+  if(/traceback|\bat \S+ \(.+:\d+:\d+\)|[A-Za-z]:[\\/]|\b(?:TypeError|ReferenceError|SyntaxError|KeyError|ValueError|RuntimeError|HTTPError|HTTPSConnectionPool)\b|cannot read properties|is not defined|is not a function|unexpected token|\bFORESTMIND_[A-Z_]+\b|<!doctype|<html|\[object Object\]/i.test(message)||/^\s*[\[{]/.test(message))return fallback;
   return message;
 }
 function validationMessage(detail) {
