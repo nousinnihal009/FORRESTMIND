@@ -1,0 +1,16 @@
+{
+  "name": "Mudumalai forest pilot, Tamil Nadu",
+  "country": "India",
+  "bbox": [76.5238, 11.5889, 76.5438, 11.6089],
+  "provider": "earth-search",
+  "start": "2026-07-01",
+  "end": "2026-10-27",
+  "patch_size": 64,
+  "max_cloud_cover": 60,
+  "min_valid_fraction": 0.6,
+  "candidates_per_month": 3,
+  "search_limit": 30,
+  "max_attempts": 12,
+  "max_downloads": 6,
+  "timeout_seconds": 30
+}
