@@ -26,6 +26,19 @@ function esc(value) {return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 function numeric(value, digits = 0) {return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('en-US', {maximumFractionDigits: digits, minimumFractionDigits: digits}) : '—';}
 function dateLabel(value, short = false) {if (!value) return 'Unavailable'; const d = new Date(value.slice(0, 10) + 'T00:00:00Z'); return Number.isNaN(+d) ? value : new Intl.DateTimeFormat('en', {month: 'short', ...(short ? {} : {day:'numeric'}), year:'numeric', timeZone:'UTC'}).format(d);}
 function isDemo(region) {return Boolean(region.provenance?.synthetic || String(region.provenance?.mode || region.provenance?.data_mode || region.provenance?.source || '').match(/synthetic|demo/i));}
+function rememberedRegionId() {
+  try {return localStorage.getItem('forestmind.selectedRegion');} catch {return null;}
+}
+function rememberRegion(id) {
+  // Storage can be unavailable in private sessions; opening an area must still work.
+  try {localStorage.setItem('forestmind.selectedRegion',id);} catch {}
+}
+function preferredRegionId(regions, requestedId) {
+  for(const id of [requestedId,state.selected,rememberedRegionId()]) {
+    if(typeof id==='string'&&regions.some(region=>region.id===id))return id;
+  }
+  return regions.find(region=>!isDemo(region))?.id || regions[0]?.id || null;
+}
 function isAcquired(region) {return region.provenance?.mode === 'satellite_acquisition';}
 function observationSource(region) {return isDemo(region)?'Synthetic observations':isAcquired(region)?'Satellite observations':'User-provided observations';}
 function sourceSummary(region) {const source=region.provenance?.source || '';return isDemo(region)?'Synthetic example observations':source.startsWith('Cached sentinel2 surface reflectance')?'Sentinel-2 satellite surface measurements':source || 'Source recorded with observations';}
@@ -104,9 +117,9 @@ async function loadWorkspace(selectId) {
     const previous = $('#scenario-region').value;
     $('#scenario-region').innerHTML = regions.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('');
     if (regions.some(r => r.id === previous)) $('#scenario-region').value = previous;
-    const id = typeof selectId === 'string' ? selectId : state.selected || regions[0]?.id;
+    const id = preferredRegionId(regions,selectId);
     if (id) await selectRegion(id);
-    else {$('#detail-title').textContent = 'No regions yet'; $('#detail-body').innerHTML = '<p class="observations-empty"><a class="text-link" href="#explore">Find a forest and collect real observations</a>, or import an existing record to start monitoring.</p>'; renderMap();}
+    else {state.selected=null;state.region=null;$('#run-analysis').disabled=true;$('#export-region').disabled=true;$('#detail-title').textContent = 'No regions yet'; $('#detail-body').innerHTML = '<p class="observations-empty"><a class="text-link" href="#explore">Find a forest and collect real observations</a>, or import an existing record to start monitoring.</p>'; renderMap();}
   } catch (error) {reportError(error);}
 }
 function renderMetrics() {
@@ -174,6 +187,7 @@ async function selectRegion(id) {
     if($('#scenario-region').value!==id)invalidateScenario();
     $('#scenario-region').value=id;
     renderMap();renderDetail();
+    rememberRegion(id);
   }catch(error){if(request===state.request){state.region=null;$('#detail-body').innerHTML='<p class="observations-empty">Could not load this region. Retry the connection above.</p>';reportError(error);}}
   finally{if(request===state.request){$('#run-analysis').disabled=!state.region;$('#export-region').disabled=!state.region;}}
 }
