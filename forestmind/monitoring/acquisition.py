@@ -661,7 +661,21 @@ class AcquisitionService:
         with self.store.connection() as db:
             row = db.execute("SELECT payload FROM acquisition_areas WHERE region_id=?", (region_id,)).fetchone()
             snapshots = [json.loads(item[0]) for item in db.execute("SELECT payload FROM acquisition_snapshots WHERE region_id=? ORDER BY rowid", (region_id,))]
-        return {"configuration": json.loads(row[0]) if row else None, "schedule": self.schedule(region_id),
+            configuration = json.loads(row[0]) if row else None
+            if configuration:
+                # A targeted refresh is one batch, not a redefinition of the
+                # study. Recover the requested span from durable jobs, including
+                # failed backfills, without rewriting original requests or old
+                # snapshots. This also repairs the view of pre-existing areas
+                # whose last successful refresh narrowed their configuration.
+                periods = [configuration["request"]]
+                periods.extend(json.loads(item[0])["request"] for item in db.execute(
+                    "SELECT payload FROM acquisition_jobs WHERE region_id=?", (region_id,)))
+                configuration["study_period"] = {
+                    "start": min(period["start"] for period in periods),
+                    "end": max(period["end"] for period in periods),
+                }
+        return {"configuration": configuration, "schedule": self.schedule(region_id),
                 "jobs": self.jobs(region_id), "snapshots": snapshots,
                 "local_schedule_notice": "Scheduled updates run only while this local service is running"}
 
@@ -670,6 +684,7 @@ class AcquisitionService:
         if not area["configuration"]:
             raise AcquisitionConflict("Only areas created by satellite acquisition can refresh automatically")
         request = area["configuration"]["request"].copy()
+        study_period = area["configuration"]["study_period"]
         values = values or {}
         request["end"] = values.get("end") or datetime.now(timezone.utc).date().isoformat()
         if values.get("start"):
@@ -678,7 +693,7 @@ class AcquisitionService:
             end = date.fromisoformat(request["end"])
             month_index = end.year * 12 + end.month - LIMITS["max_months"]
             earliest = date(month_index // 12, month_index % 12 + 1, 1).isoformat()
-            request["start"] = max(request["start"], earliest)
+            request["start"] = max(study_period["start"], earliest)
         if values.get("max_downloads") is not None:
             request["max_downloads"] = values["max_downloads"]
         return self.submit(request, region_id=region_id)
