@@ -31,6 +31,19 @@ No manual download or payment is needed from the user for the present pilot. Net
 
 The initial job `acq-5cce7597488a421a` accepted a real **30 August 2026** observation. The original historical job `acq-94f09e09a0434c16` exhausted its first budget after repeated raster-read failures. On October 29, a bounded diagnostic successfully read all twelve reflectance bands plus SCL from its previously failing 20 August 2025 candidate, without replacing any cached evidence. The diagnostic is saved in `artifacts/mudumalai-band-diagnostic-20261029.json`. This supports a transient access failure; it does not establish the precise cause of the earlier errors.
 
-Further collection and final verification are recorded in `IMPLEMENTATION_PROGRESS.md` and `VALIDATION.md`. Preserve the frozen plans, progress reports, source files and immutable exports when continuing after an interruption.
+The completed October 29 continuation saved **nine actual optical observations**:
+
+| Year | Accepted acquisition dates |
+| --- | --- |
+| 2025 | October 12, November 6, December 13 |
+| 2026 | January 22, February 4, March 21, April 22, May 12, August 30 |
+
+June and July 2026 remain missing inside the observed period. The broader requested July 2025–October 2026 coverage also lacks July–September 2025 and September–October 2026. July 2025 had no eligible catalog candidates under the chosen settings; other gaps include failed reads, rejected local quality and untried candidates after a budget stop. The September–October refresh `acq-d0b114b6217e4e68` spent its six-attempt budget on failed September reads, leaving October untried. A missing month is not evidence that no change occurred.
+
+ERA5 context from Open-Meteo is saved for **October 12, 2025–August 30, 2026**, with eleven monthly summaries of temperature, rainfall, reference evapotranspiration and surface soil moisture. October and August are partial months. Seven of nine optical dates have all required measurements in their trailing climate windows. Reanalysis is model-based context at the centroid, not field measurements or a validated drought diagnosis. No radar collection or model prediction was performed for this pilot.
+
+The final analysis manifest is `7c87063bcd044e9dca0b801bdd698e46050a40f065ead3732ec2108c8a4aa580`. Export: `artifacts/mudumalai-analysis-20261029.json`, SHA256 `f58861ed7ff9b04918837f330f62ffe1214c63dcde9b9149f98a42fbc9779807`. It contains source hashes, geometry, dates, climate and classification provenance. The full source test suite passed **877 tests in 158.58 seconds**. Browser verification confirmed the remembered pilot, nine dated observations, climate/cover context, explicit missing model and no raw code blocks or page overflow at the actual 601-pixel pane width.
+
+Collection jobs are terminal and local scheduling remains off. Further verification is recorded in [IMPLEMENTATION_PROGRESS.md](../IMPLEMENTATION_PROGRESS.md) and [VALIDATION.md](../VALIDATION.md). Preserve the frozen plans, progress reports, source files and immutable exports when continuing after an interruption.
 
 The next scientific dependency is a licensed, independently reviewed reference dataset with dated forest-change outcomes. A future collaborator could help verify labels and evaluate warnings. Satellite inputs alone do not provide that independent validation. Until then, the pilot is an evidence inspection and software testing workspace, with missing measurements and unsupported predictions kept explicit.
