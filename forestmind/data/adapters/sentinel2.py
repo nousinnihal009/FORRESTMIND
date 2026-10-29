@@ -19,6 +19,7 @@ Requires:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -85,6 +86,27 @@ PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 S2_COLLECTION = "sentinel-2-l2a"
 EARTH_SEARCH_STAC_URL = "https://earth-search.aws.element84.com/v1"
 EARTH_SEARCH_COLLECTION = "sentinel-2-c1-l2a"
+
+
+def _band_failure_reason(error: Exception, band: str) -> str:
+    """Retain the failed band and bounded causes without asset access details."""
+    details, seen = [], set()
+    current = error
+    while current is not None and id(current) not in seen and len(details) < 4:
+        seen.add(id(current))
+        message = public_error(current)
+        # The band identifies the asset; its URL (including embedded credentials)
+        # is unnecessary. GDAL can also truncate a signed URL before a block error.
+        message = re.sub(r"https?://[^\s'\"]+", "[raster asset]", message, flags=re.IGNORECASE)
+        block = re.search(r"band \d+: IReadBlock failed\b", message)
+        if block:
+            message = "[raster asset] " + message[block.start():]
+        message = " ".join(message.split())
+        if len(message) > 220:
+            message = message[:217] + "..."
+        details.append(f"{type(current).__name__}: {message}")
+        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
+    return (f"Band {band}: " + "; caused by ".join(details))[:1000]
 
 
 def reflectance_scaling(asset_metadata: dict, properties: dict,
@@ -293,6 +315,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
 
             logger.info(f"[sentinel2] Downloading: {scene.scene_id} ({scene.date_str})")
 
+            active_band = None
             try:
                 # Reconstruct STAC item for asset signing
                 item = pystac.Item.from_dict(scene.stac_item)
@@ -321,6 +344,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 scaling = {}
                 quality_mask = np.ones((self.patch_size, self.patch_size), dtype=bool)
                 for band_name in S2_BANDS:
+                    active_band = band_name
                     asset_key = self.asset_keys[band_name]
                     href = signer.sign(item.assets[asset_key].href)
 
@@ -337,6 +361,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                         band_data = np.clip(band_data, 0.0, 1.0)
 
                         band_arrays.append(band_data)
+                    active_band = None
 
                 # Stack bands: (12, H, W)
                 patch = np.stack(band_arrays, axis=0)
@@ -344,11 +369,13 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 # Read SCL for cloud masking
                 scl_key = self.asset_keys["SCL"]
                 if scl_key in item.assets:
+                    active_band = "SCL"
                     scl_href = signer.sign(item.assets[scl_key].href)
                     with open_raster(scl_href, self.timeout_seconds) as src:
                         scl, scl_valid = read_aligned_band(src, bbox, self.patch_size, categorical=True)
                         # True = valid pixel
                         quality_mask &= scl_valid & ~np.isin(scl, list(SCL_INVALID))
+                    active_band = None
 
                 else:
                     raise ValueError("Sentinel-2 scene lacks SCL quality data")
@@ -373,7 +400,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 paths.append(cache_path)
 
             except Exception as e:
-                reason = public_error(e)
+                reason = _band_failure_reason(e, active_band) if active_band else public_error(e)
                 self.download_failures.append({"scene_id": scene.scene_id, "reason": reason})
                 logger.error(f"[sentinel2] Failed to download {scene.scene_id}: {reason}")
                 continue
