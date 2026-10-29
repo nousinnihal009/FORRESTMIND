@@ -37,6 +37,8 @@ The frontend is packaged HTML/CSS/JavaScript served by FastAPI; no Node build is
 
 Normal monitoring needs no Python commands or manual model-report import. A registered model runs only if its checkpoint, independent evaluation, input compatibility and supported geography pass checks. No eligible real-trained model is bundled. Real observations are never run through the synthetic demonstration model as an ecological prediction.
 
+The saved [Mudumalai pilot in Tamil Nadu](docs/pilots/MUDUMALAI.md) documents a small real-data study area, its public sources and the user's ₹0 operating constraint. It is a local pilot, not a claim of complete reserve coverage. The app remembers the selected area across reloads and prefers an observed area when no selection is stored.
+
 Limits include a 25 km² maximum rectangular AOI, 60 months per acquisition request, a single worker and bounded downloads/storage. Forecasts need at least 12 consecutive usable months; descriptive autocorrelation/variance needs 36. These are software eligibility rules, not scientific validation. See the [operator guide](docs/OPERATOR_GUIDE.md), [acquisition limits and recovery](docs/ACQUISITION_OPERATIONS.md), [requirement-by-requirement status](docs/REQUIREMENTS_MATRIX.md) and [actual verification evidence](docs/VALIDATION.md).
 
 ## Implemented capabilities
