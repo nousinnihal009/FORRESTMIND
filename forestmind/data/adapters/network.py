@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 import logging
 import re
+import errno
 
 
 _restricted = ContextVar("forestmind_restricted_acquisition", default=False)
@@ -18,6 +19,54 @@ ASSET_HOSTS = {"e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com",
                "sentinel2l2a01.blob.core.windows.net", "sentinel2l2a02.blob.core.windows.net",
                "sentinel1rtc.blob.core.windows.net", "sentinel1euwestrtc.blob.core.windows.net",
                "esa-worldcover.s3.eu-central-1.amazonaws.com", "landsateuwest.blob.core.windows.net"}
+
+
+def check_acquisition() -> None:
+    """Check the caller's cancellation/deadline even when a read is reused."""
+    if _acquisition_check.get():
+        _acquisition_check.get()()
+
+
+def is_retryable_error(error: Exception) -> bool:
+    """Recognize transient transport failures without retrying bad inputs.
+
+    Rasterio wraps HTTP/read exceptions, so inspect the bounded cause chain.
+    Unclassified I/O failures remain eligible for bounded caller retries;
+    classification is a recovery policy, not proof of the underlying cause.
+    This helper performs no retries; callers retain their own attempt budgets.
+    """
+    chain, seen = [], set()
+    current = error
+    while current is not None and id(current) not in seen and len(chain) < 8:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
+
+    # Explicit HTTP outcomes take precedence over generic wrapper wording.
+    statuses = []
+    for current in chain:
+        response = getattr(current, "response", None)
+        status = getattr(response, "status_code", None)
+        if isinstance(status, int):
+            statuses.append(status)
+        statuses.extend(int(value) for value in re.findall(
+            r"\bHTTP(?:\s+response)?(?:\s+(?:error|status|code))?\s*[:=]?\s*([45]\d\d)\b|"
+            r"\b([45]\d\d)(?=\s+(?:Client|Server)\s+Error)",
+            str(current), flags=re.IGNORECASE))
+    if statuses:
+        return all(status in {408, 425, 429, 500, 502, 503, 504} for status in statuses)
+    for current in chain:
+        if isinstance(current, (TimeoutError, ConnectionError)):
+            return True
+        # requests/urllib3 timeouts do not consistently subclass built-in
+        # TimeoutError; messages also carry GDAL's libcurl transport failures.
+        if re.search(r"\b(?:timed?\s*out|timeout|connection\s+(?:reset|aborted|refused)|"
+                     r"remote\s+end\s+closed|temporary\s+failure\s+in\s+name\s+resolution|"
+                     r"could\s+not\s+resolve\s+host|couldn't\s+connect|"
+                     r"failed\s+to\s+connect|empty\s+reply\s+from\s+server)\b",
+                     str(current), flags=re.IGNORECASE):
+            return True
+    return False
 
 
 def validate_destination(href: str, *, catalog=False) -> str:
@@ -41,8 +90,7 @@ def restricted_acquisition(check=None):
 
 
 def open_catalog(url: str, timeout_seconds: float):
-    if _acquisition_check.get():
-        _acquisition_check.get()()
+    check_acquisition()
     if _restricted.get():
         validate_destination(url, catalog=True)
     from pystac_client import Client
@@ -68,6 +116,7 @@ class AssetSigner:
     def sign(self, href: str) -> str:
         import requests
 
+        check_acquisition()
         if _restricted.get():
             validate_destination(href)
 
@@ -93,8 +142,7 @@ class AssetSigner:
 def open_raster(href: str, timeout_seconds: float = 30.0):
     import rasterio
 
-    if _acquisition_check.get():
-        _acquisition_check.get()()
+    check_acquisition()
     if _restricted.get():
         validate_destination(href)
 
@@ -112,8 +160,7 @@ def open_raster(href: str, timeout_seconds: float = 30.0):
         ):
             with rasterio.open(href) as source:
                 yield source
-            if _acquisition_check.get():
-                _acquisition_check.get()()
+            check_acquisition()
     finally:
         error_logger.removeFilter(token_filter)
 
