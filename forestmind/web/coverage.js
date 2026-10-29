@@ -1,6 +1,7 @@
 /* Observed history and explicit gaps; no interpolation or ecological claims. */
 'use strict';
 let coverageRequest = 0;
+let coverageRender = 0;
 const coveragePeriods = new Map();
 const coverageLabels = {usable:'Usable', low_coverage:'Low coverage', missing_indices:'Missing indices', missing:'No observation'};
 
@@ -46,10 +47,24 @@ async function loadCoverage(id, start, end) {
   }
 }
 
-function renderCoverage(id) {
+async function renderCoverage(id) {
+  const render=++coverageRender;
   const rows = state.region.observations;
-  const period = coveragePeriods.get(id) || {start:rows[0].date, end:rows[rows.length-1].date};
-  $('#detail-body').innerHTML = `<div class="observations-caption"><div><strong>Every month accounted for</strong><p class="chart-caveat">Inspect gaps and quality before interpreting a trend.</p></div><button class="button secondary" id="export-coverage" disabled>${icon('download',14)}Export coverage</button></div><form class="coverage-form" id="coverage-form"><label for="coverage-start">Period start<input id="coverage-start" type="date" required value="${esc(period.start)}"></label><label for="coverage-end">Period end<input id="coverage-end" type="date" required value="${esc(period.end)}"></label><button class="button secondary" type="submit">Check period</button></form><p class="coverage-error" id="coverage-error" role="alert" hidden></p><div id="coverage-results" aria-live="polite"></div>`;
+  let period=coveragePeriods.get(id),notice='The initial period covers the first through last saved observation. Extend the dates to inspect earlier or later gaps.';
+  if(!period){
+    period={start:rows[0].date,end:rows[rows.length-1].date};
+    $('#detail-body').innerHTML='<p class="inline-status" role="status">Loading the requested study period…</p>';
+    try{
+      const record=await api('/regions/'+encodeURIComponent(id)+'/acquisition');
+      const saved=record.configuration?.study_period || record.configuration?.request;
+      if(saved&&collectionDate(saved.start)&&collectionDate(saved.end)&&saved.start<=saved.end){
+        period={start:saved.start,end:saved.end};
+        notice='The initial period covers the requested study dates, including months without an observation. Change dates here to inspect another period; this does not start a download.';
+      }
+    }catch(error){notice='Saved collection dates could not be loaded. Showing the first through last saved observation; extend the dates to inspect earlier or later gaps.';}
+  }else notice='Showing your selected inspection period. Changing these dates does not start a download.';
+  if(render!==coverageRender||state.selected!==id||state.tab!=='coverage')return;
+  $('#detail-body').innerHTML = `<div class="observations-caption"><div><strong>Every month accounted for</strong><p class="chart-caveat">Inspect gaps and quality before interpreting a trend.</p></div><button class="button secondary" id="export-coverage" disabled>${icon('download',14)}Export coverage</button></div><form class="coverage-form" id="coverage-form"><label for="coverage-start">Period start<input id="coverage-start" type="date" required value="${esc(period.start)}"></label><label for="coverage-end">Period end<input id="coverage-end" type="date" required value="${esc(period.end)}"></label><button class="button secondary" type="submit">Check period</button></form><p class="form-help">${esc(notice)}</p><p class="coverage-error" id="coverage-error" role="alert" hidden></p><div id="coverage-results" aria-live="polite"></div>`;
   $('#coverage-form').addEventListener('submit',event=>{
     event.preventDefault();
     const start = $('#coverage-start').value, end = $('#coverage-end').value;
