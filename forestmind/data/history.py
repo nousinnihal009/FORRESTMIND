@@ -500,6 +500,8 @@ def execute_history_plan(plan_path: str | Path, report_path: str | Path, cache_d
     Attempt/download limits apply per invocation. A download is a candidate read
     attempt, even if the provider fails. Resume continues untried candidates and
     interrupted attempts; rejected or failed candidates are not silently retried.
+    Each round checks one candidate per missing month. Months with fewer prior
+    acquisition attempts go first, including after a restart or explicit resume.
     """
     plan_path, report_path = _json_path(plan_path), _json_path(report_path)
     if plan_path == report_path or (report_path.exists() and plan_path.samefile(report_path)):
@@ -574,25 +576,40 @@ def execute_history_plan(plan_path: str | Path, report_path: str | Path, cache_d
                                     "finished_at": _now(), "reason": _sanitize(public_error(error))})
     save()
     budget_hit = False
-    for planned, row in zip(plan["months"], report["months"]):
-        if row["accepted"]:
-            continue
-        blocked = {attempt["scene_id"] for attempt in row["attempts"] if attempt["status"] in {"rejected", "failed"}}
-        for candidate in planned["candidates"]:
-            if candidate["scene_id"] in blocked:
-                continue
-            scene = _scene(candidate)
-            expected = adapter.cache_path_for_scene(scene, BoundingBox(*request.bbox)).resolve()
-            if not expected.is_relative_to(root / "sentinel2"):
-                raise ValueError("Resolved cache path escapes the selected Sentinel-2 cache directory")
-            needs_download = not expected.exists()
-            if run["attempts"] >= request.max_attempts:
-                budget_hit = True
+    while True:
+        attempted_in_round = False
+        # Stable sorting retains chronological order for equal attempt counts.
+        # Counting persisted attempts prevents small resumed batches from always
+        # spending their budget on the oldest difficult month.
+        pending = sorted(
+            ((planned, row) for planned, row in zip(plan["months"], report["months"]) if not row["accepted"]),
+            key=lambda pair: sum(attempt["stage"] == "acquisition" for attempt in pair[1]["attempts"]),
+        )
+        for planned, row in pending:
+            blocked = {attempt["scene_id"] for attempt in row["attempts"] if attempt["status"] in {"rejected", "failed"}}
+            selected = None
+            for candidate in planned["candidates"]:
+                if candidate["scene_id"] in blocked:
+                    continue
+                scene = _scene(candidate)
+                expected = adapter.cache_path_for_scene(scene, BoundingBox(*request.bbox)).resolve()
+                if not expected.is_relative_to(root / "sentinel2"):
+                    raise ValueError("Resolved cache path escapes the selected Sentinel-2 cache directory")
+                needs_download = not expected.exists()
+                if run["attempts"] >= request.max_attempts:
+                    budget_hit = True
+                    break
+                # A zero/used network budget still permits cached candidates,
+                # both in this month and in later months.
+                if needs_download and run["downloads"] >= request.max_downloads:
+                    budget_hit = True
+                    continue
+                selected = (candidate, scene, expected, needs_download)
                 break
-            # A zero/used network budget still permits other months' cached files.
-            if needs_download and run["downloads"] >= request.max_downloads:
-                budget_hit = True
+            if selected is None:
                 continue
+            candidate, scene, expected, needs_download = selected
+            attempted_in_round = True
             attempt = {"scene_id": candidate["scene_id"], "candidate_sha256": candidate["candidate_sha256"],
                        "run_index": run["run_index"], "stage": "acquisition",
                        "started_at": _now(), "status": "running", "download_attempted": needs_download}
@@ -616,8 +633,8 @@ def execute_history_plan(plan_path: str | Path, report_path: str | Path, cache_d
                 if attempt["status"] != "running":
                     attempt["finished_at"] = _now()
                 save()
-            if row["accepted"]:
-                break
+        if not attempted_in_round:
+            break
     for planned, row in zip(plan["months"], report["months"]):
         row["status"] = "accepted" if row["accepted"] else "missing"
         if not row["accepted"]:
