@@ -126,6 +126,68 @@ def test_all_bands_scale_once_cloud_mask_and_provenance_survive(tmp_path, monkey
     assert len(calls) == 13  # Valid matching cache prevents further network requests.
 
 
+@pytest.mark.parametrize("asset,band", [("blue", "B02"), ("scl", "SCL")])
+def test_failed_band_keeps_cause_without_signed_credentials(tmp_path, monkeypatch, caplog, asset, band):
+    stub_download(monkeypatch, fake_item())
+    original_read = sentinel2.read_aligned_band
+
+    def read(href, bbox, size, categorical=False):
+        if href.endswith(f"/{asset}.tif"):
+            try:
+                raise OSError("HTTP 503 reading https://user:private-password@public.example/"
+                              "band.tif?sig=private-token&se=tomorrow")
+            except OSError as cause:
+                raise RuntimeError("Read failed. See previous exception for details.") from cause
+        return original_read(href, bbox, size, categorical=categorical)
+
+    monkeypatch.setattr(sentinel2, "read_aligned_band", read)
+    adapter = sentinel2.Sentinel2Adapter(cache_dir=tmp_path, provider="earth-search", patch_size=4)
+    assert adapter.download([scene()], BOX) == []
+    reason = adapter.download_failures[0]["reason"]
+    assert reason.startswith(f"Band {band}:")
+    assert "Read failed" in reason and "HTTP 503" in reason
+    assert "OSError" in reason and "caused by" in reason
+    assert "private-token" not in reason + caplog.text
+    assert "private-password" not in reason + caplog.text
+    assert not list(tmp_path.rglob("*.npz"))
+
+
+def test_band_error_chain_is_bounded_and_cycle_safe():
+    outer = RuntimeError("Read failed")
+    inner = OSError("decoder failed " + "x" * 5000)
+    outer.__cause__ = inner
+    inner.__cause__ = outer
+    reason = sentinel2._band_failure_reason(outer, "B04")
+    assert len(reason) <= 1000
+    assert reason.count("Read failed") == 1
+    assert reason.count("decoder failed") == 1
+    assert "..." in reason
+
+
+def test_band_error_removes_truncated_gdal_signed_filename_and_follows_context():
+    try:
+        raise OSError("private-signature-tail: band 1: IReadBlock failed at X offset 4")
+    except OSError:
+        try:
+            raise RuntimeError("Read failed\nSee previous exception")
+        except RuntimeError as error:
+            reason = sentinel2._band_failure_reason(error, "SCL")
+    assert "private-signature-tail" not in reason
+    assert "IReadBlock failed at X offset 4" in reason
+    assert "\n" not in reason
+
+
+def test_band_error_does_not_restore_explicitly_suppressed_context():
+    try:
+        raise OSError("suppressed diagnostic")
+    except OSError:
+        try:
+            raise RuntimeError("Read failed") from None
+        except RuntimeError as error:
+            reason = sentinel2._band_failure_reason(error, "B01")
+    assert "suppressed diagnostic" not in reason
+
+
 @pytest.mark.parametrize("problem", ["band_name", "missing_scale", "private_asset", "missing_collection",
                                     "missing_scl", "private_scl"])
 def test_earth_search_invalid_metadata_fails_before_any_raster_read(tmp_path, monkeypatch, problem):
