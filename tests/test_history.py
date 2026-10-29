@@ -337,6 +337,60 @@ def test_failed_reads_count_toward_budget_and_resume_uses_next_candidate(tmp_pat
     assert resumed["status"] == "complete" and state["downloads"] == ["fail", "clear"]
 
 
+def test_failed_month_does_not_spend_the_budget_before_later_months(tmp_path):
+    state, factory = fixture({
+        "2024-01": [scene("jan-failed", cloud=1), scene("jan-clear", cloud=2)],
+        "2024-02": [scene("feb-clear", "2024-02-14T10:00:00+00:00")],
+    }, {"jan-failed": "failed"})
+    _, report, _, _, plan_path, report_path, cache = plan_and_execute(
+        tmp_path, request(max_downloads=2), state_factory=(state, factory))
+    assert state["downloads"] == ["jan-failed", "feb-clear"]
+    assert report["months"][0]["accepted"] is None
+    assert report["months"][1]["accepted"]["scene_id"] == "feb-clear"
+    assert report["runs"][0]["stop_reason"] == "budget_exhausted"
+    resumed = execute_history_plan(plan_path, report_path, cache, resume=True, adapter_factory=factory)
+    assert resumed["status"] == "complete"
+    assert state["downloads"] == ["jan-failed", "feb-clear", "jan-clear"]
+
+
+@pytest.mark.parametrize("budget", [{"max_downloads": 1}, {"max_attempts": 1}])
+def test_small_resumed_batches_prioritize_less_attempted_months(tmp_path, budget):
+    state, factory = fixture({
+        "2024-01": [scene("jan-first", cloud=1), scene("jan-second", cloud=2)],
+        "2024-02": [scene("feb-first", "2024-02-02T10:00:00+00:00", 1),
+                    scene("feb-second", "2024-02-14T10:00:00+00:00", 2)],
+        "2024-03": [scene("mar-clear", "2024-03-12T10:00:00+00:00")],
+    }, {"jan-first": "failed", "feb-first": "failed"})
+    _, report, _, _, plan_path, report_path, cache = plan_and_execute(
+        tmp_path, request(end="2024-03-31", **budget), state_factory=(state, factory))
+    assert state["downloads"] == ["jan-first"]
+    for expected in ("feb-first", "mar-clear", "jan-second", "feb-second"):
+        report = execute_history_plan(plan_path, report_path, cache, resume=True, adapter_factory=factory)
+        assert state["downloads"][-1] == expected
+        assert report["runs"][-1]["attempts"] == 1
+    assert report["status"] == "complete"
+    assert state["downloads"] == ["jan-first", "feb-first", "mar-clear", "jan-second", "feb-second"]
+    assert len(state["searches"]) == 3  # Resumes reuse the original frozen plan.
+
+
+def test_fair_rounds_still_check_cached_candidates_after_network_budget_is_used(tmp_path):
+    jan_first, jan_cached = scene("jan-first", cloud=1), scene("jan-cached", cloud=2)
+    feb_cached = scene("feb-cached", "2024-02-14T10:00:00+00:00")
+    state, factory = fixture({"2024-01": [jan_first, jan_cached], "2024-02": [feb_cached]})
+    plan_path, report_path, cache = tmp_path / "plan.json", tmp_path / "report.json", tmp_path / "cache"
+    req = request(max_downloads=0)
+    create_history_plan(req, plan_path, adapter_factory=factory)
+    adapter = factory(cache_dir=cache, patch_size=req.patch_size, provider=req.provider)
+    adapter.download([jan_cached], BoundingBox(*BBOX))
+    adapter.download([feb_cached], BoundingBox(*BBOX))
+    state["downloads"].clear()
+    report = execute_history_plan(plan_path, report_path, cache, adapter_factory=factory)
+    assert report["status"] == "complete"
+    assert report["runs"][0]["downloads"] == 0 and report["runs"][0]["attempts"] == 2
+    assert state["downloads"] == []
+    assert [row["accepted"]["scene_id"] for row in report["months"]] == ["jan-cached", "feb-cached"]
+
+
 def test_missing_accepted_cache_is_not_trusted_and_is_downloaded_again(tmp_path):
     _, report, state, factory, plan_path, report_path, cache = plan_and_execute(tmp_path, request(end="2024-01-31"))
     Path(report["accepted_cache_paths"][0]).unlink()
