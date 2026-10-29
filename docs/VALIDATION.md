@@ -1,5 +1,17 @@
 # Build verification
 
+## Mudumalai pilot and acquisition reliability — October 29, 2026
+
+The source preview now retains successful area selection across reloads, prefers an observed area for a fresh selection, and handles blocked storage and stale/failed requests. Terminal collection status derives accurate accepted/missing months and explicit catalog, budget, cancellation and acquisition-failure reasons from preserved evidence. New Sentinel-2 diagnostics identify the failed band and bounded cause chain with access details redacted. This changes diagnostics and presentation, not optical preprocessing or accepted cache values.
+
+- **877 tests passed in158.58 seconds**, no failures or skips. Full log: `artifacts/regression-mudumalai-20261029.txt`. All web JavaScript files passed syntax checks. New cases include selection precedence, absent storage, stale selection, stopped retries, already-saved months, byte-preserved historical reports, band/SCL failures, cyclic causes and access-query redaction.
+- Real original-workspace pilot `area-2b3262c5a5e5` has nine optical observations over October12,2025–August30,2026, a dated WorldCover2021 reference, and eleven ERA5 climate monthly summaries. Seven of nine optical dates have complete trailing climate features. June/July are missing inside the observed span; latest requested months also remain missing. No radar or eligible trained model is claimed.
+- Historical collection accepted eight new months after one bounded resume. The six-attempt September–October refresh accepted none: September provider reads failed and October remained untried when the budget stopped. All jobs are terminal. The updated API exposes these reasons while the preserved underlying interrupted report still retains its resumable state.
+- Six acquisition plan/report hashes match before and after restart and status reads. All ten saved regions remain present. Verification: `artifacts/mudumalai-pilot-verification-20261029.json`; complete export: `artifacts/mudumalai-analysis-20261029.json`, SHA256 `f58861ed7ff9b04918837f330f62ffe1214c63dcde9b9149f98a42fbc9779807`.
+- Browser reload retained Mudumalai. Connected analysis showed nine dated observations, climate and forest-cover context, seven of nine climate matches and no model prediction. At the actual601px pane, page width equals scroll width, no raw code blocks are present, the global error is hidden and browser error logs are empty. Screenshot: `artifacts/mudumalai-pilot-20261029.png`; audit: `artifacts/mudumalai-browser-audit-20261029.json`.
+
+The original workspace is served at port8001 by source process7096 at verification, using `artifacts/geo-validation` dependencies. Existing packaged wheels predate these changes. Full-run approval initially failed because of the account usage limit; after the user resumed, the complete run succeeded. These results validate software behavior and real-data plumbing, not ecological prediction accuracy. The user's budget remains ₹0, with no verified labels or research partner yet; see `pilots/MUDUMALAI.md`.
+
 ## Readable interface cleanup — October 28, 2026
 
 The source preview replaces raw JSON result panels with readable cards, tables, dates and unavailable states. Observation, forest-cover and model-report imports have file previews rather than editable code. Acquisition and service status, notification messages and validation errors use plain language. Downloaded records retain the complete technical data.
