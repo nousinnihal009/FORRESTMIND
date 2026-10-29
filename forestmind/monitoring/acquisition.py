@@ -133,7 +133,15 @@ class AcquisitionService:
             if report_path.exists():
                 try:
                     report = _read_json(report_path)
-                    job["progress"].update(self._progress(report))
+                    plan = None
+                    if job["status"] in TERMINAL:
+                        try:
+                            plan = load_history_plan(plan_path)[0]
+                            if plan["plan_sha256"] != report["plan_sha256"]:
+                                plan = None
+                        except (OSError, ValueError, KeyError, TypeError):
+                            pass
+                    job["progress"].update(self._progress(report, job=job, plan=plan))
                 except (OSError, ValueError, KeyError):
                     pass
             job["progress"]["candidate_downloads"] = job["progress"]["downloads"]
@@ -333,9 +341,11 @@ class AcquisitionService:
                     return self._retry(lambda: adapter.search(bbox, start, end, **kw), download=False)
 
                 def download(self, *args, **kw):
-                    return self._retry(lambda: adapter.download(*args, **kw), download=True)
+                    scenes = args[0] if args else kw.get("scenes", [])
+                    return self._retry(lambda: adapter.download(*args, **kw), download=True,
+                                       scene_id=scenes[0].scene_id if scenes else None)
 
-                def _retry(self, operation, *, download):
+                def _retry(self, operation, *, download, scene_id=None):
                     for attempt in range(LIMITS["max_auto_retries"] + 1):
                         service._check(job_id)
                         if download:
@@ -348,6 +358,15 @@ class AcquisitionService:
                                 raise OSError(reason or "Provider returned no usable cache")
                             return result
                         except (OSError, TimeoutError, ConnectionError) as error:
+                            # A budget/cancel stop may bypass history's failure
+                            # handler during the next retry. Retain the actual
+                            # scene error even when the final job error changes.
+                            if download:
+                                with service.store.connection() as db:
+                                    job = json.loads(db.execute("SELECT payload FROM acquisition_jobs WHERE id=?", (job_id,)).fetchone()[0])
+                                    job["progress"]["last_download_failure"] = {
+                                        "scene_id": scene_id, "reason": _sanitize(public_error(error))}
+                                    service._save(db, job)
                             if attempt == LIMITS["max_auto_retries"]:
                                 raise
                             with service.store.connection() as db:
@@ -392,14 +411,59 @@ class AcquisitionService:
         return plan
 
     @staticmethod
-    def _progress(report):
-        return {"requested_months": len(report["months"]),
+    def _progress(report, *, job=None, plan=None):
+        progress = {"requested_months": len(report["months"]),
                 "accepted_months": sum(bool(row["accepted"]) for row in report["months"]),
                 "attempts": sum(row["attempts"] for row in report["runs"]),
                 "downloads": sum(row["downloads"] for row in report["runs"]),
                 "missing_months": [row["month"] for row in report["months"] if not row["accepted"]],
                 "months": [{"month": row["month"], "status": row["status"], "reason": row.get("reason")}
                            for row in report["months"]]}
+        if not job or job["status"] not in TERMINAL:
+            return progress
+
+        # History deliberately keeps interrupted attempts resumable. Project the
+        # terminal service state for readers without rewriting its hashed report
+        # or the immutable provenance snapshots that refer to it.
+        planned = {row["month"]: row for row in (plan or {}).get("months", [])}
+        saved = set(job["progress"].get("already_saved_months", []))
+        last_failure = job["progress"].get("last_download_failure") or {}
+        network_exhausted = (job["download_attempts"] >= job["download_budget"]
+                             and report["status"] == "running")
+        stopped_for_budget = bool(report["runs"] and report["runs"][-1].get("stop_reason") == "budget_exhausted")
+        for row, projected in zip(report["months"], progress["months"]):
+            if row["accepted"] or row["month"] in saved:
+                projected.update(status="accepted", reason=None)
+                if row["month"] in saved and not row["accepted"]:
+                    projected["already_saved"] = True
+                continue
+            projected["status"] = "missing"
+            month_plan = planned.get(row["month"])
+            failures = [attempt["reason"] for attempt in row["attempts"]
+                        if attempt.get("status") in {"failed", "rejected"} and attempt.get("reason")]
+            if (row["attempts"] and row["attempts"][-1].get("status") == "running"
+                    and row["attempts"][-1]["scene_id"] == last_failure.get("scene_id")
+                    and last_failure.get("reason")):
+                failures.append(last_failure["reason"])
+            if month_plan and month_plan["status"] == "search_failed":
+                reason = "Catalog search failed"
+                if month_plan.get("reason"):
+                    reason += ": " + month_plan["reason"]
+            elif month_plan and not month_plan["candidates"]:
+                reason = "No eligible catalog candidates for this month and the selected settings"
+            elif job["status"] == "cancelled":
+                reason = "Collection cancelled before this month had an accepted observation"
+            elif network_exhausted:
+                reason = "Download budget exhausted before this month had an accepted observation"
+            elif stopped_for_budget:
+                reason = "Collection attempt budget exhausted before this month had an accepted observation"
+            else:
+                reason = row.get("reason") or "Collection ended without a usable observation for this month"
+            if failures:
+                reason += ". Last acquisition failure: " + failures[-1]
+            projected["reason"] = _sanitize(public_error(reason))
+        progress["missing_months"] = [row["month"] for row in progress["months"] if row["status"] != "accepted"]
+        return progress
 
     def run_once(self):
         with self.store.connection() as db:
