@@ -166,6 +166,84 @@ def test_transient_failure_retries_have_shared_download_budget(tmp_path, monkeyp
     assert result["download_attempts"] == 2
     assert result["status"] == "partial" and result["region_id"] is None
     assert worker.store.list_regions() == []
+    months = {row["month"]: row for row in result["progress"]["months"]}
+    assert all(row["status"] == "missing" for row in months.values())
+    assert "Download budget exhausted" in months["2024-01"]["reason"]
+    assert "Timed out" in months["2024-01"]["reason"]
+    assert "topsecret" not in json.dumps(result)
+    assert "Last acquisition failure" not in months["2024-02"]["reason"]
+
+
+def test_terminal_projection_distinguishes_catalog_gaps_failures_and_budget_without_rewriting(tmp_path, monkeypatch):
+    worker, state, _ = service(tmp_path, fixture({
+        "2024-01": [],
+        "2024-02": [scene("feb", "2024-02-14T10:00:00+00:00")],
+        "2024-03": [scene("mar", "2024-03-14T10:00:00+00:00")],
+        "2024-04": [scene("apr", "2024-04-14T10:00:00+00:00")],
+    }, outcomes={"mar": "failed"}))
+    monkeypatch.setattr(worker.stop_event, "wait", lambda _: False)
+    job = worker.submit(request(end="2024-04-30", max_downloads=4))
+    worker.run_once()
+    paths = list((worker.root / job["id"]).glob("*.json"))
+    original_files = {path: path.read_bytes() for path in paths}
+    original_record = worker.job(job["id"], progress=False)
+    report = json.loads((worker.root / job["id"] / "progress.json").read_text())
+    assert report["status"] == "running" and report["months"][-1]["attempts"][-1]["status"] == "running"
+    result = worker.job(job["id"])
+    months = {row["month"]: row for row in result["progress"]["months"]}
+    assert result["status"] == "partial"
+    assert result["progress"]["accepted_months"] == 1
+    assert result["progress"]["downloads"] == 4
+    assert state["downloads"] == ["feb", "mar", "mar", "mar"]
+    assert result["progress"]["missing_months"] == ["2024-01", "2024-03", "2024-04"]
+    assert months["2024-02"] == {"month": "2024-02", "status": "accepted", "reason": None}
+    assert "No eligible catalog candidates" in months["2024-01"]["reason"]
+    assert "budget" not in months["2024-01"]["reason"]
+    assert "Download budget exhausted" in months["2024-03"]["reason"]
+    assert "Timed out" in months["2024-03"]["reason"]
+    assert "Download budget exhausted" in months["2024-04"]["reason"]
+    assert "Timed out" not in months["2024-04"]["reason"]
+    assert original_files == {path: path.read_bytes() for path in paths}
+    assert original_record == worker.job(job["id"], progress=False)
+    resumed = worker.resume(job["id"])
+    assert resumed["status"] == "queued"
+    assert resumed["progress"]["months"][0]["status"] == "pending"
+
+
+def test_terminal_projection_retains_quality_failure_and_previously_saved_months(tmp_path):
+    worker, state, _ = service(tmp_path)
+    job = worker.submit(request(max_downloads=2))
+    worker.run_once()
+    region_id = worker.job(job["id"])["region_id"]
+    state["scenes"]["2024-03"] = [scene("mar", "2024-03-14T10:00:00+00:00")]
+    state["outcomes"]["mar"] = "cloudy"
+    refresh = worker.refresh(region_id, {"end": "2024-03-31"})
+    worker.run_once()
+    result = worker.job(refresh["id"])
+    assert result["progress"]["accepted_months"] == 0
+    assert result["progress"]["already_saved_months"] == ["2024-01", "2024-02"]
+    assert result["progress"]["missing_months"] == ["2024-03"]
+    assert all(row["already_saved"] and row["status"] == "accepted" for row in result["progress"]["months"][:2])
+    reason = result["progress"]["months"][-1]["reason"]
+    assert "Last acquisition failure" in reason and "valid" in reason.lower()
+    assert "Download budget exhausted" not in reason
+
+
+def test_cancelled_projection_does_not_present_pending_months_as_still_running(tmp_path, monkeypatch):
+    worker, _, factory = service(tmp_path, fixture(outcomes={"jan": "failed"}))
+    job = worker.submit(request(max_downloads=2))
+    def cancel_during_backoff(_):
+        worker.cancel(job["id"])
+        return False
+    monkeypatch.setattr(worker.stop_event, "wait", cancel_during_backoff)
+    worker.run_once()
+    result = worker.job(job["id"])
+    assert result["status"] == "cancelled"
+    assert result["progress"]["accepted_months"] == 0
+    for month in result["progress"]["months"]:
+        assert month["status"] == "missing"
+        assert "Collection cancelled" in month["reason"]
+    assert "Timed out" in result["progress"]["months"][0]["reason"]
 
 
 def test_provider_failure_retains_no_fabricated_data(tmp_path, monkeypatch):
@@ -177,6 +255,9 @@ def test_provider_failure_retains_no_fabricated_data(tmp_path, monkeypatch):
     assert result["status"] == "failed" and "No usable" in result["error"]
     assert len(state["searches"]) == 4  # three bounded attempts for failed January
     assert state["downloads"] == [] and worker.store.list_regions() == []
+    reasons = [row["reason"] for row in result["progress"]["months"]]
+    assert reasons[0] == "Catalog search failed: offline"
+    assert "No eligible catalog candidates" in reasons[1]
 
 
 def test_storage_and_queue_limits(tmp_path, monkeypatch):
