@@ -105,6 +105,102 @@ def test_refresh_skips_saved_months_and_preserves_original_records(tmp_path):
     assert len(state["searches"]) == 3
 
 
+def test_targeted_refresh_preserves_full_requested_study_period(tmp_path):
+    worker, state, _ = service(tmp_path)
+    initial = worker.submit(request(max_downloads=2))
+    worker.run_once()
+    region_id = worker.job(initial["id"])["region_id"]
+    original = worker.store.region(region_id)[1]
+    state["scenes"]["2024-03"] = [scene("mar", "2024-03-14T10:00:00+00:00")]
+    targeted = worker.refresh(region_id, {"start": "2024-03-01", "end": "2024-03-31"})
+    worker.run_once()
+    assert worker.job(targeted["id"])["status"] == "completed"
+    assert worker.store.region(region_id)[1][:2] == original
+    with worker.store.connection() as db:
+        saved_config = db.execute("SELECT payload FROM acquisition_areas WHERE region_id=?", (region_id,)).fetchone()[0]
+    config = worker.area(region_id)["configuration"]
+    assert config["request"]["start"] == "2024-03-01"  # exact last batch retained
+    assert config["study_period"] == {"start": "2024-01-01", "end": "2024-03-31"}
+    with worker.store.connection() as db:
+        assert db.execute("SELECT payload FROM acquisition_areas WHERE region_id=?", (region_id,)).fetchone()[0] == saved_config
+    following = worker.refresh(region_id, {"end": "2024-04-30"})
+    assert following["request"]["start"] == "2024-01-01"
+
+
+def test_failed_older_backfill_remains_visible_and_default_refresh_revisits_it(tmp_path):
+    worker, state, _ = service(tmp_path)
+    initial = worker.submit(request(max_downloads=2))
+    worker.run_once()
+    region_id = worker.job(initial["id"])["region_id"]
+    original = worker.store.region(region_id)[1]
+    backfill = worker.refresh(region_id, {"start": "2023-11-01", "end": "2023-12-31"})
+    worker.run_once()  # no eligible catalog candidates in the offline fixture
+    assert worker.job(backfill["id"])["status"] == "failed"
+    assert worker.store.region(region_id)[1] == original
+    assert worker.area(region_id)["configuration"]["study_period"] == {
+        "start": "2023-11-01", "end": "2024-02-29"}
+    following = worker.refresh(region_id, {"end": "2024-02-29"})
+    assert following["request"]["start"] == "2023-11-01"
+    assert state["downloads"] == ["jan", "feb"]
+
+
+def test_larger_refresh_download_budget_has_enough_candidate_checks(tmp_path):
+    worker, _, _ = service(tmp_path)
+    initial = worker.submit(request(max_downloads=1, max_attempts=1))
+    worker.run_once()
+    region_id = worker.job(initial["id"])["region_id"]
+    following = worker.refresh(region_id, {"end": "2024-02-29", "max_downloads": 24})
+    assert following["request"]["max_downloads"] == 24
+    assert following["request"]["max_attempts"] == 24
+
+
+@pytest.mark.parametrize("failure", [
+    {"reason": "Band scaling metadata is missing", "retryable": False},
+    {"reason": "HTTP response code: 404"},
+    {"reason": "No valid pixels in the selected area", "retryable": False},
+])
+def test_permanent_download_failure_does_not_spend_retries_and_next_month_runs(tmp_path, monkeypatch, failure):
+    worker, state, factory = service(tmp_path)
+    def failure_factory(**kwargs):
+        adapter = factory(**kwargs)
+        original = adapter.download
+        def download(scenes, bbox):
+            if scenes[0].scene_id == "jan":
+                state["downloads"].append("jan")
+                adapter.download_failures = [{"scene_id": "jan", **failure}]
+                return []
+            return original(scenes, bbox)
+        adapter.download = download
+        return adapter
+    worker.adapter_factory = failure_factory
+    waits = []
+    monkeypatch.setattr(worker.stop_event, "wait", lambda delay: waits.append(delay))
+    job = worker.submit(request(max_downloads=2))
+    worker.run_once()
+    result = worker.job(job["id"])
+    assert state["downloads"] == ["jan", "feb"]
+    assert result["download_attempts"] == 2 and result["retry_count"] == 0
+    assert waits == []
+    assert result["status"] == "partial" and result["region_id"]
+    assert result["progress"]["last_download_failure"]["retryable"] is False
+    assert [row["date"][:7] for row in worker.store.region(result["region_id"])[1]] == ["2024-02"]
+
+
+def test_wrapped_catalog_transport_failure_retries_but_permanent_error_does_not(tmp_path, monkeypatch):
+    class CatalogError(Exception):
+        pass
+    temporary = CatalogError("Catalog request failed")
+    temporary.__cause__ = TimeoutError("Connection timed out")
+    worker, state, factory = service(tmp_path, fixture({
+        "2024-01": temporary, "2024-02": ValueError("Invalid catalog metadata")}))
+    monkeypatch.setattr(worker.stop_event, "wait", lambda _: False)
+    job = worker.submit(request(max_downloads=2))
+    worker.run_once()
+    assert len(state["searches"]) == 4  # three transient attempts, one permanent
+    assert worker.job(job["id"])["retry_count"] == 2
+    assert state["downloads"] == []
+
+
 def test_restart_recovers_claimed_job_and_resumes_frozen_progress(tmp_path):
     worker, state, factory = service(tmp_path)
     job = worker.submit(request())
