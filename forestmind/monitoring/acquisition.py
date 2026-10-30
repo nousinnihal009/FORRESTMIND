@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from forestmind.api.schemas import Geometry, ImportRegion, geometry_metadata
 from forestmind.data.adapters.base import BoundingBox
-from forestmind.data.adapters.network import public_error, restricted_acquisition
+from forestmind.data.adapters.network import is_retryable_error, public_error, restricted_acquisition
 from forestmind.data.adapters.sentinel2 import Sentinel2Adapter
 from forestmind.data.history import (HistoryRequest, _atomic_json, _digest, _read_json,
     _sanitize, _scene, create_history_plan, execute_history_plan, load_history_plan, month_windows)
@@ -350,14 +350,25 @@ class AcquisitionService:
                         service._check(job_id)
                         if download:
                             service._reserve_download(job_id)
+                        retryable = None
                         try:
                             result = operation()
                             if download and not result:
                                 failures = getattr(adapter, "download_failures", [])
-                                reason = failures[0].get("reason") if failures else None
+                                failure = failures[0] if failures else {}
+                                reason = failure.get("reason")
+                                if type(failure.get("retryable")) is bool:
+                                    retryable = failure["retryable"]
                                 raise OSError(reason or "Provider returned no usable cache")
+                            if attempt:
+                                with service.store.connection() as db:
+                                    job = json.loads(db.execute("SELECT payload FROM acquisition_jobs WHERE id=?", (job_id,)).fetchone()[0])
+                                    job.update(phase="acquiring" if download else "planning", error=None)
+                                    service._save(db, job)
                             return result
-                        except (OSError, TimeoutError, ConnectionError) as error:
+                        except Exception as error:
+                            if retryable is None:
+                                retryable = is_retryable_error(error)
                             # A budget/cancel stop may bypass history's failure
                             # handler during the next retry. Retain the actual
                             # scene error even when the final job error changes.
@@ -365,9 +376,10 @@ class AcquisitionService:
                                 with service.store.connection() as db:
                                     job = json.loads(db.execute("SELECT payload FROM acquisition_jobs WHERE id=?", (job_id,)).fetchone()[0])
                                     job["progress"]["last_download_failure"] = {
-                                        "scene_id": scene_id, "reason": _sanitize(public_error(error))}
+                                        "scene_id": scene_id, "reason": _sanitize(public_error(error)),
+                                        "retryable": retryable}
                                     service._save(db, job)
-                            if attempt == LIMITS["max_auto_retries"]:
+                            if not retryable or attempt == LIMITS["max_auto_retries"]:
                                 raise
                             with service.store.connection() as db:
                                 job = json.loads(db.execute("SELECT payload FROM acquisition_jobs WHERE id=?", (job_id,)).fetchone()[0])
@@ -696,6 +708,7 @@ class AcquisitionService:
             request["start"] = max(study_period["start"], earliest)
         if values.get("max_downloads") is not None:
             request["max_downloads"] = values["max_downloads"]
+            request["max_attempts"] = max(request["max_attempts"], values["max_downloads"])
         return self.submit(request, region_id=region_id)
 
     def schedule(self, region_id):
