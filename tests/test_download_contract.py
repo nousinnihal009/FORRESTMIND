@@ -10,7 +10,10 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from forestmind.data.adapters.network import AssetSigner, _RedactAccessQueries, open_catalog, open_raster, public_error
+from forestmind.data.adapters.network import (
+    AssetSigner, _RedactAccessQueries, is_retryable_error, open_catalog, open_raster,
+    public_error, restricted_acquisition,
+)
 from forestmind.data.adapters.sentinel2 import Sentinel2Adapter, reflectance_scaling
 from scripts import download_data
 
@@ -92,6 +95,62 @@ def test_raster_reads_have_bounded_timeouts_and_clean_up(monkeypatch):
     assert environment["GDAL_HTTP_CONNECTTIMEOUT"] == "7"
     assert environment["GDAL_HTTP_MAX_RETRY"] == "0"
     assert error_logger.filters == previous_filters
+
+
+@pytest.mark.parametrize("error,expected", [
+    (TimeoutError("read timed out"), True),
+    (ConnectionError("connection reset"), True),
+    (OSError("offline"), True),
+    (OSError("Read failed. See previous exception for details."), True),
+    (RuntimeError("HTTP response code: 429"), True),
+    (OSError("HTTP 503 reading raster"), True),
+    (OSError("404 Client Error: Not Found"), False),
+    (OSError("HTTP response code: 403"), False),
+    (PermissionError("access denied"), False),
+    (FileNotFoundError("cache missing"), False),
+    (OSError(28, "No space left on device"), False),
+    (OSError("not recognized as being in a supported file format"), False),
+    (ValueError("timeout_seconds must be positive"), False),
+    (ValueError("Scene has no valid pixels in the requested region"), False),
+    (KeyError("B04"), False),
+    (RuntimeError("unspecified processing failure"), False),
+])
+def test_retry_classification_keeps_transport_and_permanent_failures_distinct(error, expected):
+    assert is_retryable_error(error) is expected
+
+
+def test_retry_classification_reads_wrapped_http_response_and_handles_cycles():
+    outer = RuntimeError("Read failed")
+    inner = OSError("provider rejected request")
+    inner.response = SimpleNamespace(status_code=503)
+    outer.__cause__ = inner
+    inner.__cause__ = outer
+    assert is_retryable_error(outer)
+    inner.response.status_code = 404
+    assert not is_retryable_error(outer)
+
+
+def test_retry_classification_does_not_restore_suppressed_context():
+    try:
+        raise TimeoutError("earlier operation timed out")
+    except TimeoutError:
+        try:
+            raise ValueError("invalid metadata") from None
+        except ValueError as error:
+            assert not is_retryable_error(error)
+
+
+def test_cancel_before_signing_never_requests_a_token(monkeypatch):
+    request = Mock()
+    monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=request))
+    class Stopped(BaseException):
+        pass
+    def check():
+        raise Stopped()
+    with restricted_acquisition(check):
+        with pytest.raises(Stopped):
+            AssetSigner().sign("https://sentinel2l2a01.blob.core.windows.net/container/band.tif")
+    request.assert_not_called()
 
 
 def test_partial_download_raises_and_retains_completed_count():
