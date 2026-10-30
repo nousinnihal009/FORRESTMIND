@@ -33,7 +33,7 @@ from forestmind.data.adapters.base import (
     PREPROCESSING_VERSION,
 )
 from forestmind.data.adapters.raster import read_aligned_band
-from forestmind.data.adapters.network import AssetSigner, open_catalog, open_raster, public_error
+from forestmind.data.adapters.network import AssetSigner, is_retryable_error, open_catalog, open_raster, public_error
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +254,9 @@ class Sentinel1Adapter(SatelliteAdapterBase):
 
             except Exception as e:
                 reason = public_error(e)
-                self.download_failures.append({"scene_id": scene.scene_id, "reason": reason})
+                self.download_failures.append({"scene_id": scene.scene_id, "reason": reason,
+                                               "retryable": is_retryable_error(e),
+                                               "error_type": type(e).__name__})
                 logger.error(f"[sentinel1] Failed to download {scene.scene_id}: {reason}")
                 continue
 
