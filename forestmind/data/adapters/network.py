@@ -21,10 +21,12 @@ ASSET_HOSTS = {"e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com",
                "esa-worldcover.s3.eu-central-1.amazonaws.com", "landsateuwest.blob.core.windows.net"}
 
 
-def check_acquisition() -> None:
-    """Check the caller's cancellation/deadline even when a read is reused."""
+def check_acquisition(href: str | None = None) -> None:
+    """Check cancellation/deadline and destinations even when a read is reused."""
     if _acquisition_check.get():
         _acquisition_check.get()()
+    if href is not None and _restricted.get():
+        validate_destination(href)
 
 
 def is_retryable_error(error: Exception) -> bool:
@@ -49,12 +51,23 @@ def is_retryable_error(error: Exception) -> bool:
         status = getattr(response, "status_code", None)
         if isinstance(status, int):
             statuses.append(status)
-        statuses.extend(int(value) for value in re.findall(
+        statuses.extend(int(match.group(1) or match.group(2)) for match in re.finditer(
             r"\bHTTP(?:\s+response)?(?:\s+(?:error|status|code))?\s*[:=]?\s*([45]\d\d)\b|"
             r"\b([45]\d\d)(?=\s+(?:Client|Server)\s+Error)",
             str(current), flags=re.IGNORECASE))
     if statuses:
         return all(status in {408, 425, 429, 500, 502, 503, 504} for status in statuses)
+    if any(isinstance(current, (ValueError, KeyError, TypeError, ImportError,
+                                FileNotFoundError, PermissionError)) for current in chain):
+        return False
+    if any(isinstance(current, OSError) and current.errno in {
+            errno.ENOSPC, errno.EROFS, errno.EINVAL, errno.EISDIR, errno.ENOTDIR,
+            errno.ENAMETOOLONG} for current in chain):
+        return False
+    if any(re.search(r"not recognized as (?:a supported|being in a supported) file format|"
+                     r"unsupported (?:file format|compression)|no (?:crs|valid pixels)",
+                     str(current), flags=re.IGNORECASE) for current in chain):
+        return False
     for current in chain:
         if isinstance(current, (TimeoutError, ConnectionError)):
             return True
@@ -66,7 +79,7 @@ def is_retryable_error(error: Exception) -> bool:
                      r"failed\s+to\s+connect|empty\s+reply\s+from\s+server)\b",
                      str(current), flags=re.IGNORECASE):
             return True
-    return False
+    return any(isinstance(current, OSError) for current in chain)
 
 
 def validate_destination(href: str, *, catalog=False) -> str:
