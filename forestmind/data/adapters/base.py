@@ -110,7 +110,7 @@ class SatelliteAdapterBase(ABC):
         if not np.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive and finite")
         self.timeout_seconds = float(timeout_seconds)
-        self.download_failures: list[dict[str, str]] = []
+        self.download_failures: list[dict[str, Any]] = []
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     # ─── Abstract Methods ─────────────────────────────────────────────────
