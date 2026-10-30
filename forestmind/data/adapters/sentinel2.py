@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import logging
 import re
+import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -34,7 +36,9 @@ from forestmind.data.adapters.base import (
     PREPROCESSING_VERSION,
 )
 from forestmind.data.adapters.raster import read_aligned_band
-from forestmind.data.adapters.network import AssetSigner, open_catalog, open_raster, public_error
+from forestmind.data.adapters.network import (
+    AssetSigner, check_acquisition, is_retryable_error, open_catalog, open_raster, public_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +90,9 @@ PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 S2_COLLECTION = "sentinel-2-l2a"
 EARTH_SEARCH_STAC_URL = "https://earth-search.aws.element84.com/v1"
 EARTH_SEARCH_COLLECTION = "sentinel-2-c1-l2a"
+# Keep only one scene's successful aligned reads across caller-budgeted retries.
+# Large research grids may exceed this bound and simply reread uncached bands.
+MAX_RETRY_BAND_BYTES = 16 * 1024 * 1024
 
 
 def _band_failure_reason(error: Exception, band: str) -> str:
@@ -177,6 +184,39 @@ class Sentinel2Adapter(SatelliteAdapterBase):
         self.collection = EARTH_SEARCH_COLLECTION if provider == "earth-search" else S2_COLLECTION
         self.provider_name = "element84-earth-search" if provider == "earth-search" else "microsoft-planetary-computer"
         self.asset_keys = EARTH_SEARCH_ASSET_KEYS if provider == "earth-search" else S2_ASSET_KEYS
+        self._retry_band_identity = None
+        self._retry_bands = {}
+        self._retry_band_bytes = 0
+
+    def _clear_retry_bands(self):
+        self._retry_band_identity = None
+        self._retry_bands.clear()
+        self._retry_band_bytes = 0
+
+    def _prepare_retry_bands(self, scene, bbox):
+        identity = (scene.scene_id, scene.datetime.isoformat(), self.provider, self.collection,
+                    bbox.west, bbox.south, bbox.east, bbox.north, self.patch_size,
+                    self.scale_factor, PREPROCESSING_VERSION,
+                    hashlib.sha256(json.dumps(scene.stac_item, sort_keys=True, allow_nan=False,
+                                               separators=(",", ":")).encode()).hexdigest())
+        if identity != self._retry_band_identity:
+            self._clear_retry_bands()
+            self._retry_band_identity = identity
+
+    def _read_band(self, href, band_name, bbox, signer, *, categorical=False):
+        check_acquisition(href)
+        key = (band_name, href, categorical)
+        if key in self._retry_bands:
+            return self._retry_bands[key]
+        with open_raster(signer.sign(href), self.timeout_seconds) as src:
+            data, valid = read_aligned_band(src, bbox, self.patch_size, categorical=categorical)
+        # A failed close or cancellation never leaves a completed-band entry.
+        check_acquisition()
+        size = data.nbytes + valid.nbytes
+        if self._retry_band_bytes + size <= MAX_RETRY_BAND_BYTES:
+            self._retry_bands[key] = (data.copy(), valid.copy())
+            self._retry_band_bytes += size
+        return data, valid
 
     @property
     def sensor_name(self) -> str:
@@ -295,6 +335,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
         signer = AssetSigner(self.timeout_seconds)
 
         for scene in scenes:
+            check_acquisition()
             # A scene from another provider must never be silently processed
             # using this provider's keys or scaling assumptions.
             scene_provider = scene.extra.get("provider", self.provider_name)
@@ -303,12 +344,15 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 scene_collection is not None and scene_collection != self.collection
             ):
                 self.download_failures.append({"scene_id": scene.scene_id,
-                                               "reason": "Scene does not match selected Sentinel-2 provider/collection"})
+                                               "reason": "Scene does not match selected Sentinel-2 provider/collection",
+                                               "retryable": False, "error_type": "ValueError"})
+                self._clear_retry_bands()
                 continue
             scene.extra["provider"] = self.provider_name
             cache_path = self.cache_path_for_scene(scene, bbox)
 
             if self.is_cached(scene, bbox):
+                self._clear_retry_bands()
                 logger.debug(f"[sentinel2] Cached: {scene.scene_id}")
                 paths.append(cache_path)
                 continue
@@ -319,6 +363,7 @@ class Sentinel2Adapter(SatelliteAdapterBase):
             try:
                 # Reconstruct STAC item for asset signing
                 item = pystac.Item.from_dict(scene.stac_item)
+                self._prepare_retry_bands(scene, bbox)
 
                 # Validate the complete Earth Search contract before any COG
                 # read. Do not apply Planetary Computer baseline heuristics.
@@ -346,21 +391,18 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 for band_name in S2_BANDS:
                     active_band = band_name
                     asset_key = self.asset_keys[band_name]
-                    href = signer.sign(item.assets[asset_key].href)
+                    band_data, valid = self._read_band(item.assets[asset_key].href, band_name, bbox, signer)
+                    quality_mask &= valid
 
-                    with open_raster(href, self.timeout_seconds) as src:
-                        band_data, valid = read_aligned_band(src, bbox, self.patch_size)
-                        quality_mask &= valid
+                    # Scale to [0, 1] after reuse of raw aligned values.
+                    conversion = reflectance_scaling(item.assets[asset_key].extra_fields,
+                                                     item.properties, self.scale_factor,
+                                                     require_explicit=self.provider == "earth-search")
+                    scaling[band_name] = conversion
+                    band_data = band_data * conversion["scale"] + conversion["offset"]
+                    band_data = np.clip(band_data, 0.0, 1.0)
 
-                        # Scale to [0, 1]
-                        conversion = reflectance_scaling(item.assets[asset_key].extra_fields,
-                                                         item.properties, self.scale_factor,
-                                                         require_explicit=self.provider == "earth-search")
-                        scaling[band_name] = conversion
-                        band_data = band_data * conversion["scale"] + conversion["offset"]
-                        band_data = np.clip(band_data, 0.0, 1.0)
-
-                        band_arrays.append(band_data)
+                    band_arrays.append(band_data)
                     active_band = None
 
                 # Stack bands: (12, H, W)
@@ -370,11 +412,10 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                 scl_key = self.asset_keys["SCL"]
                 if scl_key in item.assets:
                     active_band = "SCL"
-                    scl_href = signer.sign(item.assets[scl_key].href)
-                    with open_raster(scl_href, self.timeout_seconds) as src:
-                        scl, scl_valid = read_aligned_band(src, bbox, self.patch_size, categorical=True)
-                        # True = valid pixel
-                        quality_mask &= scl_valid & ~np.isin(scl, list(SCL_INVALID))
+                    scl, scl_valid = self._read_band(item.assets[scl_key].href, "SCL", bbox, signer,
+                                                     categorical=True)
+                    # True = valid pixel
+                    quality_mask &= scl_valid & ~np.isin(scl, list(SCL_INVALID))
                     active_band = None
 
                 else:
@@ -398,10 +439,15 @@ class Sentinel2Adapter(SatelliteAdapterBase):
                                              "asset_keys": self.asset_keys,
                                          })
                 paths.append(cache_path)
+                self._clear_retry_bands()
 
             except Exception as e:
                 reason = _band_failure_reason(e, active_band) if active_band else public_error(e)
-                self.download_failures.append({"scene_id": scene.scene_id, "reason": reason})
+                retryable = is_retryable_error(e)
+                self.download_failures.append({"scene_id": scene.scene_id, "reason": reason,
+                                               "retryable": retryable, "error_type": type(e).__name__})
+                if not retryable:
+                    self._clear_retry_bands()
                 logger.error(f"[sentinel2] Failed to download {scene.scene_id}: {reason}")
                 continue
 
