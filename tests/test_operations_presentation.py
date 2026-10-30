@@ -23,6 +23,7 @@ vm.createContext(context);
 const web={web};
 vm.runInContext(fs.readFileSync(path.join(web,'app.js'),'utf8').split('hydrateIcons();route();')[0],context);
 vm.runInContext(fs.readFileSync(path.join(web,'acquisition.js'),'utf8').replace(/\\ninitializeAreaMap\\(\\);\\s*$/,''),context);
+vm.runInContext(fs.readFileSync(path.join(web,'coverage.js'),'utf8'),context);
 vm.runInContext(fs.readFileSync(path.join(web,'operations.js'),'utf8'),context);
 vm.runInContext("downloadJSON=(data,name)=>downloads.push({{data,name}})",context);
 (async()=>process.stdout.write(JSON.stringify(await vm.runInContext({json.dumps(script)},context))))().catch(error=>{{console.error(error);process.exit(1);}});
@@ -135,3 +136,88 @@ def test_opening_operations_only_reads_configuration_and_export_keeps_original_r
       await renderOperations();elements['#download-deliveries'].listeners.click();return {calls,downloads};})()""")
     assert result["calls"] == [["/operations", "GET"], ["/notifications", "GET"]]
     assert result["downloads"][0]["data"]["outbox"][0]["id"] == "record-kept"
+
+
+def test_history_refresh_defaults_keep_saved_start_and_limit_rolling_window():
+    result = render("""[
+      refreshDefaults({start:'2025-07-01',max_downloads:2},'2026-10-29'),
+      refreshDefaults({start:'2015-06-23',max_downloads:6},'2026-10-29')
+    ]""")
+    assert result[0] == {"start": "2025-07-01", "end": "2026-10-29", "max_downloads": 2}
+    assert result[1] == {"start": "2021-11-01", "end": "2026-10-29", "max_downloads": 6}
+
+
+@pytest.mark.parametrize("values,fragment", [
+    ({"start": "2024-02-30", "end": "2024-03-31", "max_downloads": 1}, "valid"),
+    ({"start": "2014-01-01", "end": "2014-12-31", "max_downloads": 1}, "June 23"),
+    ({"start": "2024-02-01", "end": "2024-01-31", "max_downloads": 1}, "on or after"),
+    ({"start": "2024-01-01", "end": "2027-01-01", "max_downloads": 1}, "today or earlier"),
+    ({"start": "2020-01-31", "end": "2025-01-01", "max_downloads": 1}, "60 calendar months"),
+    ({"start": "2024-01-01", "end": "2024-12-31", "max_downloads": 0}, "1 to 24"),
+    ({"start": "2024-01-01", "end": "2024-12-31", "max_downloads": 1.5}, "whole attempts"),
+    ({"start": "2024-01-01", "end": "2024-12-31", "max_downloads": 25}, "1 to 24"),
+])
+def test_history_refresh_validation_rejects_invalid_dates_and_budgets(values, fragment):
+    result = render(f"refreshInputError({json.dumps(values)},'2026-10-29')")
+    assert fragment in result
+
+
+def test_history_refresh_validates_before_submit_and_preserves_selected_area():
+    result = render("""(async()=>{state.selected='area';state.tab='monitor';location.hash='overview';
+      const calls=[];api=async(path,options)=>{calls.push([path,options]);
+        if(path.endsWith('/acquisition'))return {configuration:{request:{start:'2026-09-01',max_downloads:2},study_period:{start:'2025-07-01',end:'2026-10-29'}}};
+        return {};};
+      refreshAcquisitionJobs=async()=>{};toast=()=>{};
+      await renderMonitoringControls('area');
+      const initial=elements['#refresh-start'].value;
+      elements['#refresh-start'].value='2024-03-01';elements['#refresh-end'].value='2024-02-29';
+      await elements['#refresh-form'].listeners.submit({preventDefault(){}});
+      const invalid={posts:calls.filter(row=>row[1]?.method==='POST').length,error:elements['#monitor-error'].textContent,disabled:elements['#refresh-region'].disabled};
+      elements['#refresh-end'].value='2024-12-31';elements['#refresh-budget'].value='4';
+      await elements['#refresh-form'].listeners.submit({preventDefault(){}});
+      return {initial,invalid,posts:calls.filter(row=>row[1]?.method==='POST'),selected:state.selected,hash:location.hash,status:elements['#refresh-status'].textContent};})()""")
+    assert result["initial"] == "2025-07-01"
+    assert result["invalid"]["posts"] == 0 and not result["invalid"]["disabled"]
+    assert "on or after" in result["invalid"]["error"]
+    assert len(result["posts"]) == 1
+    assert result["posts"][0][0] == "/regions/area/refresh"
+    assert json.loads(result["posts"][0][1]["body"]) == {
+        "start": "2024-03-01", "end": "2024-12-31", "max_downloads": 4,
+    }
+    assert result["selected"] == "area" and result["hash"] == "overview"
+    assert "Collection queued" in result["status"]
+
+
+def test_coverage_default_includes_requested_missing_months_without_starting_collection():
+    result = render("""(async()=>{state.selected='area';state.tab='coverage';
+      state.region={observations:[{date:'2025-10-12'},{date:'2026-08-30'}]};
+      const calls=[],periods=[];api=async(path,options)=>{calls.push([path,options?.method || 'GET']);return {configuration:{request:{start:'2026-09-01',end:'2026-10-29'},study_period:{start:'2025-07-01',end:'2026-10-29'}}};};
+      loadCoverage=async(...args)=>periods.push(args);
+      await renderCoverage('area');return {calls,periods,html:elements['#detail-body'].innerHTML};})()""")
+    assert result["calls"] == [["/regions/area/acquisition", "GET"]]
+    assert result["periods"] == [["area", "2025-07-01", "2026-10-29"]]
+    assert "including months without an observation" in result["html"]
+    assert "does not start a download" in result["html"]
+
+
+def test_coverage_preserves_selected_period_and_falls_back_when_settings_unavailable():
+    result = render("""(async()=>{state.selected='area';state.tab='coverage';
+      state.region={observations:[{date:'2025-10-12'},{date:'2026-08-30'}]};
+      const periods=[];let calls=0;api=async()=>{calls++;throw new Error('unavailable');};
+      loadCoverage=async(...args)=>periods.push(args);await renderCoverage('area');
+      const fallback=elements['#detail-body'].innerHTML;
+      coveragePeriods.set('area',{start:'2024-01-01',end:'2024-12-31'});await renderCoverage('area');
+      return {calls,periods,fallback};})()""")
+    assert result["calls"] == 1
+    assert result["periods"] == [["area", "2025-10-12", "2026-08-30"], ["area", "2024-01-01", "2024-12-31"]]
+    assert "could not be loaded" in result["fallback"]
+
+
+def test_stale_coverage_period_request_cannot_replace_a_different_area():
+    result = render("""(async()=>{state.selected='area';state.tab='coverage';
+      state.region={observations:[{date:'2025-10-12'}]};let release;const periods=[];
+      api=()=>new Promise(resolve=>release=resolve);loadCoverage=async(...args)=>periods.push(args);
+      const pending=renderCoverage('area');state.selected='other';elements['#detail-body'].innerHTML='Other area';
+      release({configuration:{study_period:{start:'2025-07-01',end:'2026-10-29'}}});await pending;
+      return {html:elements['#detail-body'].innerHTML,periods};})()""")
+    assert result == {"html": "Other area", "periods": []}
