@@ -150,6 +150,7 @@ def test_failed_band_keeps_cause_without_signed_credentials(tmp_path, monkeypatc
     assert "private-token" not in reason + caplog.text
     assert "private-password" not in reason + caplog.text
     assert not list(tmp_path.rglob("*.npz"))
+    assert adapter.download_failures[0]["retryable"] is True
 
 
 def test_band_error_chain_is_bounded_and_cycle_safe():
@@ -254,3 +255,102 @@ def test_unknown_provider_fails_before_cache_creation(tmp_path):
     with pytest.raises(ValueError, match="provider"):
         sentinel2.Sentinel2Adapter(cache_dir=tmp_path / "new", provider="automatic")
     assert not (tmp_path / "new").exists()
+
+
+@pytest.mark.parametrize("failed_asset", ["nir08", "scl"])
+def test_budgeted_retry_reuses_completed_bands_without_double_scaling_or_lost_masks(
+        tmp_path, monkeypatch, failed_asset):
+    calls = stub_download(monkeypatch, fake_item())
+    original_read = sentinel2.read_aligned_band
+    failed = False
+    def read(href, bbox, size, categorical=False):
+        nonlocal failed
+        if href.endswith(f"/{failed_asset}.tif") and not failed:
+            failed = True
+            raise OSError("HTTP 503")
+        return original_read(href, bbox, size, categorical=categorical)
+    monkeypatch.setattr(sentinel2, "read_aligned_band", read)
+    adapter = sentinel2.Sentinel2Adapter(cache_dir=tmp_path, provider="earth-search", patch_size=4)
+    assert adapter.download([scene()], BOX) == []
+    assert adapter.download_failures[0]["retryable"] is True
+    assert not list(tmp_path.rglob("*.npz"))
+    # The adapter never retries itself; only the caller's second attempt reads again.
+    assert sum(href.endswith(f"/{failed_asset}.tif") for href, _ in calls) == 1
+    paths = adapter.download([scene()], BOX)
+    assert len(paths) == 1 and len(calls) == 14
+    assert adapter._retry_bands == {} and adapter._retry_band_bytes == 0
+    with np.load(paths[0], allow_pickle=False) as cache:
+        np.testing.assert_allclose(cache["data"][:, 2, 2], np.arange(1, 13) * 0.01, atol=2e-8)
+        assert cache["quality_mask"].sum() == 14
+        assert not cache["data"][:, 0, 0].any()  # SCL cloud
+        assert not cache["data"][:, 1, 1].any()  # Invalid optical sample
+
+
+@pytest.mark.parametrize("change", ["source", "grid", "bounds", "date"])
+def test_retry_bands_never_cross_source_or_grid_identity(tmp_path, monkeypatch, change):
+    calls = stub_download(monkeypatch, fake_item())
+    original_read = sentinel2.read_aligned_band
+    failed = False
+    def read(href, bbox, size, categorical=False):
+        nonlocal failed
+        if href.endswith("/nir08.tif") and not failed:
+            failed = True
+            raise OSError("HTTP 503")
+        return original_read(href, BOX, size, categorical=categorical)
+    monkeypatch.setattr(sentinel2, "read_aligned_band", read)
+    adapter = sentinel2.Sentinel2Adapter(cache_dir=tmp_path, provider="earth-search", patch_size=4)
+    source, box = scene(), BOX
+    assert adapter.download([source], box) == []
+    if change == "source":
+        source.stac_item["source_version"] = "different"
+    elif change == "grid":
+        adapter.patch_size = 8
+    elif change == "bounds":
+        # A sub-microdegree change also matters even if the disk cache rounds bounds.
+        box = BoundingBox(BOX.west + 1e-8, BOX.south, BOX.east, BOX.north)
+    else:
+        source.datetime = datetime(2024, 7, 30, tzinfo=timezone.utc)
+    assert len(adapter.download([source], box)) == 1
+    assert len(calls) == 22  # Nine original reads; all thirteen from the changed source/grid.
+
+
+def test_permanent_read_failure_discards_partial_bands(tmp_path, monkeypatch):
+    calls = stub_download(monkeypatch, fake_item())
+    original_read = sentinel2.read_aligned_band
+    def read(href, bbox, size, categorical=False):
+        if href.endswith("/blue.tif"):
+            raise OSError("HTTP 404")
+        return original_read(href, bbox, size, categorical=categorical)
+    monkeypatch.setattr(sentinel2, "read_aligned_band", read)
+    adapter = sentinel2.Sentinel2Adapter(cache_dir=tmp_path, provider="earth-search", patch_size=4)
+    assert adapter.download([scene()], BOX) == []
+    assert adapter.download_failures[0]["retryable"] is False
+    assert adapter._retry_bands == {} and len(calls) == 2
+
+
+def test_retry_band_memory_is_bounded_and_cancellation_checks_cached_reads(tmp_path, monkeypatch):
+    from forestmind.data.adapters.network import restricted_acquisition
+    calls = stub_download(monkeypatch, fake_item())
+    original_read = sentinel2.read_aligned_band
+    def read(href, bbox, size, categorical=False):
+        if href.endswith("/green.tif"):
+            raise OSError("HTTP 503")
+        return original_read(href, bbox, size, categorical=categorical)
+    monkeypatch.setattr(sentinel2, "read_aligned_band", read)
+    monkeypatch.setattr(sentinel2, "MAX_RETRY_BAND_BYTES", 80)
+    adapter = sentinel2.Sentinel2Adapter(cache_dir=tmp_path, provider="earth-search", patch_size=4)
+    source = scene()
+    assert adapter.download([source], BOX) == []
+    assert adapter._retry_band_bytes == 80 and len(adapter._retry_bands) == 1
+    class Stopped(BaseException):
+        pass
+    checks = 0
+    def check():
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise Stopped()
+    with restricted_acquisition(check):
+        with pytest.raises(Stopped):
+            adapter.download([source], BOX)
+    assert checks == 2 and len(calls) == 3
