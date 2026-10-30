@@ -49,6 +49,7 @@ async function loadCoverage(id, start, end) {
 
 async function renderCoverage(id) {
   const render=++coverageRender;
+  ++coverageRequest;
   const rows = state.region.observations;
   let period=coveragePeriods.get(id),notice='The initial period covers the first through last saved observation. Extend the dates to inspect earlier or later gaps.';
   if(!period){
