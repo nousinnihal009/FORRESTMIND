@@ -188,6 +188,42 @@ def test_history_refresh_validates_before_submit_and_preserves_selected_area():
     assert "Collection queued" in result["status"]
 
 
+@pytest.mark.parametrize("change", ["area", "tab", "rerender"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_pending_refresh_does_not_change_replaced_form_or_new_selection(change, failed):
+    result = render("""(async()=>{state.selected='area';state.tab='monitor';
+      api=async path=>path.endsWith('/acquisition')?{configuration:{request:{start:'2025-07-01',max_downloads:2}}}:{};
+      let refreshed=0;const reloads=[];refreshAcquisitionJobs=async()=>{refreshed++;acquisition.jobs=[{id:'job',region_id:'area',status:'completed'}];};
+      loadWorkspace=async id=>reloads.push(id);toast=()=>{};await renderMonitoringControls('area');
+      elements['#refresh-start'].value='2024-01-01';elements['#refresh-end'].value='2024-12-31';
+      let finish;api=()=>new Promise((resolve,reject)=>finish=()=>FAILED?reject(new Error('Provider unavailable')):resolve({id:'job'}));
+      const pending=elements['#refresh-form'].listeners.submit({preventDefault(){}});
+      if(CHANGE==='area')state.selected='other';else if(CHANGE==='tab')state.tab='coverage';
+      for(const selector of ['#refresh-form','#refresh-status','#monitor-error','#refresh-region'])elements[selector]={...elements[selector],textContent:'New view',disabled:false};
+      const originalQuery=document.querySelector;
+      if(CHANGE==='tab')document.querySelector=selector=>['#refresh-form','#refresh-status','#monitor-error','#refresh-region'].includes(selector)?null:originalQuery(selector);
+      finish();await pending;return {refreshed,reloads,status:elements['#refresh-status'].textContent,error:elements['#monitor-error'].textContent,disabled:elements['#refresh-region'].disabled};})()""".replace("FAILED", json.dumps(failed)).replace("CHANGE", json.dumps(change)))
+    assert result == {"refreshed": 0 if failed else 1, "reloads": [], "status": "New view", "error": "New view", "disabled": False}
+
+
+def test_immediately_completed_refresh_reloads_current_area_and_reenables_controls():
+    result = render("""(async()=>{state.selected='area';state.tab='monitor';
+      api=async path=>path.endsWith('/acquisition')?{configuration:{request:{start:'2025-07-01',max_downloads:2}}}:{};
+      await renderMonitoringControls('area');const html=elements['#detail-body'].innerHTML;
+      elements['#refresh-start'].value='2024-01-01';elements['#refresh-end'].value='2024-12-31';
+      const reloads=[],options=[];loadWorkspace=async id=>reloads.push(id);toast=()=>{};
+      api=async()=>({id:'quick-job',status:'queued',region_id:'area'});
+      refreshAcquisitionJobs=async value=>{options.push(value);acquisition.jobs=[{id:'quick-job',status:'completed',region_id:'area'}];};
+      await elements['#refresh-form'].listeners.submit({preventDefault(){}});
+      return {reloads,options,disabled:elements['#refresh-region'].disabled,status:elements['#refresh-status'].textContent,html};})()""")
+    assert result["reloads"] == ["area"]
+    assert result["options"] == [{"preserveSelection": True}]
+    assert result["disabled"] is False
+    assert "Collection finished" in result["status"]
+    assert "Download attempts per collection" in result["html"]
+    assert "default for future updates, including local schedules" in result["html"]
+
+
 def test_coverage_default_includes_requested_missing_months_without_starting_collection():
     result = render("""(async()=>{state.selected='area';state.tab='coverage';
       state.region={observations:[{date:'2025-10-12'},{date:'2026-08-30'}]};
