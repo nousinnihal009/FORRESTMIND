@@ -1,4 +1,16 @@
-# Continuation record — 2026-10-29
+# Continuation record — 2026-10-31
+
+## Download reliability and historical coverage — October 31
+
+Continued the immediate build step after two usage-limit interruptions. Do not rerun acquisition or train merely to reproduce this work. The nine saved Mudumalai observations remain intact; licensed, independently reviewed reference outcomes remain a prerequisite for scientific training/validation.
+
+- Sentinel-2 retries reuse successful aligned raw bands for one exact source/grid identity, with a 16 MiB in-memory cap, cancellation/destination checks and atomic complete-cache writes. Permanent failures skip automatic retries; transient and unclassified I/O failures retain the existing bounded, persisted attempt budget. No hidden network retries or provider fallback.
+- History execution checks one candidate per missing month per round and prioritizes months with fewer persisted attempts on resume. Frozen plan/report schemas, cache integrity and accepted-only merges remain intact.
+- Requested study dates are recovered read-only from durable region jobs. A narrow successful refresh no longer hides older requested gaps. The exact last successful batch request and original snapshots are preserved.
+- Monitoring updates now accepts history start/end and a bounded download budget. Coverage defaults to all requested study dates. UI regressions cover invalid periods, navigation during pending requests, replacement forms and jobs completed before the first poll. Successful batch budgets become future collection/schedule defaults, explicitly explained in the UI.
+- Offline targeted verification: 123 adapter/raster checks, 159 integrated acquisition/history/coverage/presentation checks before the last UI race fixes, then 28 presentation checks after those fixes. Final full-suite result is recorded in `docs/VALIDATION.md`.
+- Browser verification used an isolated copy of `data/forestmind.db` with all startup workers and write requests disabled. Mudumalai showed 9/16 usable months, 7 missing months, correct historical controls, rejected reversed dates, no console errors and no page overflow at a 608px content width. Original regions/jobs/settings/schedules/snapshots matched the preview copy; evidence is `artifacts/reliability-pilot-verification-20261031.json`.
+- No new satellite download, reference-data purchase/outreach, radar collection, training, public hosting or notification delivery occurred. The earlier live server/package may predate these backend changes; use current source on the next normal application start. The temporary verification server is stopped after review.
 
 ## Mudumalai real-data pilot — October 29
 
