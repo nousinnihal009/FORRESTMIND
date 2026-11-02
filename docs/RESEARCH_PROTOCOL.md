@@ -115,6 +115,12 @@ Eligible execution prepares a masked sequence from accepted acquisition files, r
 
 ## Reproducible real-reference baseline experiment
 
+The November 2026 reference intake adds a versioned annual gross tree-cover-loss protocol, source-file hashes, human review and retained uncertain/excluded examples. See [the data contribution and intake guide](DATA_CONTRIBUTION.md). It exports a continuous loss target only after reference and partition audits pass. No independent verified dataset has been supplied, so no real predictive accuracy is established.
+
+The harness now accepts an optional `val` partition of at least five examples, protected by the same spatial/chronological rules. Fixed conventional estimators never fit or tune on it. When label-source `available_at` is supplied, it must not predate the outcome and participates in the embargo against later partitions. An optional `historical_trend` prediction and `historical_trend_available_at` must be supplied for every example or none; it is compared on identical test IDs. The intake can calculate it from past-only, hash-pinned annual references.
+
+Event reports additionally include AUROC (null for a single observed class), a fixed-bin expected calibration error, a confusion matrix and per-class precision/recall/F1/support. Forest-type subgroups are reported only from supplied labels; unspecified types remain explicit. Paired region-cluster bootstrap intervals for improvement over persistence require at least five distinct test regions and retain all repeated origins in each sampled region. They use 1000 replicates and seed 17, conditional on fitted models/calibration. A region identifier does not prove spatial independence; these intervals exclude fitting uncertainty and do not establish superiority by themselves. The original warning about naive independent-sample significance remains applicable.
+
 `scripts/benchmark_references.py` supplies the missing conventional comparison harness without manufacturing reference labels. Prepare a versioned JSON manifest with:
 
 - `schema_version: 1`, `dataset_id`, `version`, `synthetic: false` and a fixed `feature_names` list.
