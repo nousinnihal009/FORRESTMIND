@@ -72,7 +72,7 @@ def _file_hash(path):
     return result.hexdigest()
 
 
-def _evidence(source, root):
+def _evidence(source, root, cache):
     for key in ("reference", "version", "license", "method", "uncertainty", "independence_basis"):
         _text(source.get(key), f"source.{key}")
     if source.get("independent") is not True:
@@ -82,7 +82,18 @@ def _evidence(source, root):
     if relative.is_absolute() or not resolved.is_relative_to(root) or not resolved.is_file():
         raise ValueError("Evidence file must exist inside the reference manifest directory")
     expected = source.get("sha256")
-    if not isinstance(expected, str) or len(expected) != 64 or _file_hash(resolved) != expected:
+    stat = resolved.stat()
+    fingerprint = (stat.st_size, stat.st_mtime_ns)
+    if resolved in cache:
+        if cache[resolved][0] != fingerprint:
+            raise ValueError("Reference evidence changed during the audit")
+        actual = cache[resolved][1]
+    else:
+        if stat.st_size > 512 * 1024 * 1024 or sum(value[0][0] for value in cache.values()) + stat.st_size > 2 * 1024**3:
+            raise ValueError("Reference evidence exceeds 512 MiB per file or 2 GiB per intake")
+        actual = _file_hash(resolved)
+        cache[resolved] = (fingerprint, actual)
+    if not isinstance(expected, str) or len(expected) != 64 or actual != expected:
         raise ValueError("Reference evidence SHA256 is missing or changed")
     _date(source.get("available_at"))
 
@@ -116,6 +127,43 @@ def reference_template():
             "feature_names": ["ndvi_mean", "ndmi_mean", "nbr_mean"], "examples": []}
 
 
+def annual_reference_baselines(history, *, cutoff, horizon_days):
+    """Compute persistence and a least-squares annual trend on past references only.
+
+    Each record is a loss fraction for a complete previous calendar year. For
+    this annual target, seasonal naive equals the latest annual observation.
+    Publication lag is respected. Three consecutive available years are needed
+    for the trend; an absent history never becomes a zero-loss prediction.
+    """
+    current = _date(cutoff)
+    if not isinstance(history, list) or not 3 <= len(history) <= 50:
+        raise ValueError("Baseline history needs 3–50 consecutive annual reference records")
+    if type(horizon_days) is not int or horizon_days not in (365, 366):
+        raise ValueError("Baseline horizon must be 365 or 366 days")
+    years, values, availability = [], [], []
+    for row in history:
+        end, available = _date(row.get("period_end")), _date(row.get("available_at"))
+        if (end.month, end.day) != (12, 31) or not end <= available <= current:
+            raise ValueError("Past annual labels and their publication must be available by cutoff")
+        if years and end.year != years[-1] + 1:
+            raise ValueError("Baseline history must be ordered and consecutive without duplicate years")
+        years.append(end.year)
+        values.append(_number(row.get("loss_fraction"), 0, 1, "historical loss_fraction"))
+        availability.append(available)
+    if current.year - years[-1] > 2:
+        raise ValueError("Annual baseline history is more than two years stale")
+    mean_year, mean_value = sum(years) / len(years), sum(values) / len(values)
+    slope = sum((year - mean_year) * (value - mean_value) for year, value in zip(years, values)) / sum((year - mean_year)**2 for year in years)
+    future_year = (current + timedelta(days=horizon_days)).year
+    trend = max(0., min(1., mean_value + slope * (future_year - mean_year)))
+    available = max(availability).isoformat()
+    return {"persistence": values[-1], "seasonal": values[-1], "historical_trend": trend,
+            "persistence_available_at": available, "seasonal_available_at": available,
+            "historical_trend_available_at": available,
+            "baseline_method": "annual-reference-persistence-and-ordinary-least-squares-v1",
+            "baseline_history_sha256": content_hash(history)}
+
+
 def review_references(manifest_path):
     path = Path(manifest_path).resolve()
     document = _read_json(path)
@@ -133,8 +181,9 @@ def review_references(manifest_path):
     rows = document.get("examples")
     if not isinstance(rows, list) or len(rows) > 10000:
         raise ValueError("Reference intake accepts a list of at most 10000 examples")
-    decisions, accepted, identities = [], [], set()
+    decisions, accepted, identities, evidence_cache = [], [], set(), {}
     for row in rows:
+        row = deepcopy(row)
         identity = _text(row.get("id"), "example.id")
         if identity in identities:
             raise ValueError("Reference example IDs must be unique")
@@ -152,6 +201,16 @@ def review_references(manifest_path):
             raise ValueError("Annual target window disagrees with the frozen horizon; separate leap-year studies")
         if _date(row.get("features_available_at")) > cutoff:
             raise ValueError("Features must be available by the prediction cutoff")
+        if "baseline_history" in row:
+            computed = annual_reference_baselines(row["baseline_history"], cutoff=row["cutoff"], horizon_days=target["horizon_days"])
+            for historic in row["baseline_history"]:
+                _evidence(historic.get("source", {}), path.parent, evidence_cache)
+                if historic["source"]["available_at"] != historic.get("available_at"):
+                    raise ValueError("Baseline reference availability disagrees with its source")
+            for key in ("persistence", "seasonal", "historical_trend"):
+                if key in row and (row[key] != computed[key] or row.get(key + "_available_at") != computed[key + "_available_at"]):
+                    raise ValueError("Supplied baseline disagrees with the pinned historical references")
+            row.update(computed)
         values = row.get("features", {})
         if not isinstance(values, dict) or set(values) != set(features):
             raise ValueError("Feature keys must exactly match feature_names; use explicit null for missing values")
@@ -177,7 +236,7 @@ def review_references(manifest_path):
             reason = "No independent reference assessment supplied"
         else:
             source = reference.get("source", {})
-            _evidence(source, path.parent)
+            _evidence(source, path.parent, evidence_cache)
             if reference.get("bbox") != row["bbox"]:
                 raise ValueError("Reference geometry must exactly match the prediction footprint")
             if (reference.get("period_start") != (cutoff + timedelta(days=1)).isoformat()
@@ -225,12 +284,16 @@ def review_references(manifest_path):
             example = {key: deepcopy(row[key]) for key in (
                 "id", "region_id", "bbox", "split", "cutoff", "features_available_at", "target_date", "features",
                 "persistence", "persistence_available_at", "seasonal", "seasonal_available_at", "quality_group", "forest_type")}
-            for key in ("historical_trend", "historical_trend_available_at", "season"):
+            for key in ("historical_trend", "historical_trend_available_at", "season", "baseline_method", "baseline_history_sha256"):
                 if key in row:
                     example[key] = deepcopy(row[key])
             example.update(target=label, reference_interval=interval, review=deepcopy(review),
                            label_source={**deepcopy(reference["source"]), "review_sha256": content_hash(decision)})
             accepted.append(example)
+    for source_path, (fingerprint, _) in evidence_cache.items():
+        stat = source_path.stat()
+        if (stat.st_size, stat.st_mtime_ns) != fingerprint:
+            raise ValueError("Reference evidence changed during the audit")
     export = {"schema_version": 1, "dataset_id": document["dataset_id"], "version": document["version"],
               "synthetic": False, "target": deepcopy(target), "split_policy": deepcopy(document.get("split_policy", {})),
               "feature_names": features, "examples": accepted, "review_manifest_sha256": content_hash(document)}
@@ -240,6 +303,7 @@ def review_references(manifest_path):
     except (ValueError, KeyError, TypeError) as error:
         partition_audit, ready, blockers = None, False, [str(error)]
     return {"schema_version": 1, "kind": "forestmind_reference_intake_report", "target": target,
+            "source_manifest_path": str(path), "evidence_root": str(path.parent),
             "manifest_sha256": content_hash(document), "implementation_sha256": _file_hash(Path(__file__)),
             "scientifically_validated": False, "ready_for_baseline_experiment": ready,
             "counts": {"submitted": len(rows), "eligible": len(accepted), "excluded": len(rows) - len(accepted)},
@@ -250,9 +314,13 @@ def review_references(manifest_path):
 def prepare_reviewed_references(manifest_path, output_directory):
     """Write a new auditable packet; insufficient references never produce a training manifest."""
     report, document = review_references(manifest_path)
+    source = _read_json(Path(manifest_path))
+    if content_hash(source) != report["manifest_sha256"]:
+        raise ValueError("Reference manifest changed during preparation")
     root = Path(output_directory)
     root.mkdir(parents=True, exist_ok=False)
     report["output_manifest"] = "references.json" if report["ready_for_baseline_experiment"] else None
+    (root / "source-manifest.json").write_text(json.dumps(source, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     (root / "intake-report.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     if report["ready_for_baseline_experiment"]:
         (root / "references.json").write_text(json.dumps(document, indent=2, allow_nan=False) + "\n", encoding="utf-8")
