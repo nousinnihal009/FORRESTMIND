@@ -2,7 +2,7 @@
 'use strict';
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const state = {overview: null, region: null, selected: null, tab: 'trajectory', horizon: 365, zoom: 1, request: 0, scenario: null};
+const state = {overview: null, region: null, selected: null, tab: 'trajectory', horizon: 365, zoom: 1, request: 0, scenario: null, scenarioRequest: 0, scenarioPending: false};
 const paths = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   map: '<path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5Zm6-2v16m6-14v16"/>',
@@ -208,9 +208,11 @@ function chart(history, forecast, options={}) {
   const a=last?[last,...alternative]:alternative;
   const band=f.filter(p=>typeof p.lower==='number'&&typeof p.upper==='number');
   let interval='';if(band.length){const b=last?[{...last,lower:last.score,upper:last.score},...band]:band;interval=`<path d="${b.map((p,i)=>`${i?'L':'M'}${x(p)},${y(p.upper)}`).join(' ')} ${[...b].reverse().map(p=>`L${x(p)},${y(p.lower)}`).join(' ')} Z" fill="#e1eacb" fill-opacity=".7"/>`;}
+  const sensitivity=alternative.filter(p=>Number.isFinite(p.sensitivity_lower)&&Number.isFinite(p.sensitivity_upper));
+  const sensitivityBand=sensitivity.length?`<path d="${sensitivity.map((p,i)=>`${i?'L':'M'}${x(p)},${y(p.sensitivity_upper)}`).join(' ')} ${[...sensitivity].reverse().map(p=>`L${x(p)},${y(p.sensitivity_lower)}`).join(' ')} Z" fill="#b3935c" fill-opacity=".18"><title>Range under supplied assumptions; not a confidence interval</title></path>`:'';
   const split=last&&future.length?`<path d="M${x(last)},${top}V${height-bottom}" stroke="#cbd6bb" stroke-dasharray="3 4"/><text x="${Math.min(x(last)+8,width-105)}" y="${top+11}" fill="#8e9e79" font-size="8">PROJECTION →</text>`:'';
-  const circles=[...past,...future,...alternative].filter(p=>typeof p.score==='number').map(p=>`<circle cx="${x(p)}" cy="${y(p.score)}" r="2.3" fill="${alternative.includes(p)?'#b3935c':'#7e9a62'}"><title>${esc(dateLabel(p.date))}: ${numeric(p.score,1)}${typeof p.lower==='number'?` (range ${numeric(p.lower,1)}–${numeric(p.upper,1)})`:''}</title></circle>`).join('');
-  return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(options.label||'Observed vegetation condition index and uncalibrated baseline forecast interval')}"><title>${esc(options.label||'Vegetation condition trajectory')}</title>${axes}${interval}${split}<path d="${line(past)}" fill="none" stroke="#416b4c" stroke-width="2.2" stroke-linecap="round"/><path d="${line(f)}" fill="none" stroke="#8fa763" stroke-width="2" stroke-dasharray="5 4"/>${alternative.length?`<path d="${line(a)}" fill="none" stroke="#b3935c" stroke-width="2.3"/>`:''}${circles}</svg>`;
+  const circles=[...past,...future,...alternative].filter(p=>typeof p.score==='number').map(p=>`<circle cx="${x(p)}" cy="${y(p.score)}" r="2.3" fill="${alternative.includes(p)?'#b3935c':'#7e9a62'}"><title>${esc(dateLabel(p.date))}: ${numeric(p.score,1)}${typeof p.lower==='number'?` (range ${numeric(p.lower,1)}–${numeric(p.upper,1)})`:''}${Number.isFinite(p.sensitivity_lower)&&Number.isFinite(p.sensitivity_upper)?` (assumption sensitivity ${numeric(p.sensitivity_lower,1)}–${numeric(p.sensitivity_upper,1)}; not a confidence interval)`:''}</title></circle>`).join('');
+  return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(options.label||'Observed vegetation condition index and uncalibrated baseline forecast interval')}"><title>${esc(options.label||'Vegetation condition trajectory')}</title>${axes}${interval}${sensitivityBand}${split}<path d="${line(past)}" fill="none" stroke="#416b4c" stroke-width="2.2" stroke-linecap="round"/><path d="${line(f)}" fill="none" stroke="#8fa763" stroke-width="2" stroke-dasharray="5 4"/>${alternative.length?`<path d="${line(a)}" fill="none" stroke="#b3935c" stroke-width="2.3"/>`:''}${circles}</svg>`;
 }
 function renderDetail() {
   if(!state.region)return;
@@ -280,19 +282,27 @@ async function runAnalysis() {
 }
 async function runScenario(event) {
   event.preventDefault();
+  const request=++state.scenarioRequest;
+  state.scenarioPending=true;state.scenario=null;
   const button=$('#compare-scenario');button.disabled=true;
+  $('#scenario-results').innerHTML='<div class="empty-state" role="status"><h2>Comparing assumptions</h2><p>Preparing the selected observations and scenario inputs.</p></div>';
   try{
     const values=Object.fromEntries(new FormData($('#scenario-form')));
     for(const k of ['fire_reduction','pressure_reduction','restoration','climate_stress'])values[k]=Number(values[k]);
+    const fiveYear=$('#scenario-horizon').value==='five-year';
+    const ranges=fiveYear?scenarioAssumptionRanges(values):null;
     let result;
-    if($('#scenario-horizon').value==='five-year'){
+    if(fiveYear){
       const snapshot=await ensureWorkflowSnapshot(values.region_id);
+      if(request!==state.scenarioRequest)return;
       const parameters={...values,manifest_id:snapshot.manifest.id};delete parameters.region_id;
-      const ranges=scenarioAssumptionRanges(values);if(ranges)parameters.parameter_ranges=ranges;
+      if(ranges)parameters.parameter_ranges=ranges;
       result=await api('/regions/'+encodeURIComponent(values.region_id)+'/workflow/scenarios',{method:'POST',body:JSON.stringify(parameters)});
       result={...result,scenario:result.comparisons[0]?.points || [],caveat:result.limitations.join(' '),historical:snapshot.forecast.historical};
     }else result=await api('/scenarios',{method:'POST',body:JSON.stringify(values)});
+    if(request!==state.scenarioRequest)return;
     const region=await api('/regions/'+encodeURIComponent(values.region_id));
+    if(request!==state.scenarioRequest)return;
     state.scenario=result;
     if(!result.baseline.length){$('#scenario-results').innerHTML='<div class="empty-state"><h2>More observations are needed</h2><p>This region has no eligible forecast. No scenario projection was produced. Supply twelve consecutive usable monthly records, including the latest month.</p></div>';return;}
     const b=result.baseline.at(-1),s=result.scenario.at(-1),delta=b&&s?s.score-b.score:null;
@@ -301,15 +311,23 @@ async function runScenario(event) {
     $('#export-scenario').addEventListener('click',()=>downloadJSON(state.scenario,'forestmind-scenario-'+state.scenario.id+'.json'));
     const comparison=result.comparisons?.[0];
     if(comparison?.uncertainty?.kind==='explicit_assumption_range'){
+      $('#scenario-results .chart-legend').insertAdjacentHTML('beforeend','<span><i class="legend-band" style="background:#b3935c;opacity:.35"></i>Supplied assumption range</span>');
       const ranges=Object.entries(comparison.parameter_ranges).map(([key,bounds])=>`${humanLabel(key)}: ${bounds.lower}–${bounds.upper}%`).join(' · ');
       $('#scenario-results .scenario-assumptions').insertAdjacentHTML('beforebegin',`<section class="scenario-assumptions" aria-label="Assumption sensitivity range"><strong>Range under your assumptions</strong><p>${esc(comparison.uncertainty.definition)}</p><p>${esc(ranges)}</p><div class="table-scroll"><table><thead><tr><th>Days ahead</th><th>Lower sensitivity</th><th>Selected assumptions</th><th>Upper sensitivity</th></tr></thead><tbody>${comparison.points.map(point=>`<tr><td>${point.horizon_days}</td><td>${numeric(point.sensitivity_lower,2)}</td><td>${numeric(point.score,2)}</td><td>${numeric(point.sensitivity_upper,2)}</td></tr>`).join('')}</tbody></table></div></section>`);
     }
     toast('Scenario comparison saved.');
   }catch(error){
+    if(request!==state.scenarioRequest)return;
     state.scenario=null;
     $('#scenario-results').innerHTML=`<div class="empty-state" role="status"><h2>Comparison unavailable</h2><p>${esc(userMessage(error,'The comparison could not be completed. Please try again.'))}</p></div>`;
   }
-  finally{button.disabled=false;}
+  finally{if(request===state.scenarioRequest){button.disabled=false;state.scenarioPending=false;}}
+}
+function invalidateScenario(){
+  const hadResult=state.scenario||state.scenarioPending;
+  ++state.scenarioRequest;state.scenarioPending=false;state.scenario=null;
+  $('#compare-scenario').disabled=false;
+  if(hadResult)$('#scenario-results').innerHTML='<div class="empty-state"><h2>Assumptions changed</h2><p>Compare trajectories again to evaluate the selected region with these inputs.</p></div>';
 }
 function scenarioAssumptionRanges(values){
   if(!$('#scenario-ranges-enabled')?.checked)return null;
@@ -317,23 +335,27 @@ function scenarioAssumptionRanges(values){
   for(const key of ['pressure_reduction','fire_reduction','restoration','climate_stress']){
     const low=$('#range-'+key+'-lower').value,high=$('#range-'+key+'-upper').value;
     const lower=Number(low),upper=Number(high);
-    if(low===''||high===''||!Number.isFinite(lower)||!Number.isFinite(upper)||lower<0||upper>100||lower>values[key]||upper<values[key])throw new Error(`${humanLabel(key)}: the lower and upper range must contain your selected value and stay between 0 and 100.`);
+    if(low.trim()===''||high.trim()===''||!Number.isFinite(lower)||!Number.isFinite(upper)||!Number.isFinite(values[key])||lower<0||upper>100||lower>upper||lower>values[key]||upper<values[key])throw new Error(`${humanLabel(key)}: the lower and upper range must contain your selected value and stay between 0 and 100.`);
     ranges[key]={lower,upper};
   }
   return ranges;
+}
+function syncScenarioRanges(){
+  const panel=$('#scenario-range-controls');if(!panel)return;
+  panel.hidden=$('#scenario-horizon').value!=='five-year';
+  const enabled=$('#scenario-ranges-enabled').checked&&!panel.hidden;
+  for(const key of ['pressure_reduction','fire_reduction','restoration','climate_stress']){
+    for(const side of ['lower','upper'])$('#range-'+key+'-'+side).disabled=!enabled;
+  }
 }
 function installScenarioRanges(){
   const fields=['pressure_reduction','fire_reduction','restoration','climate_stress'];
   const panel=document.createElement('details');panel.id='scenario-range-controls';panel.className='advanced-acquisition';
   panel.innerHTML=`<summary>Optional assumption ranges</summary><p class="form-help">For five-year comparisons, enter plausible lower and upper assumptions. The resulting range is arithmetic sensitivity, not a confidence interval.</p><label class="check-label"><input type="checkbox" id="scenario-ranges-enabled"> Include my assumption ranges</label><div id="scenario-range-fields">${fields.map(key=>`<div class="slider-field"><strong>${humanLabel(key)}</strong><div class="history-dates"><label>Lower (%)<input type="number" id="range-${key}-lower" min="0" max="100" step="any" disabled></label><label>Upper (%)<input type="number" id="range-${key}-upper" min="0" max="100" step="any" disabled></label></div></div>`).join('')}</div>`;
   $('#compare-scenario').before(panel);
-  const sync=()=>{
-    panel.hidden=$('#scenario-horizon').value!=='five-year';
-    const enabled=$('#scenario-ranges-enabled').checked&&!panel.hidden;
-    fields.forEach(key=>{for(const side of ['lower','upper']){const input=$('#range-'+key+'-'+side);input.disabled=!enabled;if(input.value==='')input.value=$('#scenario-form [name="'+key+'"]').value;}});
-  };
-  panel.addEventListener('input',()=>{sync();invalidateScenario();});
-  $('#scenario-horizon').addEventListener('change',sync);sync();
+  fields.forEach(key=>{for(const side of ['lower','upper'])$('#range-'+key+'-'+side).value=$('#scenario-form [name="'+key+'"]').value;});
+  panel.addEventListener('input',()=>{syncScenarioRanges();invalidateScenario();});
+  $('#scenario-horizon').addEventListener('change',syncScenarioRanges);syncScenarioRanges();
 }
 function downloadJSON(data, filename) {const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 let regionImportFile=null,regionImportRead=0;
@@ -391,7 +413,6 @@ $('#run-analysis').addEventListener('click',runAnalysis);
 $('#export-region').addEventListener('click',async()=>{if(!state.selected)return;try{downloadJSON(await api('/regions/'+encodeURIComponent(state.selected)+'/export'),'forestmind-'+state.selected+'.json');}catch(error){toast(userMessage(error));}});
 $('#scenario-form').addEventListener('submit',runScenario);
 $$('input[type="range"]').forEach(el=>el.addEventListener('input',()=>{$('#'+el.id+'-output').textContent=el.value+'%';}));
-function invalidateScenario(){if(state.scenario){state.scenario=null;$('#scenario-results').innerHTML='<div class="empty-state"><h2>Assumptions changed</h2><p>Compare trajectories again to evaluate the selected region with these inputs.</p></div>';}}
 $('#scenario-region').addEventListener('change',()=>{invalidateScenario();selectRegion($('#scenario-region').value);});
 $('#scenario-horizon').addEventListener('change',invalidateScenario);
 $$('input[type="range"]').forEach(el=>el.addEventListener('input',invalidateScenario));
