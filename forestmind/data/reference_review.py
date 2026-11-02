@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import shutil
 
 from forestmind.training.reference_experiment import audit_references, content_hash
 
@@ -237,6 +238,12 @@ def review_references(manifest_path):
         else:
             source = reference.get("source", {})
             _evidence(source, path.parent, evidence_cache)
+            baseline_source = reference.get("baseline_source", {})
+            _evidence(baseline_source, path.parent, evidence_cache)
+            if reference.get("baseline_observed_at") != cutoff.isoformat():
+                raise ValueError("Baseline forest reference must explicitly describe tree cover at the prediction cutoff")
+            if _date(baseline_source["available_at"]) < cutoff:
+                raise ValueError("Baseline reference availability cannot predate its observation")
             if reference.get("bbox") != row["bbox"]:
                 raise ValueError("Reference geometry must exactly match the prediction footprint")
             if (reference.get("period_start") != (cutoff + timedelta(days=1)).isoformat()
@@ -251,7 +258,7 @@ def review_references(manifest_path):
             if review["status"] in {"accepted", "rejected"}:
                 for key in ("reviewer", "basis"):
                     _text(review.get(key), "review." + key)
-                if _date(review.get("reviewed_at")) < _date(source["available_at"]):
+                if _date(review.get("reviewed_at")) < max(_date(source["available_at"]), _date(baseline_source["available_at"])):
                     raise ValueError("Review date must not predate the reference availability")
             if review["status"] != "accepted":
                 reason = "Reference is pending review" if review["status"] == "pending" else "Reference rejected by reviewer"
@@ -269,13 +276,14 @@ def review_references(manifest_path):
                     significant = True
                 elif high < threshold:
                     significant = False
-                else:
-                    reason = "Reference uncertainty straddles the significant-loss criterion"
-                if reason is None:
-                    label = loss / forest
+                # Threshold ambiguity affects the event interpretation only.
+                # Dropping these valid continuous labels would select easy
+                # outcomes and bias the continuous training/test distribution.
+                label = loss / forest
         decision = {"id": identity, "split": row["split"], "status": "eligible" if label is not None else "excluded",
                     "classification": "uncertain" if significant is None else "positive" if significant else "negative",
                     "target": label, "reference_interval": interval, "reason": reason,
+                    "classification_reason": "Reference interval straddles the significant-loss criterion" if label is not None and significant is None else None,
                     "review": deepcopy(review), "reference_sha256": content_hash(reference) if reference else None}
         decisions.append(decision)
         if label is not None:
@@ -288,7 +296,11 @@ def review_references(manifest_path):
                 if key in row:
                     example[key] = deepcopy(row[key])
             example.update(target=label, reference_interval=interval, review=deepcopy(review),
-                           label_source={**deepcopy(reference["source"]), "review_sha256": content_hash(decision)})
+                           baseline_source=deepcopy(baseline_source), baseline_observed_at=reference["baseline_observed_at"],
+                           label_source={**deepcopy(reference["source"]),
+                                         "source_available_at": reference["source"]["available_at"],
+                                         "available_at": max(source["available_at"], baseline_source["available_at"], review["reviewed_at"]),
+                                         "review_sha256": content_hash(decision)})
             accepted.append(example)
     for source_path, (fingerprint, _) in evidence_cache.items():
         stat = source_path.stat()
@@ -296,7 +308,11 @@ def review_references(manifest_path):
             raise ValueError("Reference evidence changed during the audit")
     export = {"schema_version": 1, "dataset_id": document["dataset_id"], "version": document["version"],
               "synthetic": False, "target": deepcopy(target), "split_policy": deepcopy(document.get("split_policy", {})),
-              "feature_names": features, "examples": accepted, "review_manifest_sha256": content_hash(document)}
+              "feature_names": features, "examples": accepted, "review_manifest_sha256": content_hash(document),
+              "evidence_root": str(path.parent),
+              "evidence_files": {str(source_path.relative_to(path.parent)): hashed for source_path, (_, hashed) in evidence_cache.items()}}
+    export["split_policy"]["required_splits"] = ["train", "val", "calibration", "test"] if any(row.get("split") == "val" for row in rows) else ["train", "calibration", "test"]
+    export["required_baselines"] = ["persistence", "seasonal", "historical_trend"] if any("historical_trend" in row or "baseline_history" in row for row in rows) else ["persistence", "seasonal"]
     try:
         partition_audit = audit_references(export)
         ready, blockers = True, []
@@ -321,7 +337,25 @@ def prepare_reviewed_references(manifest_path, output_directory):
     root.mkdir(parents=True, exist_ok=False)
     report["output_manifest"] = "references.json" if report["ready_for_baseline_experiment"] else None
     (root / "source-manifest.json").write_text(json.dumps(source, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-    (root / "intake-report.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    evidence_root = Path(document["evidence_root"])
+    mapping = {name: "evidence/" + digest for name, digest in document["evidence_files"].items()}
+    if mapping:
+        (root / "evidence").mkdir()
+    for name, digest in document["evidence_files"].items():
+        destination = root / mapping[name]
+        if not destination.exists():
+            shutil.copyfile(evidence_root / name, destination)
+        if _file_hash(destination) != digest:
+            raise ValueError("Reference evidence changed while creating the packet")
+    document["evidence_files"] = {mapping[name]: digest for name, digest in document["evidence_files"].items()}
+    document["evidence_root"] = str(root.resolve())
+    for example in document["examples"]:
+        for field in ("label_source", "baseline_source"):
+            example[field]["file"] = mapping[example[field]["file"]]
+    report["evidence_mapping"] = mapping
+    report["packet_evidence_root"] = str(root.resolve())
     if report["ready_for_baseline_experiment"]:
         (root / "references.json").write_text(json.dumps(document, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+        report["output_manifest_sha256"] = content_hash(document)
+    (root / "intake-report.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     return report
