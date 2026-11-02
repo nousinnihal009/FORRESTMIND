@@ -54,6 +54,41 @@ def footprint_separation_lower_bound_km(a, b):
     return max(0., _distance_km(*centres) - sum(radii))
 
 
+def _audit_evidence_files(document):
+    """Recheck the original reviewed measurements at freeze and experiment time."""
+    files = document.get("evidence_files")
+    if files is None:
+        if any("file" in row.get("label_source", {}) for row in document.get("examples", [])):
+            raise ValueError("File-backed labels require evidence_files and evidence_root integrity metadata")
+        return
+    if not isinstance(files, dict) or len(files) > 10000:
+        raise ValueError("Evidence manifest must contain at most 10000 source files")
+    root_value = document.get("evidence_root")
+    if not isinstance(root_value, str) or not Path(root_value).is_absolute():
+        raise ValueError("File-backed references require an explicit absolute evidence_root")
+    root, total = Path(root_value).resolve(), 0
+    for name, expected in files.items():
+        relative = Path(name)
+        path = (root / relative).resolve()
+        if relative.is_absolute() or not path.is_relative_to(root) or not path.is_file():
+            raise ValueError("Reference evidence file is missing or outside its packet root")
+        size = path.stat().st_size
+        total += size
+        if size > 512 * 1024**2 or total > 2 * 1024**3:
+            raise ValueError("Reference evidence exceeds file or packet size limits")
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        if digest.hexdigest() != expected:
+            raise ValueError("Reference evidence SHA256 changed after review")
+    for row in document.get("examples", []):
+        for field in ("label_source", "baseline_source"):
+            source = row.get(field, {})
+            if "file" in source and files.get(source["file"]) != source.get("sha256"):
+                raise ValueError("Label source is not pinned by the packet evidence manifest")
+
+
 def audit_references(document: dict) -> dict:
     if document.get("schema_version") != 1 or not document.get("dataset_id") or not document.get("version"):
         raise ValueError("Reference manifest requires schema_version=1, dataset_id and version")
@@ -77,10 +112,13 @@ def audit_references(document: dict) -> dict:
         raise ValueError("Provide 1–256 unique feature names")
     if not 20 <= len(examples) <= 100000:
         raise ValueError("Reference dataset must contain 20–100000 explicitly labeled examples")
-    split_names = ["train", "val", "calibration", "test"] if any(r.get("split") == "val" for r in examples) else ["train", "calibration", "test"]
+    _audit_evidence_files(document)
+    split_names = policy.get("required_splits", ["train", "val", "calibration", "test"] if any(r.get("split") == "val" for r in examples) else ["train", "calibration", "test"])
+    if split_names not in (["train", "calibration", "test"], ["train", "val", "calibration", "test"]):
+        raise ValueError("required_splits must preserve train, optional val, calibration, test in order")
     pairs = list(itertools.combinations(split_names, 2))
     ids, regions, footprints = set(), {}, {name: [] for name in split_names}
-    has_trend = any("historical_trend" in row for row in examples)
+    has_trend = "historical_trend" in document.get("required_baselines", []) or any("historical_trend" in row for row in examples)
     event_references = {}
     splits = {name: [] for name in footprints}
     for example in examples:
@@ -231,35 +269,58 @@ def _event_metrics(rows, truth, scores):
             "alert_definition": "Threshold crossing per prediction origin; false-alert episodes are not deduplicated. True event detections group explicit event_id."}
 
 
-def paired_region_bootstrap(rows, baseline, prediction, *, event):
+def paired_region_bootstrap(rows, baseline, prediction, *, event, spatial_buffer_km=10.):
     """Paired cluster resampling keeps all dependent origins within each region.
 
     This conditional test-set interval does not include fitting/calibration
     uncertainty or prove independence between nearby region IDs.
     """
     regions = sorted({row["region_id"] for row in rows})
-    result = {"available": False, "method": "paired-region-cluster-percentile-bootstrap",
+    result = {"available": False, "method": "paired-spatial-block-percentile-bootstrap",
               "metric": "brier" if event else "mae", "confidence_level": .95,
               "distinct_regions": len(regions), "replicates": MODEL_CONFIG["bootstrap_regions"],
+              "spatial_buffer_km": spatial_buffer_km, "independent_blocks": None,
               "seed": MODEL_CONFIG["bootstrap_seed"], "lower": None, "upper": None,
-              "limitations": "Conditional on fitted models and supplied test regions. Region IDs must represent independent sampling blocks; spatial dependence between blocks and training/calibration uncertainty are not modeled."}
+              "limitations": "Conditional on fitted models and supplied test geography. Overlapping or nearby regions are joined into connected blocks using the study buffer. Remaining dependence beyond that buffer and training/calibration uncertainty are not modeled; the buffer does not prove independence."}
     if len(regions) < MODEL_CONFIG["bootstrap_minimum_regions"]:
         return {**result, "reason": "Fewer than five distinct held-out regions; dependent origins cannot supply independent evidence"}
+    if type(spatial_buffer_km) not in (int, float) or not math.isfinite(spatial_buffer_km) or spatial_buffer_km <= 0:
+        raise ValueError("Bootstrap spatial buffer must be a finite positive distance")
+    footprints = {region: set() for region in regions}
+    for row in rows:
+        if "bbox" not in row:
+            return {**result, "reason": "Test footprints are required to audit spatial bootstrap blocks"}
+        footprints[row["region_id"]].add(tuple(row["bbox"]))
+    total = sum(len(values) for values in footprints.values())
+    pair_count = (total * total - sum(len(values)**2 for values in footprints.values())) // 2
+    if pair_count > 1000000:
+        return {**result, "reason": "Spatial block audit exceeds one million comparisons; supply a separately audited block design"}
+    parent = {region: region for region in regions}
+    def find(region):
+        while parent[region] != region:
+            parent[region] = parent[parent[region]]
+            region = parent[region]
+        return region
+    for a, b in itertools.combinations(regions, 2):
+        if find(a) != find(b) and any(footprint_separation_lower_bound_km(x, y) < spatial_buffer_km for x in footprints[a] for y in footprints[b]):
+            parent[find(b)] = find(a)
+    blocks = sorted({find(region) for region in regions})
+    result["independent_blocks"] = len(blocks)
+    if len(blocks) < MODEL_CONFIG["bootstrap_minimum_regions"]:
+        return {**result, "reason": "Fewer than five separated spatial blocks after merging nearby or overlapping regions"}
     truth = np.asarray([row["target"] for row in rows], dtype=float)
     baseline, prediction = np.asarray(baseline, dtype=float), np.asarray(prediction, dtype=float)
     if baseline.shape != truth.shape or prediction.shape != truth.shape or not np.isfinite(baseline).all() or not np.isfinite(prediction).all():
         raise ValueError("Bootstrap predictions must be finite and match identical test rows")
     difference = (baseline - truth)**2 - (prediction - truth)**2 if event else abs(baseline - truth) - abs(prediction - truth)
-    sums, counts = [], []
-    for region in regions:
-        mask = np.asarray([row["region_id"] == region for row in rows])
-        sums.append(difference[mask].sum())
-        counts.append(mask.sum())
-    sums, counts = np.asarray(sums), np.asarray(counts)
+    block_indices = {block: i for i, block in enumerate(blocks)}
+    inverse = np.asarray([block_indices[find(row["region_id"])] for row in rows])
+    sums = np.bincount(inverse, weights=difference, minlength=len(blocks))
+    counts = np.bincount(inverse, minlength=len(blocks))
     generator = np.random.default_rng(MODEL_CONFIG["bootstrap_seed"])
     estimates = []
     for _ in range(MODEL_CONFIG["bootstrap_regions"]):
-        sampled = generator.integers(0, len(regions), size=len(regions))
+        sampled = generator.integers(0, len(blocks), size=len(blocks))
         estimates.append(sums[sampled].sum() / counts[sampled].sum())
     lower, upper = np.quantile(estimates, [.025, .975])
     return {**result, "available": True, "reason": None, "lower": float(lower), "upper": float(upper)}
@@ -342,7 +403,8 @@ def run_reference_experiment(document: dict, protocol: dict) -> dict:
         output["improvement_over_persistence"] = baseline - output["metrics"][primary]
         output["improvement_interval"] = paired_region_bootstrap(
             splits["test"], [row["prediction"] for row in outputs["persistence"]["examples"]],
-            [row["prediction"] for row in output["examples"]], event=event)
+            [row["prediction"] for row in output["examples"]], event=event,
+            spatial_buffer_km=document["split_policy"]["spatial_buffer_km"])
     return {"schema_version": 1, "kind": "forestmind_reference_baseline_experiment", "created_at": datetime.now(timezone.utc).isoformat(),
             "dataset_id": document["dataset_id"], "dataset_version": document["version"], "dataset_sha256": content_hash(document),
             "data_provenance": "user_declared_nonsynthetic_references_not_independently_authenticated",
