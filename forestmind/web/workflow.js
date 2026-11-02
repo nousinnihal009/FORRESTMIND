@@ -173,7 +173,7 @@ function wireFiveYearScenarios(report) {
   const selector=$('#five-year-scenario');if(!selector)return;
   const data=report.scenarios || report.sections?.scenarios;
   const draw=()=>{const item=data.comparisons[Number(selector.value)];$('#five-year-comparison').innerHTML=`<div class="monitor-status"><div><small>Baseline index at five years</small><strong>${numeric(data.baseline.at(-1).score,2)}</strong></div><div><small>Under these assumptions</small><strong>${numeric(item.points.at(-1).score,2)}</strong></div><div><small>Hypothetical difference</small><strong>${numeric(item.five_year_difference,2)} points</strong></div></div><div class="chart-legend"><span><i class="legend-line dashed"></i>No additional intervention</span><span><i class="legend-line" style="border-color:#b3935c"></i>${esc(item.name)}</span></div>${chart((report.forecast?.historical || []).slice(-12),data.baseline,{alternative:item.points,label:'Five-year hypothetical indicator sensitivity; not an ecological forecast'})}<p class="form-help">${esc(Object.entries(item.parameters).map(([key,value])=>workflowLabel(key)+': '+value+'%').join(' · '))}</p>`;};
-  selector.addEventListener('change',draw);$('#adjust-five-year').addEventListener('click',()=>{$('#scenario-horizon').value='five-year';invalidateScenario();});draw();
+  selector.addEventListener('change',draw);$('#adjust-five-year').addEventListener('click',()=>{$('#scenario-horizon').value='five-year';syncScenarioRanges();invalidateScenario();});draw();
 }
 async function ensureWorkflowSnapshot(id) {
   let report=await api('/regions/'+encodeURIComponent(id)+'/workflow');
