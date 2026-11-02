@@ -1,5 +1,7 @@
 # Preparing real training data
 
+For the first annual tree-cover-loss study, begin with the [reference review and data contribution workflow](DATA_CONTRIBUTION.md). It defines a separate continuous loss target, records evidence/reviews/uncertain exclusions and prepares an audited conventional-baseline manifest. This does not create health or driver labels for the neural converter below.
+
 `scripts/prepare_training_data.py` joins existing raw observation sequences to independently supplied labels. It supports partially labeled examples, protected geographic and chronological partitions, explicit label uncertainty, training-only normalization and fixed-length batches. It never generates a health label, driver, future condition or negative event from an unlabeled satellite image.
 
 No independent health/driver/trajectory dataset has been supplied with this release. The templates are deliberately incomplete and cannot pass the audit until real observations and references replace the placeholders. Software fixture tests do not establish prediction accuracy.
