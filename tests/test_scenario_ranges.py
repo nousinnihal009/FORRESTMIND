@@ -1,7 +1,6 @@
 """Assumption-envelope arithmetic and persistence; no causal uncertainty claim."""
 from copy import deepcopy
-import json
-
+from itertools import product
 from fastapi.testclient import TestClient
 import pytest
 
@@ -40,6 +39,19 @@ def test_degenerate_ranges_and_clipped_bounds_are_exact():
     result = scenario_projection(low, {"climate_stress": 100}, parameter_ranges={"climate_stress": {"lower": 0, "upper": 100}})
     assert result["comparisons"][0]["points"][-1]["sensitivity_lower"] == 0
     assert result["comparisons"][0]["points"][-1]["sensitivity_upper"] == 5
+
+
+def test_envelope_matches_all_corners_of_supplied_assumptions():
+    central = {"pressure_reduction": 50, "fire_reduction": 30, "restoration": 40, "climate_stress": 60}
+    ranges = {"pressure_reduction": {"lower": 0, "upper": 100}, "fire_reduction": {"lower": 10, "upper": 80},
+              "restoration": {"lower": 20, "upper": 70}, "climate_stress": {"lower": 5, "upper": 100}}
+    bounded = scenario_projection(analysis(), central, parameter_ranges=ranges)["comparisons"][0]["points"]
+    corners = [scenario_projection(analysis(), dict(zip(central, corner)))["comparisons"][0]["points"]
+               for corner in product(*[(value["lower"], value["upper"]) for value in ranges.values()])]
+    for index, point in enumerate(bounded):
+        outcomes = [corner[index]["score"] for corner in corners]
+        assert point["sensitivity_lower"] == min(outcomes)
+        assert point["sensitivity_upper"] == max(outcomes)
 
 
 @pytest.mark.parametrize("ranges", [{}, {"unknown": {"lower": 0, "upper": 10}},
@@ -99,3 +111,112 @@ def test_browser_range_parser_preserves_explicit_values_and_rejects_empty_or_inv
     assert result["parsed"]["restoration"] == {"lower": 10, "upper": 30}
     assert "must contain" in result["message"]
     assert result["disabled"] is None
+
+
+@pytest.mark.parametrize("value", ["' '", "'NaN'", "'101'", "'-1'", "'21'"])
+def test_browser_rejects_invalid_lower_bound(value):
+    result = run_js(f"""(()=>{{
+      $('#scenario-ranges-enabled').checked=true;
+      const values={{pressure_reduction:20,fire_reduction:20,restoration:20,climate_stress:20}};
+      for(const key of Object.keys(values)){{$('#range-'+key+'-lower').value='10';$('#range-'+key+'-upper').value='30';}}
+      $('#range-restoration-lower').value={value};
+      try{{scenarioAssumptionRanges(values);return null;}}catch(error){{return error.message;}}
+    }})()""")
+    assert "must contain" in result
+
+
+def test_range_controls_follow_horizon_and_preserve_cleared_input():
+    result = run_js("""(()=>{
+      $('#scenario-horizon').value='five-year';$('#scenario-ranges-enabled').checked=true;
+      $('#range-restoration-lower').value='';$('#range-restoration-upper').value='30';
+      syncScenarioRanges();
+      const visible=!$('#scenario-range-controls').hidden,enabled=!$('#range-restoration-lower').disabled;
+      $('#scenario-horizon').value='baseline';syncScenarioRanges();
+      const hidden=$('#scenario-range-controls').hidden,disabled=$('#range-restoration-lower').disabled;
+      $('#scenario-horizon').value='five-year';syncScenarioRanges();
+      return {visible,enabled,hidden,disabled,cleared:$('#range-restoration-lower').value,upper:$('#range-restoration-upper').value};
+    })()""")
+    assert result == {"visible": True, "enabled": True, "hidden": True, "disabled": True, "cleared": "", "upper": "30"}
+
+
+def test_workflow_shortcut_reveals_range_controls():
+    result = run_js("""(()=>{
+      let click;$('#adjust-five-year').addEventListener=(name,handler)=>{click=handler;};
+      $('#scenario-horizon').value='baseline';$('#scenario-ranges-enabled').checked=false;
+      $('#five-year-scenario').value='0';syncScenarioRanges();
+      wireFiveYearScenarios({scenarios:{baseline:[{date:'2025-01-01',score:50}],comparisons:[{
+        name:'Fixture',points:[{date:'2030-01-01',score:55}],five_year_difference:5,parameters:{restoration:10}}]},forecast:{historical:[]}});
+      click();
+      return {horizon:$('#scenario-horizon').value,hidden:$('#scenario-range-controls').hidden,disabled:$('#range-restoration-lower').disabled};
+    })()""", extra_scripts=("workflow.js",))
+    assert result == {"horizon": "five-year", "hidden": False, "disabled": True}
+
+
+def test_chart_draws_assumption_band_without_probability_label():
+    result = run_js("""chart([],[{date:'2025-01-01',score:50},{date:'2030-01-01',score:50}],{
+      alternative:[{date:'2025-01-01',score:50,sensitivity_lower:50,sensitivity_upper:50},
+                   {date:'2030-01-01',score:51,sensitivity_lower:45,sensitivity_upper:57}],
+      label:'Explicit scenario sensitivity'})""")
+    assert 'fill="#b3935c" fill-opacity=".18"' in result
+    assert "supplied assumptions; not a confidence interval" in result
+    assert "assumption sensitivity 45.0–57.0" in result
+    assert "95%" not in result
+
+
+def test_changed_inputs_discard_in_flight_scenario_without_saving_mixed_assumptions():
+    result = run_js("""(async()=>{
+      $('#scenario-horizon').value='five-year';$('#scenario-ranges-enabled').checked=false;
+      let release,posts=0;
+      ensureWorkflowSnapshot=()=>new Promise(resolve=>release=resolve);
+      api=async()=>{posts++;return {};};
+      const pending=runScenario({preventDefault(){}});
+      invalidateScenario();
+      release({manifest:{id:'record'},forecast:{historical:[]}});await pending;
+      return {posts,retained:state.scenario,pending:state.scenarioPending,enabled:!$('#compare-scenario').disabled,html:$('#scenario-results').innerHTML};
+    })()""")
+    assert result["posts"] == 0
+    assert result["retained"] is None and not result["pending"] and result["enabled"]
+    assert "Assumptions changed" in result["html"]
+
+
+def test_late_saved_scenario_cannot_replace_newer_input_state():
+    result = run_js("""(async()=>{
+      let release;api=()=>new Promise(resolve=>release=resolve);
+      const pending=runScenario({preventDefault(){}});invalidateScenario();
+      release({id:'outdated',baseline:[],scenario:[]});await pending;
+      return {retained:state.scenario,enabled:!$('#compare-scenario').disabled,html:$('#scenario-results').innerHTML};
+    })()""")
+    assert result["retained"] is None and result["enabled"]
+    assert "Assumptions changed" in result["html"]
+
+
+def test_browser_submits_and_displays_explicit_ranges_with_exportable_evidence():
+    result = run_js("""(async()=>{
+      $('#scenario-horizon').value='five-year';$('#scenario-ranges-enabled').checked=true;
+      for(const key of ['pressure_reduction','fire_reduction','restoration','climate_stress']){
+        $('#range-'+key+'-lower').value='0';$('#range-'+key+'-upper').value='10';}
+      $('#scenario-results .scenario-assumptions').insertAdjacentHTML=(where,html)=>{
+        $('#scenario-results .scenario-assumptions').innerHTML+=html;};
+      $('#scenario-results .chart-legend').insertAdjacentHTML=(where,html)=>{
+        $('#scenario-results .chart-legend').innerHTML+=html;};
+      ensureWorkflowSnapshot=async()=>({manifest:{id:'frozen'},forecast:{historical:[]}});toast=()=>{};
+      let submitted;
+      api=async(path,options)=>{
+        if(!path.endsWith('/workflow/scenarios'))return {name:'Controlled UI fixture'};
+        submitted=JSON.parse(options.body);
+        return {id:'fixture',baseline:[{date:'2030-01-01',horizon_days:1825,score:50}],limitations:['Unvalidated assumptions.'],assumptions:['Fixed coefficients.'],
+          comparisons:[{parameter_ranges:submitted.parameter_ranges,uncertainty:{kind:'explicit_assumption_range',calibrated:false,confidence_level:null,definition:'Not a confidence interval.'},
+            points:[{date:'2030-01-01',horizon_days:1825,score:50,sensitivity_lower:46,sensitivity_upper:56}]}]};
+      };
+      await runScenario({preventDefault(){}});
+      return {submitted,evidence:state.scenario.comparisons[0],html:$('#scenario-results').innerHTML,
+        range:$('#scenario-results .scenario-assumptions').innerHTML,legend:$('#scenario-results .chart-legend').innerHTML,enabled:!$('#compare-scenario').disabled};
+    })()""")
+    assert result["submitted"]["manifest_id"] == "frozen"
+    assert "region_id" not in result["submitted"]
+    assert result["submitted"]["parameter_ranges"]["restoration"] == {"lower": 0, "upper": 10}
+    assert result["evidence"]["uncertainty"]["calibrated"] is False
+    assert result["evidence"]["uncertainty"]["confidence_level"] is None
+    assert "Export comparison" in result["html"] and "assumption sensitivity 46.0–56.0" in result["html"]
+    assert "Not a confidence interval" in result["range"] and "56.00" in result["range"]
+    assert "Supplied assumption range" in result["legend"] and result["enabled"]
