@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "kind": "forestmind_reference_review",
+  "dataset_id": "my-annual-loss-study",
+  "version": "v1",
+  "synthetic": false,
+  "target": {
+    "id": "annual-gross-tree-cover-loss-v1",
+    "kind": "continuous",
+    "units": "fraction_0_1",
+    "horizon_days": 365,
+    "name": "Next-year gross tree-cover-loss fraction",
+    "definition": "Area of independently reviewed stand-replacement tree-cover loss during the next full calendar year, divided by independently documented tree-covered area at the prediction cutoff, within a fixed study patch.",
+    "intended_use": "Compare annual loss forecasts on protected places and later years; prioritize subsequent investigation.",
+    "spatial_unit_ha": 100.0,
+    "spatial_area_tolerance_fraction": 0.05,
+    "minimum_baseline_forest_ha": 10.0,
+    "significant_loss_fraction": 0.1,
+    "minimum_detectable_loss_ha": 1.0,
+    "maximum_reference_uncertainty_fraction": 0.05,
+    "reference_protocol": "Independent dated baseline forest mask and loss-area assessment for the identical footprint/window; full baseline-mask coverage; recorded uncertainty and human review. Annual products retain annual time precision.",
+    "forest_definition": "Trees taller than 5 metres and at least 30 percent canopy cover, documented by an independent baseline reference; plantations and natural forests must be distinguished in study metadata."
+  },
+  "split_policy": {
+    "spatial_buffer_km": 10.0,
+    "temporal_embargo_days": 30,
+    "protected_test": true
+  },
+  "feature_names": [
+    "ndvi_mean",
+    "ndmi_mean",
+    "nbr_mean"
+  ],
+  "examples": []
+}
