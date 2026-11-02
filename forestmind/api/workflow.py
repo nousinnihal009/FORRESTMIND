@@ -13,7 +13,7 @@ from pydantic import Field, model_validator
 
 from forestmind.api.schemas import Geometry, StrictModel, Percent
 from forestmind.monitoring.workflow import WorkflowService, digest, now
-from forestmind.monitoring.projections import scenario_projection
+from forestmind.monitoring.projections import scenario_projection, validate_parameter_ranges
 
 
 class WorkflowRequest(StrictModel):
@@ -22,12 +22,25 @@ class WorkflowRequest(StrictModel):
     include_radar: bool = Field(default=False, strict=True)
 
 
+class AssumptionRange(StrictModel):
+    lower: Percent
+    upper: Percent
+
+
 class ProjectionRequest(StrictModel):
     manifest_id: str = Field(pattern=r"^[a-f0-9]{64}$")
     pressure_reduction: Percent = 0.
     fire_reduction: Percent = 0.
     restoration: Percent = 0.
     climate_stress: Percent = 0.
+    parameter_ranges: dict[Literal["pressure_reduction", "fire_reduction", "restoration", "climate_stress"], AssumptionRange] | None = None
+
+    @model_validator(mode="after")
+    def check_assumption_ranges(self):
+        if self.parameter_ranges is not None:
+            validate_parameter_ranges(self.model_dump(exclude={"manifest_id", "parameter_ranges"}),
+                                      {key: value.model_dump() for key, value in self.parameter_ranges.items()})
+        return self
 
 
 Pixel = Annotated[bool, Field(strict=True)]
@@ -143,12 +156,15 @@ def install_workflow(app, store):
         if not row:
             raise HTTPException(404, "Selected analysis snapshot does not belong to this region")
         snapshot = json.loads(row["payload"])
-        parameters = payload.model_dump(exclude={"manifest_id"})
-        result = scenario_projection(snapshot, parameters)
+        parameters = payload.model_dump(exclude={"manifest_id", "parameter_ranges"})
+        ranges = {key: value.model_dump() for key, value in payload.parameter_ranges.items()} if payload.parameter_ranges is not None else None
+        result = scenario_projection(snapshot, parameters, parameter_ranges=ranges)
         if not result["available"]:
             raise HTTPException(409, result["reason"])
         result.update({"id": "scenario-" + uuid4().hex[:12], "created_at": now(), "region_id": region_id,
                        "manifest": snapshot["manifest"], "parameters": parameters})
+        if ranges is not None:
+            result["parameter_ranges"] = ranges
         try:
             service.save_scenario(result)
         except ValueError as error:
