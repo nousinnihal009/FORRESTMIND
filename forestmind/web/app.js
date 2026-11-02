@@ -288,6 +288,7 @@ async function runScenario(event) {
     if($('#scenario-horizon').value==='five-year'){
       const snapshot=await ensureWorkflowSnapshot(values.region_id);
       const parameters={...values,manifest_id:snapshot.manifest.id};delete parameters.region_id;
+      const ranges=scenarioAssumptionRanges(values);if(ranges)parameters.parameter_ranges=ranges;
       result=await api('/regions/'+encodeURIComponent(values.region_id)+'/workflow/scenarios',{method:'POST',body:JSON.stringify(parameters)});
       result={...result,scenario:result.comparisons[0]?.points || [],caveat:result.limitations.join(' '),historical:snapshot.forecast.historical};
     }else result=await api('/scenarios',{method:'POST',body:JSON.stringify(values)});
@@ -298,12 +299,41 @@ async function runScenario(event) {
     const assumptions=Array.isArray(result.assumptions)?result.assumptions.map(readableValue):Object.entries(result.assumptions||{}).map(([k,v])=>`${humanLabel(k)}: ${readableValue(v)}`);
     $('#scenario-results').innerHTML=`<div class="panel-heading"><div><div class="eyebrow">EXPLICIT ASSUMPTIONS · ILLUSTRATIVE OUTPUT</div><h2>${esc(region.name)}</h2></div>${badge('Uncalibrated')}</div><div class="scenario-result-body"><div class="scenario-metrics"><div class="scenario-metric"><small>Baseline · ${b?.horizon_days || '—'} days</small><strong>${numeric(b?.score,1)}</strong></div><div class="scenario-metric"><small>Scenario · same horizon</small><strong>${numeric(s?.score,1)}</strong></div><div class="scenario-metric"><small>Condition-point difference</small><strong>${typeof delta==='number'&&delta>0?'+':''}${numeric(delta,1)}</strong></div></div><div class="chart-topline"><div class="chart-legend"><span><i class="legend-line"></i>Observed</span><span><i class="legend-line dashed"></i>Baseline</span><span><i class="legend-line" style="border-color:#b3935c"></i>Scenario</span></div></div>${chart((result.historical || region.forecast.historical).slice(-12),result.baseline,{alternative:result.scenario,label:'Baseline and hypothetical scenario condition trajectories'})}<div class="evidence-disclaimer">${esc(result.caveat)}</div><div class="scenario-assumptions"><strong>Assumptions saved with this comparison</strong><ul>${assumptions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul><button id="export-scenario" class="button secondary">${icon('download',14)}Export comparison</button></div></div>`;
     $('#export-scenario').addEventListener('click',()=>downloadJSON(state.scenario,'forestmind-scenario-'+state.scenario.id+'.json'));
+    const comparison=result.comparisons?.[0];
+    if(comparison?.uncertainty?.kind==='explicit_assumption_range'){
+      const ranges=Object.entries(comparison.parameter_ranges).map(([key,bounds])=>`${humanLabel(key)}: ${bounds.lower}–${bounds.upper}%`).join(' · ');
+      $('#scenario-results .scenario-assumptions').insertAdjacentHTML('beforebegin',`<section class="scenario-assumptions" aria-label="Assumption sensitivity range"><strong>Range under your assumptions</strong><p>${esc(comparison.uncertainty.definition)}</p><p>${esc(ranges)}</p><div class="table-scroll"><table><thead><tr><th>Days ahead</th><th>Lower sensitivity</th><th>Selected assumptions</th><th>Upper sensitivity</th></tr></thead><tbody>${comparison.points.map(point=>`<tr><td>${point.horizon_days}</td><td>${numeric(point.sensitivity_lower,2)}</td><td>${numeric(point.score,2)}</td><td>${numeric(point.sensitivity_upper,2)}</td></tr>`).join('')}</tbody></table></div></section>`);
+    }
     toast('Scenario comparison saved.');
   }catch(error){
     state.scenario=null;
     $('#scenario-results').innerHTML=`<div class="empty-state" role="status"><h2>Comparison unavailable</h2><p>${esc(userMessage(error,'The comparison could not be completed. Please try again.'))}</p></div>`;
   }
   finally{button.disabled=false;}
+}
+function scenarioAssumptionRanges(values){
+  if(!$('#scenario-ranges-enabled')?.checked)return null;
+  const ranges={};
+  for(const key of ['pressure_reduction','fire_reduction','restoration','climate_stress']){
+    const low=$('#range-'+key+'-lower').value,high=$('#range-'+key+'-upper').value;
+    const lower=Number(low),upper=Number(high);
+    if(low===''||high===''||!Number.isFinite(lower)||!Number.isFinite(upper)||lower<0||upper>100||lower>values[key]||upper<values[key])throw new Error(`${humanLabel(key)}: the lower and upper range must contain your selected value and stay between 0 and 100.`);
+    ranges[key]={lower,upper};
+  }
+  return ranges;
+}
+function installScenarioRanges(){
+  const fields=['pressure_reduction','fire_reduction','restoration','climate_stress'];
+  const panel=document.createElement('details');panel.id='scenario-range-controls';panel.className='advanced-acquisition';
+  panel.innerHTML=`<summary>Optional assumption ranges</summary><p class="form-help">For five-year comparisons, enter plausible lower and upper assumptions. The resulting range is arithmetic sensitivity, not a confidence interval.</p><label class="check-label"><input type="checkbox" id="scenario-ranges-enabled"> Include my assumption ranges</label><div id="scenario-range-fields">${fields.map(key=>`<div class="slider-field"><strong>${humanLabel(key)}</strong><div class="history-dates"><label>Lower (%)<input type="number" id="range-${key}-lower" min="0" max="100" step="any" disabled></label><label>Upper (%)<input type="number" id="range-${key}-upper" min="0" max="100" step="any" disabled></label></div></div>`).join('')}</div>`;
+  $('#compare-scenario').before(panel);
+  const sync=()=>{
+    panel.hidden=$('#scenario-horizon').value!=='five-year';
+    const enabled=$('#scenario-ranges-enabled').checked&&!panel.hidden;
+    fields.forEach(key=>{for(const side of ['lower','upper']){const input=$('#range-'+key+'-'+side);input.disabled=!enabled;if(input.value==='')input.value=$('#scenario-form [name="'+key+'"]').value;}});
+  };
+  panel.addEventListener('input',()=>{sync();invalidateScenario();});
+  $('#scenario-horizon').addEventListener('change',sync);sync();
 }
 function downloadJSON(data, filename) {const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 let regionImportFile=null,regionImportRead=0;
@@ -372,4 +402,5 @@ $('#download-template').addEventListener('click',downloadObservationTemplate);
 $('#download-import-template').addEventListener('click',downloadObservationTemplate);
 $('#import-file').addEventListener('change',loadRegionFile);
 $('#refresh-data').addEventListener('click',async()=>{await loadWorkspace();toast('Workspace refreshed.');});
+installScenarioRanges();
 loadWorkspace();
