@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from forestmind.data.reference_review import reference_template, review_references, prepare_reviewed_references
+from forestmind.data.reference_review import annual_reference_baselines, reference_template, review_references, prepare_reviewed_references
 from forestmind.training.reference_experiment import freeze_protocol, run_reference_experiment
 
 
@@ -127,6 +127,50 @@ def test_changed_source_file_is_detected(tmp_path):
     path, _ = study(tmp_path)
     (tmp_path / "controlled-evidence.txt").write_text("changed")
     with pytest.raises(ValueError, match="SHA256"):
+        review_references(path)
+
+
+def test_annual_baseline_trend_uses_only_available_history():
+    history = [{"period_end": f"{year}-12-31", "available_at": f"{year+1}-02-01", "loss_fraction": value}
+               for year, value in [(2012, .01), (2013, .02), (2014, .03)]]
+    result = annual_reference_baselines(history, cutoff="2015-12-31", horizon_days=366)
+    assert result["persistence"] == result["seasonal"] == .03
+    assert result["historical_trend"] == pytest.approx(.05)
+    assert result["historical_trend_available_at"] == "2015-02-01"
+    history[-1]["available_at"] = "2016-02-01"
+    with pytest.raises(ValueError, match="available by cutoff"):
+        annual_reference_baselines(history, cutoff="2015-12-31", horizon_days=366)
+
+
+def test_baseline_history_is_integrated_and_cannot_override_dated_measurements(tmp_path):
+    path, doc = study(tmp_path)
+    row = doc["examples"][0]
+    history = []
+    for year in [2013, 2014, 2015]:
+        source = deepcopy(row["reference"]["source"])
+        source["available_at"] = f"{year+1}-02-01"
+        history.append({"period_end": f"{year}-12-31", "available_at": source["available_at"],
+                        "loss_fraction": .02, "source": source})
+    row["baseline_history"] = history
+    for key in ["persistence", "seasonal", "historical_trend"]:
+        del row[key]
+        del row[key + "_available_at"]
+    save(path, doc)
+    report, export = review_references(path)
+    assert report["ready_for_baseline_experiment"]
+    assert export["examples"][0]["historical_trend"] == .02
+    row["historical_trend"] = .9
+    save(path, doc)
+    with pytest.raises(ValueError, match="disagrees"):
+        review_references(path)
+
+
+def test_leap_year_window_requires_separate_protocol(tmp_path):
+    path, doc = study(tmp_path)
+    row = doc["examples"][0]
+    row["cutoff"], row["target_date"] = "2015-12-31", "2016-12-31"
+    save(path, doc)
+    with pytest.raises(ValueError, match="leap-year"):
         review_references(path)
 
 
