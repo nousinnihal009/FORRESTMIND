@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import hashlib
+import itertools
 import json
 import math
 from pathlib import Path
@@ -15,7 +16,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor, RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.metrics import average_precision_score, brier_score_loss, mean_absolute_error, mean_squared_error, precision_recall_fscore_support
+from sklearn.metrics import average_precision_score, brier_score_loss, confusion_matrix, mean_absolute_error, mean_squared_error, precision_recall_fscore_support, roc_auc_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -23,7 +24,8 @@ MODEL_CONFIG = {"seed": 17, "ridge_alpha": 1., "forest_trees": 100, "forest_min_
                 "boost_stages": 100, "boost_learning_rate": .05, "boost_max_depth": 2,
                 "boost_min_samples_leaf": 3, "boost_subsample": 1., "boost_n_iter_no_change": None,
                 "boost_continuous_loss": "squared_error", "boost_event_loss": "log_loss",
-                "event_threshold": .5, "minimum_subgroup_size": 5, "interval_nominal_coverage": .9}
+                "event_threshold": .5, "minimum_subgroup_size": 5, "interval_nominal_coverage": .9,
+                "bootstrap_regions": 1000, "bootstrap_minimum_regions": 5, "bootstrap_seed": 17}
 
 
 def content_hash(value):
@@ -75,14 +77,17 @@ def audit_references(document: dict) -> dict:
         raise ValueError("Provide 1–256 unique feature names")
     if not 20 <= len(examples) <= 100000:
         raise ValueError("Reference dataset must contain 20–100000 explicitly labeled examples")
-    ids, regions, footprints = set(), {}, {name: [] for name in ("train", "calibration", "test")}
+    split_names = ["train", "val", "calibration", "test"] if any(r.get("split") == "val" for r in examples) else ["train", "calibration", "test"]
+    pairs = list(itertools.combinations(split_names, 2))
+    ids, regions, footprints = set(), {}, {name: [] for name in split_names}
+    has_trend = any("historical_trend" in row for row in examples)
     event_references = {}
     splits = {name: [] for name in footprints}
     for example in examples:
         identity = example.get("id")
         split = example.get("split")
         if not isinstance(identity, str) or not identity or identity in ids or split not in splits:
-            raise ValueError("Every example requires a unique id and train/calibration/test split")
+            raise ValueError("Every example requires a unique id and train/optional val/calibration/test split")
         ids.add(identity)
         region = example.get("region_id")
         if not isinstance(region, str) or not region:
@@ -105,10 +110,12 @@ def audit_references(document: dict) -> dict:
         if (label.get("independent") is not True or any(not label.get(k) for k in ("reference", "version"))
                 or "uncertainty" not in label or label["uncertainty"] is None):
             raise ValueError("Each outcome needs an independent label reference, version and declared uncertainty")
+        if "available_at" in label and calendar(label["available_at"]) < target_date:
+            raise ValueError("Reference availability must not predate the future outcome")
         outcome = example.get("target")
         if type(outcome) not in (int, float) or not math.isfinite(outcome) or (target["kind"] == "event" and outcome not in (0, 1)):
             raise ValueError("Outcomes must be finite; event labels must be 0 or 1")
-        for field in ("persistence", "seasonal"):
+        for field in (("persistence", "seasonal", "historical_trend") if has_trend else ("persistence", "seasonal")):
             value = example.get(field)
             if type(value) not in (int, float) or not math.isfinite(value) or (target["kind"] == "event" and not 0 <= value <= 1):
                 raise ValueError("Each identical example requires finite persistence and seasonal baselines (event scores in [0,1])")
@@ -125,25 +132,29 @@ def audit_references(document: dict) -> dict:
             raise ValueError("Declare quality_group high, partial or low for subgroup reporting")
         if "season" in example and (not isinstance(example["season"], str) or not example["season"]):
             raise ValueError("Optional season labels must be nonempty strings")
+        if "forest_type" in example and (not isinstance(example["forest_type"], str) or not example["forest_type"]):
+            raise ValueError("Optional forest_type labels must be nonempty strings")
         footprints[split].append(bbox)
         splits[split].append(example)
     if len(splits["train"]) < 10 or len(splits["calibration"]) < 5 or len(splits["test"]) < 5:
         raise ValueError("Need at least 10 training, 5 calibration and 5 protected test examples")
+    if "val" in splits and len(splits["val"]) < 5:
+        raise ValueError("An optional validation partition requires at least five examples")
     if target["kind"] == "event" and any(len({r["target"] for r in splits[s]}) < 2 for s in ("train", "calibration")):
         raise ValueError("Event training/calibration partitions must each contain positive and negative outcomes")
     # Audit unique footprints: repeated dates at one site do not multiply work.
     unique = {key: sorted(set(map(tuple, values))) for key, values in footprints.items()}
-    if sum(len(unique[a]) * len(unique[b]) for a, b in (("train", "calibration"), ("train", "test"), ("calibration", "test"))) > 1000000:
+    if sum(len(unique[a]) * len(unique[b]) for a, b in pairs) > 1000000:
         raise ValueError("Spatial audit exceeds one million footprint comparisons; partition the study or pre-audit spatial blocks")
     nearest = None
-    for left, right in (("train", "calibration"), ("train", "test"), ("calibration", "test")):
+    for left, right in pairs:
         for a in unique[left]:
             for b in unique[right]:
                 separation = footprint_separation_lower_bound_km(a, b)
                 nearest = separation if nearest is None else min(nearest, separation)
                 if separation < buffer:
                     raise ValueError(f"Protected {left}/{right} footprints violate the {buffer} km spatial buffer")
-        latest_target = max(calendar(r["target_date"]) for r in splits[left])
+        latest_target = max(max(calendar(r["target_date"]), calendar(r["label_source"].get("available_at", r["target_date"]))) for r in splits[left])
         earliest_cutoff = min(calendar(r["cutoff"]) for r in splits[right])
         if (earliest_cutoff - latest_target).days <= embargo:
             raise ValueError(f"Protected {left}/{right} temporal split violates target-window purging or embargo")
@@ -175,9 +186,11 @@ def _event_metrics(rows, truth, scores):
     predicted = scores >= MODEL_CONFIG["event_threshold"]
     precision, recall, f1, _ = precision_recall_fscore_support(truth, predicted, average="binary", zero_division=0)
     calibration = []
-    for low in np.linspace(0, .8, 5):
-        mask = (scores >= low) & (scores < low + .2 if low < .8 else scores <= 1)
-        calibration.append({"lower": float(low), "upper": float(low + .2), "count": int(mask.sum()),
+    # Construct adjacent boundaries once: floating-point gaps must not lose scores.
+    edges = np.linspace(0., 1., 6)
+    for i, (low, high) in enumerate(zip(edges[:-1], edges[1:])):
+        mask = (scores >= low) & ((scores < high) if i < 4 else (scores <= high))
+        calibration.append({"lower": float(low), "upper": float(high), "count": int(mask.sum()),
                             "mean_prediction": float(scores[mask].mean()) if mask.any() else None,
                             "observed_frequency": float(truth[mask].mean()) if mask.any() else None})
     events = {}
@@ -197,8 +210,18 @@ def _event_metrics(rows, truth, scores):
             end = max(end, b)
     lead = [max(event["lead_days"]) for event in events.values() if event["lead_days"]]
     false_count = int(((truth == 0) & predicted).sum())
+    class_precision, class_recall, class_f1, support = precision_recall_fscore_support(
+        truth, predicted, labels=[0, 1], zero_division=0)
+    ece = sum(b["count"] * abs(b["mean_prediction"] - b["observed_frequency"])
+              for b in calibration if b["count"]) / len(truth)
     return {"brier": float(brier_score_loss(truth, scores)),
             "pr_auc_average_precision": float(average_precision_score(truth, scores)) if truth.any() else None,
+            "auroc": float(roc_auc_score(truth, scores)) if len(np.unique(truth)) == 2 else None,
+            "expected_calibration_error": float(ece), "ece_bins": 5,
+            "confusion_matrix": confusion_matrix(truth, predicted, labels=[0, 1]).tolist(),
+            "confusion_matrix_order": "rows=true, columns=predicted; classes=[0,1]",
+            "per_class": [{"class": i, "precision": float(class_precision[i]), "recall": float(class_recall[i]),
+                           "f1": float(class_f1[i]), "support": int(support[i])} for i in (0, 1)],
             "precision": float(precision), "recall": float(recall), "f1": float(f1),
             "threshold": MODEL_CONFIG["event_threshold"], "reliability": calibration,
             "false_alert_origins": false_count, "false_alert_origins_per_region_year": false_count / (days / 365.25) if days else None,
@@ -206,6 +229,40 @@ def _event_metrics(rows, truth, scores):
             "mean_first_warning_lead_days": float(np.mean(lead)) if lead else None,
             "exposure_region_days": days,
             "alert_definition": "Threshold crossing per prediction origin; false-alert episodes are not deduplicated. True event detections group explicit event_id."}
+
+
+def paired_region_bootstrap(rows, baseline, prediction, *, event):
+    """Paired cluster resampling keeps all dependent origins within each region.
+
+    This conditional test-set interval does not include fitting/calibration
+    uncertainty or prove independence between nearby region IDs.
+    """
+    regions = sorted({row["region_id"] for row in rows})
+    result = {"available": False, "method": "paired-region-cluster-percentile-bootstrap",
+              "metric": "brier" if event else "mae", "confidence_level": .95,
+              "distinct_regions": len(regions), "replicates": MODEL_CONFIG["bootstrap_regions"],
+              "seed": MODEL_CONFIG["bootstrap_seed"], "lower": None, "upper": None,
+              "limitations": "Conditional on fitted models and supplied test regions. Region IDs must represent independent sampling blocks; spatial dependence between blocks and training/calibration uncertainty are not modeled."}
+    if len(regions) < MODEL_CONFIG["bootstrap_minimum_regions"]:
+        return {**result, "reason": "Fewer than five distinct held-out regions; dependent origins cannot supply independent evidence"}
+    truth = np.asarray([row["target"] for row in rows], dtype=float)
+    baseline, prediction = np.asarray(baseline, dtype=float), np.asarray(prediction, dtype=float)
+    if baseline.shape != truth.shape or prediction.shape != truth.shape or not np.isfinite(baseline).all() or not np.isfinite(prediction).all():
+        raise ValueError("Bootstrap predictions must be finite and match identical test rows")
+    difference = (baseline - truth)**2 - (prediction - truth)**2 if event else abs(baseline - truth) - abs(prediction - truth)
+    sums, counts = [], []
+    for region in regions:
+        mask = np.asarray([row["region_id"] == region for row in rows])
+        sums.append(difference[mask].sum())
+        counts.append(mask.sum())
+    sums, counts = np.asarray(sums), np.asarray(counts)
+    generator = np.random.default_rng(MODEL_CONFIG["bootstrap_seed"])
+    estimates = []
+    for _ in range(MODEL_CONFIG["bootstrap_regions"]):
+        sampled = generator.integers(0, len(regions), size=len(regions))
+        estimates.append(sums[sampled].sum() / counts[sampled].sum())
+    lower, upper = np.quantile(estimates, [.025, .975])
+    return {**result, "available": True, "reason": None, "lower": float(lower), "upper": float(upper)}
 
 
 def run_reference_experiment(document: dict, protocol: dict) -> dict:
@@ -240,7 +297,7 @@ def run_reference_experiment(document: dict, protocol: dict) -> dict:
                   subsample=MODEL_CONFIG["boost_subsample"], random_state=MODEL_CONFIG["seed"],
                   n_iter_no_change=MODEL_CONFIG["boost_n_iter_no_change"])}
     predictions = {}
-    for name in ("persistence", "seasonal"):
+    for name in (("persistence", "seasonal", "historical_trend") if "historical_trend" in document["examples"][0] else ("persistence", "seasonal")):
         predictions[name] = {s: np.array([r[name] for r in rows], dtype=float) for s, rows in splits.items() if s != "train"}
     for name, estimator in models.items():
         estimator.fit(arrays["train"], truth["train"])
@@ -264,8 +321,8 @@ def run_reference_experiment(document: dict, protocol: dict) -> dict:
             metrics["empirical_interval_coverage"] = float(((truth["test"] >= lower) & (truth["test"] <= upper)).mean())
             calibration = {"method": "calibration residual 5th/95th quantiles; not guaranteed coverage under spatial/temporal shift", "offsets": offsets.tolist(), "count": len(splits["calibration"])}
         groups = {}
-        for key in ("region_id", "quality_group", "season"):
-            labels = [row.get(key, "calendar_quarter_" + str((calendar(row["cutoff"]).month - 1) // 3 + 1)) for row in splits["test"]]
+        for key in ("region_id", "quality_group", "season", "forest_type"):
+            labels = [row.get(key, "calendar_quarter_" + str((calendar(row["cutoff"]).month - 1) // 3 + 1) if key == "season" else "unspecified") for row in splits["test"]]
             groups[key] = []
             for label_value in sorted(set(labels)):
                 mask = np.asarray([v == label_value for v in labels])
@@ -283,6 +340,9 @@ def run_reference_experiment(document: dict, protocol: dict) -> dict:
     baseline = outputs["persistence"]["metrics"][primary]
     for output in outputs.values():
         output["improvement_over_persistence"] = baseline - output["metrics"][primary]
+        output["improvement_interval"] = paired_region_bootstrap(
+            splits["test"], [row["prediction"] for row in outputs["persistence"]["examples"]],
+            [row["prediction"] for row in output["examples"]], event=event)
     return {"schema_version": 1, "kind": "forestmind_reference_baseline_experiment", "created_at": datetime.now(timezone.utc).isoformat(),
             "dataset_id": document["dataset_id"], "dataset_version": document["version"], "dataset_sha256": content_hash(document),
             "data_provenance": "user_declared_nonsynthetic_references_not_independently_authenticated",
@@ -291,7 +351,7 @@ def run_reference_experiment(document: dict, protocol: dict) -> dict:
             "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "runtime": {"numpy": np.__version__, "scikit_learn": sklearn.__version__},
             "limitations": ["References are supplied and declared independent; this tool does not authenticate their quality or test-set custody.",
-                            "Repeated origins and spatial/temporal dependence invalidate naive independent-sample significance claims; none are reported.",
+                            "Paired region bootstrap intervals require at least five distinct test regions; they are conditional on fitted models and depend on genuinely independent region blocks.",
                             "Training/calibration/test geography and periods differ; calibration may not transfer.",
                             "Negative improvements are retained. Do not change targets, thresholds or examples after reading protected-test results.",
                             "Pretrained, recurrent, multimodal and resilience-feature model comparisons require compatible actual predictions on these same reference IDs."]}
