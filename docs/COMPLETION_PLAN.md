@@ -1,5 +1,11 @@
 # Completing ForestMind
 
+## November 2026 continuation
+
+The new [ordered implementation plan](BUILD_PLAN_20261102.md) covers every original section and preserves the existing local stack. The first build adds reviewed annual-loss reference packets and source integrity, optional validation and historical-trend comparison, fuller event metrics and spatial-block resampling, and explicit scenario assumption ranges. Actual verification is recorded in `VALIDATION.md`. All O01–O59 rows in the authoritative matrix now have a Complete/Incomplete/Blocked verdict; an implemented interface alone does not close a scientific requirement.
+
+The user reconfirmed that no independently verified reference data is available. Real training, model superiority, calibrated risk maps and ecological/causal predictions remain unestablished. The current Mudumalai pilot retains nine actual observations with a longest consecutive run of eight; the older pilot counts below describe the October 26 build. Source datasets and original monitoring records are preserved. [The contribution guide](DATA_CONTRIBUTION.md) explains the evidence that would unlock the next training milestone.
+
 Updated October 26, 2026 for the **v0.7.0 research bridge**. The bounded local monitoring application passed its v0.6 acceptance checks. This build adds measured multimodal inputs, independent-reference dataset preparation, partial supervision and offline native execution; 814 regression checks and 42 final presentation/radar checks passed. The full ecological early-warning proposal is not complete. The user confirmed no verified reference data is available yet. Software behavior, deployment readiness and scientific predictive validity have separate acceptance gates. Current verification and its limits are recorded in `VALIDATION.md`.
 
 ## Three acceptance gates
