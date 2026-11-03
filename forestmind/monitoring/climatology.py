@@ -41,6 +41,7 @@ LIMITATIONS = [
     "Temperature exceedance compares monthly mean daily temperature with the reference monthly 90th percentile; it is not a heatwave or daily-maximum index.",
     "Reference ET0 describes reference-grass atmospheric demand, not actual forest water use; P minus ET0 is a climatic balance.",
     "Thirty complete reference years is this implementation's conservative eligibility rule, not WMO-method certification or ecological validation.",
+    "Complete-case reference selection can bias a climatology when missingness is systematic; excluded years remain explicit for review.",
     "Observation-date separation does not establish historical product availability: ERA5 vintages may have been revised after a historical cutoff.",
     "Hashes establish local artifact consistency, not provider authenticity, source rights, or independent scientific validation.",
 ]
@@ -110,7 +111,8 @@ def _context(context):
     requested = _coordinates(context.get("location_requested"), "Requested location")
     grid = _coordinates(context.get("grid_location"), "Provider grid location")
     raw = context.get("raw_response")
-    if not isinstance(raw, dict) or raw.get("utc_offset_seconds") != 0 or raw.get("timezone") not in {"GMT", "UTC"}:
+    if (not isinstance(raw, dict) or type(raw.get("utc_offset_seconds")) is not int
+            or raw["utc_offset_seconds"] != 0 or raw.get("timezone") not in {"GMT", "UTC"}):
         raise ValueError("Saved daily ERA5 evidence must explicitly use UTC/GMT")
     if _coordinates([raw.get("longitude"), raw.get("latitude")], "Raw provider grid location") != grid:
         raise ValueError("Raw response and declared provider grid location differ")
@@ -125,7 +127,9 @@ def _context(context):
         raise ValueError("A timezone-aware retrieval timestamp is required") from error
     if retrieved.tzinfo is None:
         raise ValueError("A timezone-aware retrieval timestamp is required")
-    parsed_url = urlparse(context.get("request_url", ""))
+    if not isinstance(context.get("request_url"), str):
+        raise ValueError("Saved request URL must be a string")
+    parsed_url = urlparse(context["request_url"])
     if (parsed_url.scheme != "https" or parsed_url.netloc != "archive-api.open-meteo.com"
             or parsed_url.path != "/v1/archive" or parsed_url.fragment):
         raise ValueError("Saved request must identify the fixed historical ERA5 provider endpoint")
@@ -282,23 +286,56 @@ def validate_climatology(reference: dict) -> None:
     """Validate integrity and recompute statistics from stored annual samples."""
     if not isinstance(reference, dict) or reference.get("artifact_sha256") != artifact_hash(reference):
         raise ValueError("Frozen climatology artifact hash mismatch")
-    if (reference.get("schema_version") != 1 or reference.get("kind") != "forestmind_frozen_monthly_climatology"
+    if (type(reference.get("schema_version")) is not int or reference["schema_version"] != 1
+            or reference.get("kind") != "forestmind_frozen_monthly_climatology"
             or reference.get("method") != METHOD or reference.get("policy") != POLICY):
         raise ValueError("Unsupported frozen climatology schema, method or completeness policy")
     baseline = reference.get("baseline", {})
+    if not isinstance(baseline, dict):
+        raise ValueError("Reference baseline must contain explicit start and end dates")
     start, end = _reference_dates(baseline.get("start"), baseline.get("end"))
     years = list(range(start.year, end.year + 1))
     if baseline.get("calendar_years") != len(years):
         raise ValueError("Reference calendar-year count differs from its dates")
+    identity = reference.get("source_contract")
+    if (not isinstance(identity, dict) or identity.get("provider") != "Open-Meteo"
+            or identity.get("dataset") != "ERA5" or identity.get("source_url") != SOURCE
+            or identity.get("units") != VARIABLES or identity.get("timezone") != "UTC"):
+        raise ValueError("Frozen reference source contract must identify the documented ERA5 source and units")
+    for key in ("location_requested", "grid_location"):
+        _coordinates(identity.get(key), f"Reference {key}")
+    _number(identity.get("elevation_m"), "Reference elevation")
+    for key in ("license", "spatial_resolution"):
+        if not isinstance(identity.get(key), str) or not identity[key].strip():
+            raise ValueError(f"Reference {key} must remain documented")
+    sources = reference.get("sources")
+    if not isinstance(sources, list) or not 1 <= len(sources) <= MAX_CONTEXTS:
+        raise ValueError("Reference requires a bounded nonempty source provenance list")
+    previous_end = None
+    for source in sources:
+        if not isinstance(source, dict):
+            raise ValueError("Reference source provenance must contain objects")
+        source_start = _date(source.get("start"), "Reference source start")
+        source_end = _date(source.get("end"), "Reference source end")
+        if (not start <= source_start <= source_end <= end or (source_end - source_start).days > 3653
+                or (previous_end is not None and source_start <= previous_end)):
+            raise ValueError("Reference source windows must be disjoint, ordered and inside the frozen baseline")
+        previous_end = source_end
+        for key in ("provider_response_sha256", "raw_response_sha256", "context_sha256"):
+            _digest_field(source.get(key), f"Reference {key}")
     months = reference.get("months")
     if not isinstance(months, list) or len(months) != 12:
         raise ValueError("Reference requires all twelve calendar months")
     count = 0
     for month, record in enumerate(months, 1):
-        if record.get("calendar_month") != month or set(record.get("variables", {})) != set(FEATURES):
+        if (not isinstance(record, dict) or type(record.get("calendar_month")) is not int
+                or record["calendar_month"] != month or not isinstance(record.get("variables"), dict)
+                or set(record["variables"]) != set(FEATURES)):
             raise ValueError("Reference month/feature definitions disagree")
         for name, (unit, _, _) in FEATURES.items():
             stats = record["variables"][name]
+            if not isinstance(stats, dict):
+                raise ValueError("Reference feature statistics must contain objects")
             samples = stats.get("samples")
             if not isinstance(samples, list) or len(samples) > len(years):
                 raise ValueError("Reference samples must be bounded annual observations")
@@ -308,6 +345,10 @@ def validate_climatology(reference: dict) -> None:
                         or type(sample["year"]) is not int or sample["year"] not in years):
                     raise ValueError("Reference sample lies outside the declared baseline")
                 _number(sample["value"], "Reference aggregate")
+                if name == "precipitation_sum_mm" and sample["value"] < 0:
+                    raise ValueError("Reference precipitation cannot be negative")
+                if name == "soil_moisture_mean_m3_m3" and not 0 <= sample["value"] <= 1:
+                    raise ValueError("Reference volumetric soil moisture must lie in [0, 1]")
                 used.append(sample["year"])
             if used != sorted(set(used)):
                 raise ValueError("Reference samples require unique ordered years")
@@ -367,8 +408,8 @@ def analyze_climate(contexts: list[dict], reference: dict, *, cutoff: str) -> di
                   "limitations": LIMITATIONS.copy()})
 
 
-def read_json(path: str | Path) -> dict:
-    """Bounded JSON with duplicate keys and nonfinite literals rejected."""
+def read_json_record(path: str | Path) -> tuple[dict, dict]:
+    """Parse and fingerprint exactly the same bounded bytes, without a second read."""
     path = Path(path)
     with path.open("rb") as stream:
         raw = stream.read(MAX_JSON_BYTES + 1)
@@ -386,7 +427,13 @@ def read_json(path: str | Path) -> dict:
     value = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=unique, parse_constant=invalid)
     if not isinstance(value, dict):
         raise ValueError("Climate JSON must contain one object")
-    return value
+    return value, {"path": str(path.resolve()), "bytes": len(raw),
+                   "file_sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def read_json(path: str | Path) -> dict:
+    """Bounded JSON with duplicate keys and nonfinite literals rejected."""
+    return read_json_record(path)[0]
 
 
 def write_new_artifact(value: dict, path: str | Path) -> Path:
