@@ -21,7 +21,7 @@ def study(tmp_path, *, validation=False):
         specs.insert(1, ("val", 2018, -20., 5))
     for split, year, lon, count in specs:
         for i in range(count):
-            bbox = [lon + i * .02, 1., lon + i * .02 + .009, 1.009]
+            bbox = [lon + i * .2, 1., lon + i * .2 + .009, 1.009]
             cutoff, end = f"{year}-12-31", f"{year + 1}-12-31"
             document["examples"].append({
                 "id": f"{split}-{i}", "region_id": f"{split}-block-{i}", "bbox": bbox,
@@ -40,6 +40,9 @@ def study(tmp_path, *, validation=False):
                         "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest()}},
                 "review": {"status": "accepted", "reviewer": "test-fixture", "basis": "Software test only",
                            "reviewed_at": f"{year+2}-02-01"}})
+            reference = document["examples"][-1]["reference"]
+            reference["baseline_observed_at"] = cutoff
+            reference["baseline_source"] = {**deepcopy(reference["source"]), "available_at": f"{year+1}-01-31"}
     path = tmp_path / "intake.json"
     path.write_text(json.dumps(document), encoding="utf-8")
     return path, document
@@ -75,7 +78,11 @@ def test_reviewed_continuous_labels_feed_identical_baseline_partitions(tmp_path)
     assert all(model["improvement_interval"]["available"] for model in result["models"].values())
     assert json.loads(path.read_text()) == original
     prepare_reviewed_references(path, tmp_path / "prepared")
-    assert json.loads((tmp_path / "prepared/references.json").read_text()) == document
+    prepared = json.loads((tmp_path / "prepared/references.json").read_text())
+    assert [r["target"] for r in prepared["examples"]] == [r["target"] for r in document["examples"]]
+    assert prepared["evidence_root"] == str((tmp_path / "prepared").resolve())
+    assert prepared["examples"][0]["label_source"]["file"].startswith("evidence/")
+    freeze_protocol(prepared)
 
 
 @pytest.mark.parametrize("change,reason", [
@@ -84,7 +91,6 @@ def test_reviewed_continuous_labels_feed_identical_baseline_partitions(tmp_path)
     (lambda row: row["review"].update(status="rejected"), "rejected"),
     (lambda row: row["reference"].update(coverage_fraction=.99), "Incomplete reference coverage"),
     (lambda row: row["reference"].update(uncertainty_area_ha=5.), "uncertainty exceeds"),
-    (lambda row: row["reference"].update(loss_area_ha=8., uncertainty_area_ha=.5), "straddles"),
 ])
 def test_unknown_incomplete_or_disputed_reference_never_becomes_negative(tmp_path, change, reason):
     path, doc = study(tmp_path)
@@ -97,6 +103,56 @@ def test_unknown_incomplete_or_disputed_reference_never_becomes_negative(tmp_pat
     assert "train-0" not in [row["id"] for row in exported["examples"]]
 
 
+def test_uncertain_event_threshold_keeps_valid_continuous_measurement(tmp_path):
+    path, doc = study(tmp_path)
+    doc["examples"][0]["reference"].update(loss_area_ha=8., uncertainty_area_ha=.5)
+    save(path, doc)
+    report, exported = review_references(path)
+    decision = report["decisions"][0]
+    assert decision["status"] == "eligible" and decision["classification"] == "uncertain"
+    assert decision["target"] == .1
+    assert "straddles" in decision["classification_reason"]
+    assert exported["examples"][0]["id"] == "train-0"
+    assert report["ready_for_baseline_experiment"]
+
+
+def test_prepared_evidence_is_self_contained_and_rechecked_at_freeze_and_run(tmp_path):
+    path, _ = study(tmp_path)
+    prepare_reviewed_references(path, tmp_path / "packet")
+    prepared = json.loads((tmp_path / "packet/references.json").read_text())
+    (tmp_path / "controlled-evidence.txt").unlink()
+    protocol = freeze_protocol(prepared)
+    source = tmp_path / "packet" / prepared["examples"][0]["label_source"]["file"]
+    source.write_text("tampered after preparation")
+    with pytest.raises(ValueError, match="evidence SHA256"):
+        freeze_protocol(prepared)
+    with pytest.raises(ValueError, match="evidence SHA256"):
+        run_reference_experiment(prepared, protocol)
+
+
+def test_pending_validation_cannot_remove_predeclared_holdout(tmp_path):
+    path, doc = study(tmp_path, validation=True)
+    for row in doc["examples"]:
+        if row["split"] == "val":
+            row["review"]["status"] = "pending"
+    save(path, doc)
+    report, exported = review_references(path)
+    assert not report["ready_for_baseline_experiment"]
+    assert "val" in exported["split_policy"]["required_splits"]
+    assert "validation partition" in report["blockers"][0]
+
+
+def test_reviewed_label_availability_is_later_than_raw_source_publication(tmp_path):
+    path, doc = study(tmp_path)
+    doc["examples"][0]["review"]["reviewed_at"] = "2021-01-01"
+    save(path, doc)
+    report, exported = review_references(path)
+    assert not report["ready_for_baseline_experiment"]
+    assert "temporal split" in report["blockers"][0]
+    assert exported["examples"][0]["label_source"]["available_at"] == "2021-01-01"
+    assert exported["examples"][0]["label_source"]["source_available_at"] == "2018-01-31"
+
+
 @pytest.mark.parametrize("change,match", [
     (lambda d: d["target"].update(significant_loss_fraction=.2), "versioned annual"),
     (lambda d: d["examples"][0].update(features_available_at="2025-01-01"), "Features must"),
@@ -106,6 +162,7 @@ def test_unknown_incomplete_or_disputed_reference_never_becomes_negative(tmp_pat
     (lambda d: d["examples"][0]["reference"]["source"].update(independent=False), "independent=true"),
     (lambda d: d["examples"][0]["reference"]["source"].update(file="../outside.txt"), "inside"),
     (lambda d: d["examples"][0]["reference"]["source"].update(sha256="0" * 64), "SHA256"),
+    (lambda d: d["examples"][0]["reference"].update(baseline_observed_at="2017-12-31"), "Baseline forest reference"),
     (lambda d: d["examples"][0]["review"].update(reviewed_at="2016-01-01"), "Review date"),
     (lambda d: d["examples"][0]["reference"].update(loss_area_ha=True), "finite number"),
     (lambda d: d["examples"][0]["reference"].update(loss_area_ha=float("nan")), "finite number"),
