@@ -31,7 +31,7 @@ def study(tmp_path, *, validation=False):
                 "persistence_available_at": cutoff, "seasonal_available_at": cutoff,
                 "historical_trend_available_at": cutoff, "quality_group": "high", "forest_type": "fixture-only",
                 "reference": {"bbox": bbox, "period_start": f"{year+1}-01-01", "period_end": end,
-                    "baseline_forest_area_ha": 80., "loss_area_ha": 0. if i % 2 else 20.,
+                    "baseline_forest_area_ha": 80., "baseline_uncertainty_area_ha": 0., "loss_area_ha": 0. if i % 2 else 20.,
                     "uncertainty_area_ha": .5, "coverage_fraction": 1.,
                     "source": {"independent": True, "reference": "CONTROLLED TEST FIXTURE",
                         "version": "fixture-v1", "license": "Test fixture", "method": "Fabricated fixture areas",
@@ -116,6 +116,19 @@ def test_uncertain_event_threshold_keeps_valid_continuous_measurement(tmp_path):
     assert report["ready_for_baseline_experiment"]
 
 
+def test_denominator_uncertainty_is_propagated_and_cannot_claim_precise_loss(tmp_path):
+    path, doc = study(tmp_path)
+    doc["examples"][0]["reference"].update(loss_area_ha=20., uncertainty_area_ha=0., baseline_uncertainty_area_ha=10.)
+    save(path, doc)
+    report, _ = review_references(path)
+    assert report["decisions"][0]["reference_interval"] == pytest.approx([20/90, 20/70])
+    doc["examples"][0]["reference"]["baseline_uncertainty_area_ha"] = 20.
+    save(path, doc)
+    report, _ = review_references(path)
+    assert report["decisions"][0]["target"] is None
+    assert "uncertainty exceeds" in report["decisions"][0]["reason"]
+
+
 def test_prepared_evidence_is_self_contained_and_rechecked_at_freeze_and_run(tmp_path):
     path, _ = study(tmp_path)
     prepare_reviewed_references(path, tmp_path / "packet")
@@ -130,6 +143,23 @@ def test_prepared_evidence_is_self_contained_and_rechecked_at_freeze_and_run(tmp
         run_reference_experiment(prepared, protocol)
 
 
+@pytest.mark.parametrize("spelling", ["evidence/source.txt", "./evidence/source.txt", "evidence/../evidence/source.txt"])
+def test_nested_evidence_paths_are_canonical_across_windows_and_posix(tmp_path, spelling):
+    path, doc = study(tmp_path)
+    (tmp_path / "evidence").mkdir()
+    (tmp_path / "evidence/source.txt").write_bytes((tmp_path / "controlled-evidence.txt").read_bytes())
+    for row in doc["examples"]:
+        for field in ("source", "baseline_source"):
+            row["reference"][field]["file"] = spelling
+    save(path, doc)
+    report, exported = review_references(path)
+    assert report["ready_for_baseline_experiment"]
+    assert set(exported["evidence_files"]) == {"evidence/source.txt"}
+    assert exported["examples"][0]["label_source"]["file"] == "evidence/source.txt"
+    prepare_reviewed_references(path, tmp_path / "packet")
+    freeze_protocol(json.loads((tmp_path / "packet/references.json").read_text()))
+
+
 def test_pending_validation_cannot_remove_predeclared_holdout(tmp_path):
     path, doc = study(tmp_path, validation=True)
     for row in doc["examples"]:
@@ -140,6 +170,24 @@ def test_pending_validation_cannot_remove_predeclared_holdout(tmp_path):
     assert not report["ready_for_baseline_experiment"]
     assert "val" in exported["split_policy"]["required_splits"]
     assert "validation partition" in report["blockers"][0]
+
+
+def test_declared_but_unsupplied_validation_and_trend_remain_required(tmp_path):
+    path, doc = study(tmp_path)
+    doc["split_policy"]["required_splits"] = ["train", "val", "calibration", "test"]
+    save(path, doc)
+    report, exported = review_references(path)
+    assert not report["ready_for_baseline_experiment"]
+    assert exported["split_policy"]["required_splits"] == doc["split_policy"]["required_splits"]
+    del doc["split_policy"]["required_splits"]
+    doc["required_baselines"] = ["persistence", "seasonal", "historical_trend"]
+    for row in doc["examples"]:
+        del row["historical_trend"]
+        del row["historical_trend_available_at"]
+    save(path, doc)
+    report, exported = review_references(path)
+    assert not report["ready_for_baseline_experiment"]
+    assert "historical_trend" in exported["required_baselines"]
 
 
 def test_reviewed_label_availability_is_later_than_raw_source_publication(tmp_path):
