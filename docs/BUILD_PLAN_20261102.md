@@ -47,3 +47,7 @@ The authoritative detailed checklist remains `REQUIREMENTS_MATRIX.md` (O01–O59
 ## Current execution boundary
 
 Begin with target/reference intake and evaluation improvements. No real model training is authorized by a fabricated reference, a source-name declaration, or a passed test. Public reference products can supply candidate annotations; independent review and source limitations remain explicit. Subsequent work must update this plan, the detailed matrix and validation record with actual results. This plan does not mark the overall project complete.
+
+## Continuation on November 3
+
+Target/reference intake, source-verified packets, independent baseline-mask evidence, effective review availability and guarded partitions are implemented. Valid continuous targets remain eligible when only the derived significant-loss classification is ambiguous. The baseline harness adds historical trend, class/calibration metrics and bootstrap resampling that merges nearby test footprints. Scenario input ranges now produce signed-coefficient sensitivity bands and tables, with stale-request protection and persisted exports. These are software increments; real training/evaluation remains blocked by the user's missing verified references. A separate frozen-climatology increment is being verified; all executed checks and limits belong in `VALIDATION.md`.
