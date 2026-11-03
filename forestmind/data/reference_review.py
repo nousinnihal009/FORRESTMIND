@@ -82,6 +82,7 @@ def _evidence(source, root, cache):
     resolved = (root / relative).resolve()
     if relative.is_absolute() or not resolved.is_relative_to(root) or not resolved.is_file():
         raise ValueError("Evidence file must exist inside the reference manifest directory")
+    source["file"] = resolved.relative_to(root).as_posix()
     expected = source.get("sha256")
     stat = resolved.stat()
     fingerprint = (stat.st_size, stat.st_mtime_ns)
@@ -252,6 +253,7 @@ def review_references(manifest_path):
             if _date(source["available_at"]) < end:
                 raise ValueError("A complete annual reference cannot be available before the target period ends")
             forest = _number(reference.get("baseline_forest_area_ha"), 0, area, "baseline_forest_area_ha")
+            forest_uncertainty = _number(reference.get("baseline_uncertainty_area_ha"), 0, area, "baseline_uncertainty_area_ha")
             coverage = _number(reference.get("coverage_fraction"), 0, 1, "coverage_fraction")
             loss = _number(reference.get("loss_area_ha"), 0, forest, "loss_area_ha")
             uncertainty = _number(reference.get("uncertainty_area_ha"), 0, forest, "uncertainty_area_ha")
@@ -262,24 +264,27 @@ def review_references(manifest_path):
                     raise ValueError("Review date must not predate the reference availability")
             if review["status"] != "accepted":
                 reason = "Reference is pending review" if review["status"] == "pending" else "Reference rejected by reviewer"
-            elif forest < target["minimum_baseline_forest_ha"]:
+            elif forest - forest_uncertainty < target["minimum_baseline_forest_ha"]:
                 reason = "Insufficient independently documented baseline tree cover"
             elif coverage != 1.:
                 reason = "Incomplete reference coverage; missing area is not absence of loss"
-            elif uncertainty / forest > target["maximum_reference_uncertainty_fraction"]:
-                reason = "Reference uncertainty exceeds the preregistered tolerance"
             else:
                 low, high = max(0., loss - uncertainty), min(forest, loss + uncertainty)
-                interval = [low / forest, high / forest]
-                threshold = max(target["minimum_detectable_loss_ha"], forest * target["significant_loss_fraction"])
-                if low >= threshold:
+                forest_low, forest_high = forest - forest_uncertainty, min(area, forest + forest_uncertainty)
+                # Both numerator and denominator assessment bounds matter.
+                interval = [low / forest_high, min(1., (loss + uncertainty) / forest_low)]
+                point_estimate = loss / forest
+                if max(point_estimate - interval[0], interval[1] - point_estimate) > target["maximum_reference_uncertainty_fraction"]:
+                    reason = "Reference uncertainty exceeds the preregistered tolerance"
+                elif interval[0] >= target["significant_loss_fraction"] and low >= target["minimum_detectable_loss_ha"]:
                     significant = True
-                elif high < threshold:
+                elif interval[1] < target["significant_loss_fraction"] or high < target["minimum_detectable_loss_ha"]:
                     significant = False
                 # Threshold ambiguity affects the event interpretation only.
                 # Dropping these valid continuous labels would select easy
                 # outcomes and bias the continuous training/test distribution.
-                label = loss / forest
+                if reason is None:
+                    label = point_estimate
         decision = {"id": identity, "split": row["split"], "status": "eligible" if label is not None else "excluded",
                     "classification": "uncertain" if significant is None else "positive" if significant else "negative",
                     "target": label, "reference_interval": interval, "reason": reason,
@@ -310,9 +315,10 @@ def review_references(manifest_path):
               "synthetic": False, "target": deepcopy(target), "split_policy": deepcopy(document.get("split_policy", {})),
               "feature_names": features, "examples": accepted, "review_manifest_sha256": content_hash(document),
               "evidence_root": str(path.parent),
-              "evidence_files": {str(source_path.relative_to(path.parent)): hashed for source_path, (_, hashed) in evidence_cache.items()}}
-    export["split_policy"]["required_splits"] = ["train", "val", "calibration", "test"] if any(row.get("split") == "val" for row in rows) else ["train", "calibration", "test"]
-    export["required_baselines"] = ["persistence", "seasonal", "historical_trend"] if any("historical_trend" in row or "baseline_history" in row for row in rows) else ["persistence", "seasonal"]
+              "evidence_files": {source_path.relative_to(path.parent).as_posix(): hashed for source_path, (_, hashed) in evidence_cache.items()}}
+    inferred_splits = ["train", "val", "calibration", "test"] if any(row.get("split") == "val" for row in rows) else ["train", "calibration", "test"]
+    export["split_policy"].setdefault("required_splits", inferred_splits)
+    export["required_baselines"] = deepcopy(document.get("required_baselines", ["persistence", "seasonal", "historical_trend"] if any("historical_trend" in row or "baseline_history" in row for row in rows) else ["persistence", "seasonal"]))
     try:
         partition_audit = audit_references(export)
         ready, blockers = True, []
