@@ -5,35 +5,29 @@ No downloads, model training, database changes, or existing-file replacement.
 from __future__ import annotations
 
 import argparse
-import hashlib
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from forestmind.monitoring.climatology import (
-    MAX_JSON_BYTES, analyze_climate, artifact_hash, freeze_climatology,
-    read_json, write_new_artifact,
+    analyze_climate, artifact_hash, freeze_climatology,
+    read_json_record, write_new_artifact,
 )
 
 
 def _read_contexts(paths):
     contexts, files = [], []
     for path in paths:
-        value = read_json(path)
+        value, provenance = read_json_record(path)
         # A selected-area export is also an existing evidence source. Keep the
         # full input-file hash, even when only its saved climate field is used.
         if value.get("kind") == "forestmind_selected_area_analysis":
             value = value.get("climate")
         if not isinstance(value, dict):
             raise ValueError("Input must be a saved climate context or a selected-area export containing one")
-        with path.open("rb") as stream:
-            raw = stream.read(MAX_JSON_BYTES + 1)
-        if len(raw) > MAX_JSON_BYTES:
-            raise ValueError("Climate JSON exceeds the 16 MiB limit")
         contexts.append(value)
-        files.append({"path": str(path.resolve()), "bytes": len(raw),
-                      "file_sha256": hashlib.sha256(raw).hexdigest()})
+        files.append(provenance)
     return contexts, files
 
 
@@ -63,10 +57,9 @@ def main(argv=None) -> int:
         if args.command == "freeze":
             result = freeze_climatology(contexts, baseline_start=args.baseline_start, baseline_end=args.baseline_end)
         else:
-            reference = read_json(args.reference)
+            reference, reference_file = read_json_record(args.reference)
             result = analyze_climate(contexts, reference, cutoff=args.cutoff)
-            result["reference_file"] = {"path": str(args.reference.resolve()),
-                                        "artifact_sha256": reference["artifact_sha256"]}
+            result["reference_file"] = {**reference_file, "artifact_sha256": reference["artifact_sha256"]}
         result["input_files"] = input_files
         result["artifact_sha256"] = artifact_hash(result)
         write_new_artifact(result, args.output)
