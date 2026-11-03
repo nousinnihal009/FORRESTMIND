@@ -153,6 +153,17 @@ Targets remain a fixed spectral index, **not independent field labels**. Overlap
 
 ## Neural research workflow
 
+Before real model training, use the [reference-data contribution and review workflow](docs/DATA_CONTRIBUTION.md). It defines the first annual gross tree-cover-loss study, keeps unknown references out of training, retains valid continuous measurements even when their event classification is uncertain, and prepares source-verified baseline packets. This is a separate loss target, not a replacement for the health trajectory head.
+
+```powershell
+python scripts/review_references.py init --output data/my-reference-study/intake.json
+python scripts/review_references.py check --manifest data/my-reference-study/intake.json
+```
+
+The empty template intentionally reports that references are missing. Once reviewed real evidence is supplied, the existing baseline harness can compare dated historical-trend predictions alongside its five existing baselines, retain an optional validation partition, report additional event/calibration metrics, and estimate paired improvement intervals across separated spatial blocks. No real predictive study is bundled. See the [prioritized build plan](docs/BUILD_PLAN_20261102.md) and [requirements matrix](docs/REQUIREMENTS_MATRIX.md) for the remaining work.
+
+The Scenario lab also accepts optional lower/upper assumptions for five-year comparisons. Its shaded/table ranges describe sensitivity to those explicit assumptions with fixed coefficients. They are not calibrated confidence intervals or evidence that an intervention will work.
+
 ```powershell
 python scripts/train.py --config configs/quick_test.yaml
 python scripts/evaluate.py --checkpoint checkpoints/quick_test/best_model.pt --split test --output artifacts/quick-test-evaluation.json
