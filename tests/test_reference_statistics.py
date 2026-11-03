@@ -36,13 +36,29 @@ def test_reliability_bins_do_not_drop_boundary_scores_and_undefined_auc_is_null(
 def test_region_bootstrap_withholds_single_region_and_keeps_paired_negative_results():
     rows = [{"region_id": "same", "target": 0.} for _ in range(100)]
     assert not paired_region_bootstrap(rows, np.zeros(100), np.ones(100), event=False)["available"]
-    rows = [{"region_id": f"region-{i}", "target": 0.} for i in range(6) for _ in range(i + 1)]
+    rows = [{"region_id": f"region-{i}", "bbox": [i, 1, i + .01, 1.01], "target": 0.} for i in range(6) for _ in range(i + 1)]
     baseline, prediction = np.zeros(len(rows)), np.ones(len(rows))
     result = paired_region_bootstrap(rows, baseline, prediction, event=False)
     assert result["available"] and result["lower"] == result["upper"] == -1.
     assert result == paired_region_bootstrap(rows, baseline, prediction, event=False)
     same = paired_region_bootstrap(rows, prediction, prediction, event=True)
     assert same["lower"] == same["upper"] == 0
+
+
+def test_renamed_overlapping_or_nearby_test_regions_are_not_independent():
+    doc = references()
+    rows = [r for r in doc["examples"] if r["split"] == "test"]
+    for index, row in enumerate(rows):
+        row["region_id"] = f"alias-{index}"
+    assert audit_references(doc)["passed"]
+    result = run_reference_experiment(doc, freeze_protocol(doc))
+    interval = result["models"]["persistence"]["improvement_interval"]
+    assert interval["distinct_regions"] == 6 and interval["independent_blocks"] == 1
+    assert not interval["available"]
+    for index, row in enumerate(rows):
+        row["bbox"] = [100 + index * .02, 1, 100.01 + index * .02, 1.01]
+    interval = paired_region_bootstrap(rows, [.1] * 6, [.2] * 6, event=False)
+    assert not interval["available"] and interval["independent_blocks"] == 1
 
 
 def test_historical_trend_requires_identical_examples_and_past_availability():
