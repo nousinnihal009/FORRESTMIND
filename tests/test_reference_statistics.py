@@ -75,3 +75,18 @@ def test_historical_trend_requires_identical_examples_and_past_availability():
     doc["examples"][0]["historical_trend_available_at"] = "2099-01-01"
     with pytest.raises(ValueError, match="availability"):
         audit_references(doc)
+
+
+@pytest.mark.parametrize("field", ["label_source", "baseline_source"])
+def test_file_backed_label_cannot_bypass_evidence_manifest_with_absent_hash(tmp_path, field):
+    doc = references()
+    source = doc["examples"][0].setdefault(field, {})
+    source["file"] = "nonexistent-required-evidence.txt"
+    with pytest.raises(ValueError, match="integrity metadata"):
+        audit_references(doc)
+    doc.update(evidence_files={}, evidence_root=str(tmp_path.resolve()))
+    with pytest.raises(ValueError, match="not pinned"):
+        audit_references(doc)
+    source["sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="not pinned"):
+        audit_references(doc)
