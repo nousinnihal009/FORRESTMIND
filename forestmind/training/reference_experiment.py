@@ -58,7 +58,7 @@ def _audit_evidence_files(document):
     """Recheck the original reviewed measurements at freeze and experiment time."""
     files = document.get("evidence_files")
     if files is None:
-        if any("file" in row.get("label_source", {}) for row in document.get("examples", [])):
+        if any("file" in row.get(field, {}) for row in document.get("examples", []) for field in ("label_source", "baseline_source")):
             raise ValueError("File-backed labels require evidence_files and evidence_root integrity metadata")
         return
     if not isinstance(files, dict) or len(files) > 10000:
@@ -68,6 +68,8 @@ def _audit_evidence_files(document):
         raise ValueError("File-backed references require an explicit absolute evidence_root")
     root, total = Path(root_value).resolve(), 0
     for name, expected in files.items():
+        if not isinstance(name, str) or not name or not isinstance(expected, str) or len(expected) != 64 or set(expected) - set("0123456789abcdef"):
+            raise ValueError("Evidence entries require a relative filename and a lowercase SHA256")
         relative = Path(name)
         path = (root / relative).resolve()
         if relative.is_absolute() or not path.is_relative_to(root) or not path.is_file():
@@ -85,8 +87,12 @@ def _audit_evidence_files(document):
     for row in document.get("examples", []):
         for field in ("label_source", "baseline_source"):
             source = row.get(field, {})
-            if "file" in source and files.get(source["file"]) != source.get("sha256"):
-                raise ValueError("Label source is not pinned by the packet evidence manifest")
+            if "file" in source:
+                name, digest = source["file"], source.get("sha256")
+                if (not isinstance(name, str) or name not in files
+                        or not isinstance(digest, str) or len(digest) != 64
+                        or set(digest) - set("0123456789abcdef") or files[name] != digest):
+                    raise ValueError("Label source is not pinned by the packet evidence manifest")
 
 
 def audit_references(document: dict) -> dict:
@@ -118,7 +124,10 @@ def audit_references(document: dict) -> dict:
         raise ValueError("required_splits must preserve train, optional val, calibration, test in order")
     pairs = list(itertools.combinations(split_names, 2))
     ids, regions, footprints = set(), {}, {name: [] for name in split_names}
-    has_trend = "historical_trend" in document.get("required_baselines", []) or any("historical_trend" in row for row in examples)
+    required_baselines = document.get("required_baselines", ["persistence", "seasonal"])
+    if required_baselines not in (["persistence", "seasonal"], ["persistence", "seasonal", "historical_trend"]):
+        raise ValueError("required_baselines must contain persistence, seasonal and optionally historical_trend")
+    has_trend = "historical_trend" in required_baselines or any("historical_trend" in row for row in examples)
     event_references = {}
     splits = {name: [] for name in footprints}
     for example in examples:
