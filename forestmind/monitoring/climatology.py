@@ -312,6 +312,7 @@ def validate_climatology(reference: dict) -> None:
     if not isinstance(sources, list) or not 1 <= len(sources) <= MAX_CONTEXTS:
         raise ValueError("Reference requires a bounded nonempty source provenance list")
     previous_end = None
+    source_windows = []
     for source in sources:
         if not isinstance(source, dict):
             raise ValueError("Reference source provenance must contain objects")
@@ -321,6 +322,7 @@ def validate_climatology(reference: dict) -> None:
                 or (previous_end is not None and source_start <= previous_end)):
             raise ValueError("Reference source windows must be disjoint, ordered and inside the frozen baseline")
         previous_end = source_end
+        source_windows.append((source_start.toordinal(), source_end.toordinal()))
         for key in ("provider_response_sha256", "raw_response_sha256", "context_sha256"):
             _digest_field(source.get(key), f"Reference {key}")
     months = reference.get("months")
@@ -345,6 +347,15 @@ def validate_climatology(reference: dict) -> None:
                         or type(sample["year"]) is not int or sample["year"] not in years):
                     raise ValueError("Reference sample lies outside the declared baseline")
                 _number(sample["value"], "Reference aggregate")
+                first = date(sample["year"], month, 1).toordinal()
+                last = first + monthrange(sample["year"], month)[1] - 1
+                covered_until = first - 1
+                for window_start, window_end in source_windows:
+                    if window_start > covered_until + 1:
+                        break
+                    covered_until = max(covered_until, window_end)
+                if covered_until < last:
+                    raise ValueError("Reference sample month is not fully covered by the declared source windows")
                 if name == "precipitation_sum_mm" and sample["value"] < 0:
                     raise ValueError("Reference precipitation cannot be negative")
                 if name == "soil_moisture_mean_m3_m3" and not 0 <= sample["value"] <= 1:
