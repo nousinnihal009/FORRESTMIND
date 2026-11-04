@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "kind": "forestmind_climate_history_progress",
+  "plan_sha256": "10b634b11e78d7fd22385100dc22312b96b24ffa35803cc09d80e028fb1eac98",
+  "windows": [
+    {
+      "role": "reference",
+      "start": "1991-01-01",
+      "end": "2000-12-31",
+      "file": "reference-1991-01-01-2000-12-31.json",
+      "attempts": 1,
+      "status": "accepted",
+      "file_sha256": "6ee682132b33811e146517cb92b2c05f3115eaf41f42c800f11be4391497aa9b",
+      "bytes": 554207
+    },
+    {
+      "role": "reference",
+      "start": "2001-01-01",
+      "end": "2010-12-31",
+      "file": "reference-2001-01-01-2010-12-31.json",
+      "attempts": 1,
+      "status": "accepted",
+      "file_sha256": "1d8ba7af0243ba4234eb95cbcb6c1f7419e5cdf00e011092b9740981699985c0",
+      "bytes": 554235
+    },
+    {
+      "role": "reference",
+      "start": "2011-01-01",
+      "end": "2020-12-31",
+      "file": "reference-2011-01-01-2020-12-31.json",
+      "attempts": 1,
+      "status": "accepted",
+      "file_sha256": "a72f7cbfc1fad9888488cd7bc5ef15149ad735fd127d7a9792e6fee066cb4376",
+      "bytes": 554524
+    },
+    {
+      "role": "observed",
+      "start": "2021-01-01",
+      "end": "2025-12-31",
+      "file": "observed-2021-01-01-2025-12-31.json",
+      "attempts": 0,
+      "status": "pending"
+    }
+  ],
+  "status": "incomplete",
+  "scientifically_validated": false,
+  "model_input": false,
+  "artifact_sha256": "e0bf279457ca2bd0728b69efcea03194f72d4e6f14868d8b5107b65008ec2dd8"
+}
