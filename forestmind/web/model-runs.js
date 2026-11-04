@@ -25,10 +25,18 @@ function modelTrajectoryRows(points) {
   return points.map(point=>`<tr><td>${numeric(point.horizon_days)} days</td><td>${Number.isFinite(point.score)?numeric(point.score,2):'Unavailable · no trained output'}</td><td>${Number.isFinite(point.stddev)?numeric(point.stddev,2):Number.isFinite(point.score)?'Not estimated':'Unavailable'}</td></tr>`).join('');
 }
 
+function modelAnnualLoss(value) {
+  if(!value)return '';
+  const available=Number.isFinite(value.fraction)&&value.fraction>=0&&value.fraction<=1;
+  return `<section class="model-limitations"><h3>Annual tree-cover loss</h3><p><strong>${available?numeric(value.fraction*100,2)+'% of baseline tree-covered area':'Unavailable'}</strong>${value.target_date?' · through '+esc(dateLabel(value.target_date)):''}</p><p class="form-help">${available?'Estimated loss within the 100 ha study patch. This is an uncalibrated area fraction, not the probability of a loss event.':esc(value.reason||'This model has no supported annual-loss estimate for these inputs.')}</p></section>`;
+}
+
 function showModelRun(run) {
   const report = run.report, prediction = report.predictions;
   const synthetic = report.input.synthetic || report.checkpoint.trained_on_synthetic;
   $('#model-run-detail').innerHTML = `<div class="model-run-heading"><div>${badge(synthetic ? 'Synthetic research run' : 'Unvalidated research run')}<h3>${prediction.health.state?'Top-scoring class: '+esc(prediction.health.state):'Condition class unavailable'}</h3><p>${prediction.health.state?'Model class assignment · uncalibrated':'This checkpoint has no trained condition-class output.'}</p></div><div class="model-score"><strong>${Number.isFinite(prediction.health.score)?numeric(prediction.health.score,1):'Unavailable'}</strong><span>${Number.isFinite(prediction.health.score)?'/ 100 model score':'No trained condition-score output'}</span></div><button class="button secondary" id="export-model-run">${icon('download',14)}Export report</button></div><div class="evidence-disclaimer">${synthetic ? 'This run uses synthetic inputs or a model trained on synthetic data. It cannot establish real forest condition. ' : ''}Class and driver scores are uncalibrated. Forecast spread is a model output, not a validated confidence interval. These predictions do not establish a tipping point.</div>${modelProvenance(report,run)}<div class="model-output-grid"><section><h3>Condition class scores</h3><p class="chart-caveat">Available class scores sum to one · missing supervision is shown as unavailable</p>${modelScoreRows(prediction.health.class_scores)}</section><section><h3>Candidate driver scores</h3><p class="chart-caveat">Multiple drivers can score highly · no causal claim</p>${modelScoreRows(prediction.drivers)}</section></div><h3 class="model-forecast-title">Configured forecast horizons</h3><div class="table-scroll"><table><thead><tr><th>Horizon from cutoff</th><th>Model score / 100</th><th>Standard deviation (score points)</th></tr></thead><tbody>${modelTrajectoryRows(prediction.trajectory)}</tbody></table></div><div class="model-limitations"><strong>Limitations saved with the run</strong><ul>${report.caveats.map(item=>`<li>${esc(item)}</li>`).join('')}</ul></div>`;
+  const annual=modelAnnualLoss(prediction.annual_loss);
+  if(annual)$('#model-run-detail').innerHTML+=annual;
   $('#export-model-run').addEventListener('click',()=>downloadJSON(report,'forestmind-'+report.region_id+'-'+run.id+'.json'));
 }
 
