@@ -1,0 +1,6529 @@
+{
+  "schema_version": 1,
+  "kind": "forestmind_frozen_monthly_climatology",
+  "method": "frozen-complete-calendar-month-era5-v1",
+  "baseline": {
+    "start": "1991-01-01",
+    "end": "2020-12-31",
+    "calendar_years": 30
+  },
+  "policy": {
+    "minimum_reference_years_per_calendar_month_and_feature": 30,
+    "daily_coverage": "Every calendar day and each required measurement must be present; no imputation or partial-sum extrapolation",
+    "standard_deviation": "Sample standard deviation (ddof=1) across complete same-calendar-month yearly aggregates",
+    "quantiles": "Linear interpolation at (n-1)*q of sorted yearly monthly aggregates",
+    "future_data": "The frozen reference ends before every target month; observed context ends on or before the explicit cutoff"
+  },
+  "source_contract": {
+    "provider": "Open-Meteo",
+    "dataset": "ERA5",
+    "source_url": "https://open-meteo.com/en/docs/historical-weather-api",
+    "location_requested": [
+      76.5338,
+      11.5989
+    ],
+    "grid_location": [
+      76.5,
+      11.5
+    ],
+    "elevation_m": 990.0,
+    "units": {
+      "temperature_2m_mean": "°C",
+      "precipitation_sum": "mm",
+      "et0_fao_evapotranspiration": "mm",
+      "soil_moisture_0_to_7cm_mean": "m³/m³"
+    },
+    "timezone": "UTC",
+    "license": "CC BY 4.0; free hosted API is for non-commercial use, subject to provider limits",
+    "spatial_resolution": "ERA5 0.25 degrees (approximately 25 km)"
+  },
+  "sources": [
+    {
+      "start": "1991-01-01",
+      "end": "2000-12-31",
+      "request_url": "https://archive-api.open-meteo.com/v1/archive?latitude=11.5989&longitude=76.5338&start_date=1991-01-01&end_date=2000-12-31&daily=temperature_2m_mean%2Cprecipitation_sum%2Cet0_fao_evapotranspiration%2Csoil_moisture_0_to_7cm_mean&models=era5&timezone=GMT",
+      "retrieved_at": "2026-11-04T19:55:05.936589+00:00",
+      "provider_response_sha256": "5d697a68329798690df3feeb979cec62248ac88ef007d6be9080bd15cc7c3676",
+      "raw_response_sha256": "a32917fa9497dc807696a2c04eb268bfd0ad0e837d9dba1b9dec2b8a2133c90c",
+      "context_sha256": "e2e7e4ba389bb5aa179d313554e1455efcac416570becf0a6b07dffe6aef8fed"
+    },
+    {
+      "start": "2001-01-01",
+      "end": "2010-12-31",
+      "request_url": "https://archive-api.open-meteo.com/v1/archive?latitude=11.5989&longitude=76.5338&start_date=2001-01-01&end_date=2010-12-31&daily=temperature_2m_mean%2Cprecipitation_sum%2Cet0_fao_evapotranspiration%2Csoil_moisture_0_to_7cm_mean&models=era5&timezone=GMT",
+      "retrieved_at": "2026-11-04T19:55:44.760952+00:00",
+      "provider_response_sha256": "2fc40bbe5d7ac9a3c6c453cf166710f53fe9b47deab29e3df6249fa04bf59f9f",
+      "raw_response_sha256": "42d510e6ee6b072e1ef664f0c90f7bd2e17e6ec0c18b1b584f8ff58c3343603f",
+      "context_sha256": "0de5be825cfafd9bcae9924b9f468db8f221ea785579db01b6404c47c061dc2a"
+    },
+    {
+      "start": "2011-01-01",
+      "end": "2020-12-31",
+      "request_url": "https://archive-api.open-meteo.com/v1/archive?latitude=11.5989&longitude=76.5338&start_date=2011-01-01&end_date=2020-12-31&daily=temperature_2m_mean%2Cprecipitation_sum%2Cet0_fao_evapotranspiration%2Csoil_moisture_0_to_7cm_mean&models=era5&timezone=GMT",
+      "retrieved_at": "2026-11-04T19:56:24.617296+00:00",
+      "provider_response_sha256": "c35f0a778ce041d5ae602a1170a778866fcd4dceaa82cf8af0dc3222c43eb4fd",
+      "raw_response_sha256": "b091e0a79b6c2db9de0671e0543191563b2a3fb09d2c8fd11486b6dc479b5e6d",
+      "context_sha256": "dda2d04370ddcf8674f7e9344f0df9868dd76ef5f9088963827dfaf859bf29ee"
+    }
+  ],
+  "months": [
+    {
+      "calendar_month": 1,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 21.26774193548387
+            },
+            {
+              "year": 1992,
+              "value": 19.580645161290324
+            },
+            {
+              "year": 1993,
+              "value": 20.03548387096774
+            },
+            {
+              "year": 1994,
+              "value": 20.74516129032258
+            },
+            {
+              "year": 1995,
+              "value": 21.1
+            },
+            {
+              "year": 1996,
+              "value": 20.5
+            },
+            {
+              "year": 1997,
+              "value": 19.848387096774193
+            },
+            {
+              "year": 1998,
+              "value": 21.57741935483871
+            },
+            {
+              "year": 1999,
+              "value": 20.03548387096774
+            },
+            {
+              "year": 2000,
+              "value": 20.651612903225807
+            },
+            {
+              "year": 2001,
+              "value": 21.135483870967743
+            },
+            {
+              "year": 2002,
+              "value": 21.016129032258064
+            },
+            {
+              "year": 2003,
+              "value": 21.061290322580643
+            },
+            {
+              "year": 2004,
+              "value": 21.161290322580644
+            },
+            {
+              "year": 2005,
+              "value": 20.916129032258063
+            },
+            {
+              "year": 2006,
+              "value": 21.003225806451614
+            },
+            {
+              "year": 2007,
+              "value": 21.11935483870968
+            },
+            {
+              "year": 2008,
+              "value": 20.938709677419357
+            },
+            {
+              "year": 2009,
+              "value": 20.738709677419354
+            },
+            {
+              "year": 2010,
+              "value": 21.138709677419353
+            },
+            {
+              "year": 2011,
+              "value": 20.903225806451612
+            },
+            {
+              "year": 2012,
+              "value": 20.916129032258063
+            },
+            {
+              "year": 2013,
+              "value": 21.741935483870968
+            },
+            {
+              "year": 2014,
+              "value": 21.093548387096774
+            },
+            {
+              "year": 2015,
+              "value": 21.02258064516129
+            },
+            {
+              "year": 2016,
+              "value": 21.458064516129035
+            },
+            {
+              "year": 2017,
+              "value": 21.016129032258064
+            },
+            {
+              "year": 2018,
+              "value": 20.322580645161292
+            },
+            {
+              "year": 2019,
+              "value": 20.06451612903226
+            },
+            {
+              "year": 2020,
+              "value": 21.748387096774195
+            }
+          ],
+          "missing_years": [],
+          "mean": 20.86193548387097,
+          "sample_standard_deviation": 0.5356978545072707,
+          "p10": 20.03548387096774,
+          "p90": 21.470000000000002,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 28.6
+            },
+            {
+              "year": 1992,
+              "value": 5.7
+            },
+            {
+              "year": 1993,
+              "value": 0.0
+            },
+            {
+              "year": 1994,
+              "value": 55.5
+            },
+            {
+              "year": 1995,
+              "value": 34.8
+            },
+            {
+              "year": 1996,
+              "value": 22.2
+            },
+            {
+              "year": 1997,
+              "value": 28.6
+            },
+            {
+              "year": 1998,
+              "value": 5.8
+            },
+            {
+              "year": 1999,
+              "value": 4.6
+            },
+            {
+              "year": 2000,
+              "value": 43.2
+            },
+            {
+              "year": 2001,
+              "value": 17.6
+            },
+            {
+              "year": 2002,
+              "value": 21.8
+            },
+            {
+              "year": 2003,
+              "value": 26.0
+            },
+            {
+              "year": 2004,
+              "value": 6.6
+            },
+            {
+              "year": 2005,
+              "value": 80.3
+            },
+            {
+              "year": 2006,
+              "value": 8.8
+            },
+            {
+              "year": 2007,
+              "value": 0.5
+            },
+            {
+              "year": 2008,
+              "value": 5.9
+            },
+            {
+              "year": 2009,
+              "value": 21.8
+            },
+            {
+              "year": 2010,
+              "value": 35.7
+            },
+            {
+              "year": 2011,
+              "value": 9.7
+            },
+            {
+              "year": 2012,
+              "value": 1.3
+            },
+            {
+              "year": 2013,
+              "value": 0.2
+            },
+            {
+              "year": 2014,
+              "value": 19.3
+            },
+            {
+              "year": 2015,
+              "value": 10.2
+            },
+            {
+              "year": 2016,
+              "value": 13.1
+            },
+            {
+              "year": 2017,
+              "value": 59.9
+            },
+            {
+              "year": 2018,
+              "value": 5.9
+            },
+            {
+              "year": 2019,
+              "value": 5.3999999999999995
+            },
+            {
+              "year": 2020,
+              "value": 6.2
+            }
+          ],
+          "missing_years": [],
+          "mean": 19.506666666666668,
+          "sample_standard_deviation": 19.658760148460853,
+          "p10": 1.2200000000000002,
+          "p90": 44.43000000000002,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.2810967741935484
+            },
+            {
+              "year": 1992,
+              "value": 0.24358064516129033
+            },
+            {
+              "year": 1993,
+              "value": 0.20980645161290323
+            },
+            {
+              "year": 1994,
+              "value": 0.32493548387096777
+            },
+            {
+              "year": 1995,
+              "value": 0.25493548387096776
+            },
+            {
+              "year": 1996,
+              "value": 0.24845161290322582
+            },
+            {
+              "year": 1997,
+              "value": 0.29245161290322585
+            },
+            {
+              "year": 1998,
+              "value": 0.2565483870967742
+            },
+            {
+              "year": 1999,
+              "value": 0.26712903225806456
+            },
+            {
+              "year": 2000,
+              "value": 0.2870322580645161
+            },
+            {
+              "year": 2001,
+              "value": 0.2565806451612903
+            },
+            {
+              "year": 2002,
+              "value": 0.2890967741935484
+            },
+            {
+              "year": 2003,
+              "value": 0.2663870967741936
+            },
+            {
+              "year": 2004,
+              "value": 0.21648387096774194
+            },
+            {
+              "year": 2005,
+              "value": 0.30374193548387096
+            },
+            {
+              "year": 2006,
+              "value": 0.25112903225806454
+            },
+            {
+              "year": 2007,
+              "value": 0.21090322580645163
+            },
+            {
+              "year": 2008,
+              "value": 0.23548387096774193
+            },
+            {
+              "year": 2009,
+              "value": 0.23009677419354838
+            },
+            {
+              "year": 2010,
+              "value": 0.33029032258064517
+            },
+            {
+              "year": 2011,
+              "value": 0.24429032258064518
+            },
+            {
+              "year": 2012,
+              "value": 0.22725806451612904
+            },
+            {
+              "year": 2013,
+              "value": 0.2112258064516129
+            },
+            {
+              "year": 2014,
+              "value": 0.24480645161290324
+            },
+            {
+              "year": 2015,
+              "value": 0.29203225806451616
+            },
+            {
+              "year": 2016,
+              "value": 0.2578064516129032
+            },
+            {
+              "year": 2017,
+              "value": 0.27848387096774196
+            },
+            {
+              "year": 2018,
+              "value": 0.2665806451612904
+            },
+            {
+              "year": 2019,
+              "value": 0.2631935483870968
+            },
+            {
+              "year": 2020,
+              "value": 0.26541935483870965
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.260241935483871,
+          "sample_standard_deviation": 0.03133236828551247,
+          "p10": 0.21595806451612903,
+          "p90": 0.2935806451612904,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": -100.98
+            },
+            {
+              "year": 1992,
+              "value": -128.92
+            },
+            {
+              "year": 1993,
+              "value": -141.41
+            },
+            {
+              "year": 1994,
+              "value": -68.82
+            },
+            {
+              "year": 1995,
+              "value": -85.55
+            },
+            {
+              "year": 1996,
+              "value": -110.25999999999999
+            },
+            {
+              "year": 1997,
+              "value": -90.05
+            },
+            {
+              "year": 1998,
+              "value": -119.97
+            },
+            {
+              "year": 1999,
+              "value": -123.14
+            },
+            {
+              "year": 2000,
+              "value": -82.82
+            },
+            {
+              "year": 2001,
+              "value": -106.69
+            },
+            {
+              "year": 2002,
+              "value": -99.4
+            },
+            {
+              "year": 2003,
+              "value": -101.73
+            },
+            {
+              "year": 2004,
+              "value": -119.56
+            },
+            {
+              "year": 2005,
+              "value": -36.5
+            },
+            {
+              "year": 2006,
+              "value": -122.51
+            },
+            {
+              "year": 2007,
+              "value": -136.73
+            },
+            {
+              "year": 2008,
+              "value": -129.37
+            },
+            {
+              "year": 2009,
+              "value": -113.05
+            },
+            {
+              "year": 2010,
+              "value": -85.96
+            },
+            {
+              "year": 2011,
+              "value": -122.74
+            },
+            {
+              "year": 2012,
+              "value": -130.21
+            },
+            {
+              "year": 2013,
+              "value": -137.52
+            },
+            {
+              "year": 2014,
+              "value": -107.81
+            },
+            {
+              "year": 2015,
+              "value": -109.76
+            },
+            {
+              "year": 2016,
+              "value": -111.21000000000001
+            },
+            {
+              "year": 2017,
+              "value": -59.690000000000005
+            },
+            {
+              "year": 2018,
+              "value": -115.94
+            },
+            {
+              "year": 2019,
+              "value": -125.01
+            },
+            {
+              "year": 2020,
+              "value": -119.69
+            }
+          ],
+          "missing_years": [],
+          "mean": -108.1,
+          "sample_standard_deviation": 24.03937517117884,
+          "p10": -130.862,
+          "p90": -81.41999999999997,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 2,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 22.32857142857143
+            },
+            {
+              "year": 1992,
+              "value": 21.841379310344827
+            },
+            {
+              "year": 1993,
+              "value": 21.321428571428573
+            },
+            {
+              "year": 1994,
+              "value": 21.79642857142857
+            },
+            {
+              "year": 1995,
+              "value": 22.87142857142857
+            },
+            {
+              "year": 1996,
+              "value": 21.679310344827588
+            },
+            {
+              "year": 1997,
+              "value": 21.285714285714285
+            },
+            {
+              "year": 1998,
+              "value": 22.592857142857145
+            },
+            {
+              "year": 1999,
+              "value": 22.175
+            },
+            {
+              "year": 2000,
+              "value": 21.396551724137932
+            },
+            {
+              "year": 2001,
+              "value": 22.5
+            },
+            {
+              "year": 2002,
+              "value": 21.692857142857143
+            },
+            {
+              "year": 2003,
+              "value": 22.735714285714288
+            },
+            {
+              "year": 2004,
+              "value": 22.42758620689655
+            },
+            {
+              "year": 2005,
+              "value": 22.957142857142856
+            },
+            {
+              "year": 2006,
+              "value": 21.707142857142856
+            },
+            {
+              "year": 2007,
+              "value": 22.07857142857143
+            },
+            {
+              "year": 2008,
+              "value": 21.768965517241377
+            },
+            {
+              "year": 2009,
+              "value": 22.54642857142857
+            },
+            {
+              "year": 2010,
+              "value": 22.875
+            },
+            {
+              "year": 2011,
+              "value": 21.410714285714285
+            },
+            {
+              "year": 2012,
+              "value": 23.06206896551724
+            },
+            {
+              "year": 2013,
+              "value": 22.510714285714283
+            },
+            {
+              "year": 2014,
+              "value": 22.25357142857143
+            },
+            {
+              "year": 2015,
+              "value": 21.99642857142857
+            },
+            {
+              "year": 2016,
+              "value": 23.144827586206898
+            },
+            {
+              "year": 2017,
+              "value": 22.20357142857143
+            },
+            {
+              "year": 2018,
+              "value": 21.682142857142857
+            },
+            {
+              "year": 2019,
+              "value": 22.59642857142857
+            },
+            {
+              "year": 2020,
+              "value": 22.875862068965517
+            }
+          ],
+          "missing_years": [],
+          "mean": 22.2104802955665,
+          "sample_standard_deviation": 0.5569341498397768,
+          "p10": 21.40929802955665,
+          "p90": 22.88399014778325,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 13.4
+            },
+            {
+              "year": 1992,
+              "value": 10.8
+            },
+            {
+              "year": 1993,
+              "value": 14.5
+            },
+            {
+              "year": 1994,
+              "value": 88.5
+            },
+            {
+              "year": 1995,
+              "value": 4.8
+            },
+            {
+              "year": 1996,
+              "value": 26.7
+            },
+            {
+              "year": 1997,
+              "value": 3.0
+            },
+            {
+              "year": 1998,
+              "value": 2.3
+            },
+            {
+              "year": 1999,
+              "value": 11.0
+            },
+            {
+              "year": 2000,
+              "value": 116.2
+            },
+            {
+              "year": 2001,
+              "value": 33.0
+            },
+            {
+              "year": 2002,
+              "value": 83.0
+            },
+            {
+              "year": 2003,
+              "value": 26.2
+            },
+            {
+              "year": 2004,
+              "value": 14.1
+            },
+            {
+              "year": 2005,
+              "value": 8.9
+            },
+            {
+              "year": 2006,
+              "value": 0.1
+            },
+            {
+              "year": 2007,
+              "value": 18.4
+            },
+            {
+              "year": 2008,
+              "value": 100.8
+            },
+            {
+              "year": 2009,
+              "value": 0.30000000000000004
+            },
+            {
+              "year": 2010,
+              "value": 24.900000000000002
+            },
+            {
+              "year": 2011,
+              "value": 61.5
+            },
+            {
+              "year": 2012,
+              "value": 0.3
+            },
+            {
+              "year": 2013,
+              "value": 63.8
+            },
+            {
+              "year": 2014,
+              "value": 34.6
+            },
+            {
+              "year": 2015,
+              "value": 33.3
+            },
+            {
+              "year": 2016,
+              "value": 7.8
+            },
+            {
+              "year": 2017,
+              "value": 0.1
+            },
+            {
+              "year": 2018,
+              "value": 36.9
+            },
+            {
+              "year": 2019,
+              "value": 16.5
+            },
+            {
+              "year": 2020,
+              "value": 1.4
+            }
+          ],
+          "missing_years": [],
+          "mean": 28.57,
+          "sample_standard_deviation": 32.23955751814093,
+          "p10": 0.30000000000000004,
+          "p90": 83.55000000000001,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.20760714285714285
+            },
+            {
+              "year": 1992,
+              "value": 0.2139310344827586
+            },
+            {
+              "year": 1993,
+              "value": 0.19689285714285715
+            },
+            {
+              "year": 1994,
+              "value": 0.31542857142857145
+            },
+            {
+              "year": 1995,
+              "value": 0.20675
+            },
+            {
+              "year": 1996,
+              "value": 0.23717241379310344
+            },
+            {
+              "year": 1997,
+              "value": 0.22646428571428573
+            },
+            {
+              "year": 1998,
+              "value": 0.20792857142857143
+            },
+            {
+              "year": 1999,
+              "value": 0.22764285714285717
+            },
+            {
+              "year": 2000,
+              "value": 0.2948965517241379
+            },
+            {
+              "year": 2001,
+              "value": 0.26803571428571427
+            },
+            {
+              "year": 2002,
+              "value": 0.3116785714285714
+            },
+            {
+              "year": 2003,
+              "value": 0.25125000000000003
+            },
+            {
+              "year": 2004,
+              "value": 0.21906896551724137
+            },
+            {
+              "year": 2005,
+              "value": 0.23964285714285713
+            },
+            {
+              "year": 2006,
+              "value": 0.2041785714285714
+            },
+            {
+              "year": 2007,
+              "value": 0.2074642857142857
+            },
+            {
+              "year": 2008,
+              "value": 0.3114137931034483
+            },
+            {
+              "year": 2009,
+              "value": 0.2075
+            },
+            {
+              "year": 2010,
+              "value": 0.23439285714285713
+            },
+            {
+              "year": 2011,
+              "value": 0.23125
+            },
+            {
+              "year": 2012,
+              "value": 0.1863448275862069
+            },
+            {
+              "year": 2013,
+              "value": 0.2737857142857143
+            },
+            {
+              "year": 2014,
+              "value": 0.23489285714285715
+            },
+            {
+              "year": 2015,
+              "value": 0.2633214285714286
+            },
+            {
+              "year": 2016,
+              "value": 0.2300344827586207
+            },
+            {
+              "year": 2017,
+              "value": 0.24717857142857144
+            },
+            {
+              "year": 2018,
+              "value": 0.2819642857142857
+            },
+            {
+              "year": 2019,
+              "value": 0.2566428571428571
+            },
+            {
+              "year": 2020,
+              "value": 0.2016551724137931
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.2398803366174056,
+          "sample_standard_deviation": 0.0362519250685966,
+          "p10": 0.20392623152709358,
+          "p90": 0.296548275862069,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": -123.17
+            },
+            {
+              "year": 1992,
+              "value": -113.98
+            },
+            {
+              "year": 1993,
+              "value": -116.55
+            },
+            {
+              "year": 1994,
+              "value": -27.810000000000002
+            },
+            {
+              "year": 1995,
+              "value": -125.15
+            },
+            {
+              "year": 1996,
+              "value": -107.27
+            },
+            {
+              "year": 1997,
+              "value": -129.01
+            },
+            {
+              "year": 1998,
+              "value": -123.36
+            },
+            {
+              "year": 1999,
+              "value": -123.73
+            },
+            {
+              "year": 2000,
+              "value": 3.340000000000001
+            },
+            {
+              "year": 2001,
+              "value": -94.03
+            },
+            {
+              "year": 2002,
+              "value": -41.98
+            },
+            {
+              "year": 2003,
+              "value": -95.18
+            },
+            {
+              "year": 2004,
+              "value": -127.2
+            },
+            {
+              "year": 2005,
+              "value": -129.88
+            },
+            {
+              "year": 2006,
+              "value": -144.13
+            },
+            {
+              "year": 2007,
+              "value": -111.38
+            },
+            {
+              "year": 2008,
+              "value": -17.709999999999997
+            },
+            {
+              "year": 2009,
+              "value": -143.68
+            },
+            {
+              "year": 2010,
+              "value": -104.09
+            },
+            {
+              "year": 2011,
+              "value": -67.38
+            },
+            {
+              "year": 2012,
+              "value": -149.04
+            },
+            {
+              "year": 2013,
+              "value": -60.75
+            },
+            {
+              "year": 2014,
+              "value": -85.73
+            },
+            {
+              "year": 2015,
+              "value": -96.67999999999999
+            },
+            {
+              "year": 2016,
+              "value": -125.5
+            },
+            {
+              "year": 2017,
+              "value": -141.78
+            },
+            {
+              "year": 2018,
+              "value": -94.21
+            },
+            {
+              "year": 2019,
+              "value": -113.07
+            },
+            {
+              "year": 2020,
+              "value": -137.92
+            }
+          ],
+          "missing_years": [],
+          "mean": -102.267,
+          "sample_standard_deviation": 39.16003611618214,
+          "p10": -141.97,
+          "p90": -40.562999999999974,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 3,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 24.23548387096774
+            },
+            {
+              "year": 1992,
+              "value": 23.983870967741936
+            },
+            {
+              "year": 1993,
+              "value": 22.593548387096774
+            },
+            {
+              "year": 1994,
+              "value": 23.73225806451613
+            },
+            {
+              "year": 1995,
+              "value": 24.048387096774192
+            },
+            {
+              "year": 1996,
+              "value": 23.851612903225806
+            },
+            {
+              "year": 1997,
+              "value": 23.206451612903226
+            },
+            {
+              "year": 1998,
+              "value": 24.506451612903227
+            },
+            {
+              "year": 1999,
+              "value": 23.95483870967742
+            },
+            {
+              "year": 2000,
+              "value": 22.838709677419356
+            },
+            {
+              "year": 2001,
+              "value": 22.858064516129033
+            },
+            {
+              "year": 2002,
+              "value": 23.761290322580646
+            },
+            {
+              "year": 2003,
+              "value": 23.7
+            },
+            {
+              "year": 2004,
+              "value": 24.467741935483872
+            },
+            {
+              "year": 2005,
+              "value": 23.983870967741936
+            },
+            {
+              "year": 2006,
+              "value": 23.432258064516127
+            },
+            {
+              "year": 2007,
+              "value": 24.519354838709678
+            },
+            {
+              "year": 2008,
+              "value": 22.493548387096773
+            },
+            {
+              "year": 2009,
+              "value": 23.52258064516129
+            },
+            {
+              "year": 2010,
+              "value": 24.60967741935484
+            },
+            {
+              "year": 2011,
+              "value": 23.458064516129035
+            },
+            {
+              "year": 2012,
+              "value": 24.73225806451613
+            },
+            {
+              "year": 2013,
+              "value": 23.816129032258065
+            },
+            {
+              "year": 2014,
+              "value": 24.061290322580643
+            },
+            {
+              "year": 2015,
+              "value": 23.46451612903226
+            },
+            {
+              "year": 2016,
+              "value": 24.9
+            },
+            {
+              "year": 2017,
+              "value": 23.493548387096773
+            },
+            {
+              "year": 2018,
+              "value": 23.448387096774194
+            },
+            {
+              "year": 2019,
+              "value": 24.34193548387097
+            },
+            {
+              "year": 2020,
+              "value": 24.322580645161292
+            }
+          ],
+          "missing_years": [],
+          "mean": 23.811290322580646,
+          "sample_standard_deviation": 0.6207742067273065,
+          "p10": 22.856129032258067,
+          "p90": 24.528387096774193,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 45.0
+            },
+            {
+              "year": 1992,
+              "value": 0.7
+            },
+            {
+              "year": 1993,
+              "value": 152.9
+            },
+            {
+              "year": 1994,
+              "value": 51.8
+            },
+            {
+              "year": 1995,
+              "value": 38.0
+            },
+            {
+              "year": 1996,
+              "value": 44.9
+            },
+            {
+              "year": 1997,
+              "value": 68.5
+            },
+            {
+              "year": 1998,
+              "value": 16.7
+            },
+            {
+              "year": 1999,
+              "value": 73.0
+            },
+            {
+              "year": 2000,
+              "value": 40.7
+            },
+            {
+              "year": 2001,
+              "value": 149.1
+            },
+            {
+              "year": 2002,
+              "value": 30.8
+            },
+            {
+              "year": 2003,
+              "value": 73.6
+            },
+            {
+              "year": 2004,
+              "value": 116.3
+            },
+            {
+              "year": 2005,
+              "value": 91.6
+            },
+            {
+              "year": 2006,
+              "value": 78.4
+            },
+            {
+              "year": 2007,
+              "value": 10.9
+            },
+            {
+              "year": 2008,
+              "value": 273.5
+            },
+            {
+              "year": 2009,
+              "value": 108.9
+            },
+            {
+              "year": 2010,
+              "value": 91.5
+            },
+            {
+              "year": 2011,
+              "value": 61.9
+            },
+            {
+              "year": 2012,
+              "value": 5.2
+            },
+            {
+              "year": 2013,
+              "value": 134.2
+            },
+            {
+              "year": 2014,
+              "value": 40.8
+            },
+            {
+              "year": 2015,
+              "value": 112.0
+            },
+            {
+              "year": 2016,
+              "value": 66.3
+            },
+            {
+              "year": 2017,
+              "value": 130.1
+            },
+            {
+              "year": 2018,
+              "value": 89.2
+            },
+            {
+              "year": 2019,
+              "value": 11.0
+            },
+            {
+              "year": 2020,
+              "value": 36.7
+            }
+          ],
+          "missing_years": [],
+          "mean": 74.80666666666667,
+          "sample_standard_deviation": 57.01105720540675,
+          "p10": 10.99,
+          "p90": 135.69,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.2518387096774194
+            },
+            {
+              "year": 1992,
+              "value": 0.18793548387096773
+            },
+            {
+              "year": 1993,
+              "value": 0.3173870967741936
+            },
+            {
+              "year": 1994,
+              "value": 0.2519677419354839
+            },
+            {
+              "year": 1995,
+              "value": 0.21919354838709676
+            },
+            {
+              "year": 1996,
+              "value": 0.2299677419354839
+            },
+            {
+              "year": 1997,
+              "value": 0.2443225806451613
+            },
+            {
+              "year": 1998,
+              "value": 0.22003225806451612
+            },
+            {
+              "year": 1999,
+              "value": 0.2486774193548387
+            },
+            {
+              "year": 2000,
+              "value": 0.3140645161290323
+            },
+            {
+              "year": 2001,
+              "value": 0.3197741935483871
+            },
+            {
+              "year": 2002,
+              "value": 0.23909677419354838
+            },
+            {
+              "year": 2003,
+              "value": 0.269258064516129
+            },
+            {
+              "year": 2004,
+              "value": 0.2257741935483871
+            },
+            {
+              "year": 2005,
+              "value": 0.27164516129032257
+            },
+            {
+              "year": 2006,
+              "value": 0.28974193548387095
+            },
+            {
+              "year": 2007,
+              "value": 0.20567741935483871
+            },
+            {
+              "year": 2008,
+              "value": 0.33148387096774196
+            },
+            {
+              "year": 2009,
+              "value": 0.2836774193548387
+            },
+            {
+              "year": 2010,
+              "value": 0.25948387096774195
+            },
+            {
+              "year": 2011,
+              "value": 0.25690322580645164
+            },
+            {
+              "year": 2012,
+              "value": 0.18725806451612903
+            },
+            {
+              "year": 2013,
+              "value": 0.3048709677419355
+            },
+            {
+              "year": 2014,
+              "value": 0.25529032258064516
+            },
+            {
+              "year": 2015,
+              "value": 0.3182258064516129
+            },
+            {
+              "year": 2016,
+              "value": 0.273741935483871
+            },
+            {
+              "year": 2017,
+              "value": 0.3245806451612903
+            },
+            {
+              "year": 2018,
+              "value": 0.27619354838709675
+            },
+            {
+              "year": 2019,
+              "value": 0.2265806451612903
+            },
+            {
+              "year": 2020,
+              "value": 0.23829032258064517
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.26143118279569894,
+          "sample_standard_deviation": 0.040625884408865935,
+          "p10": 0.21784193548387096,
+          "p90": 0.31838064516129033,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": -104.25
+            },
+            {
+              "year": 1992,
+              "value": -176.33
+            },
+            {
+              "year": 1993,
+              "value": 14.570000000000004
+            },
+            {
+              "year": 1994,
+              "value": -110.48
+            },
+            {
+              "year": 1995,
+              "value": -123.82
+            },
+            {
+              "year": 1996,
+              "value": -124.79
+            },
+            {
+              "year": 1997,
+              "value": -87.27
+            },
+            {
+              "year": 1998,
+              "value": -135.55
+            },
+            {
+              "year": 1999,
+              "value": -82.17
+            },
+            {
+              "year": 2000,
+              "value": -108.92999999999999
+            },
+            {
+              "year": 2001,
+              "value": 14.11
+            },
+            {
+              "year": 2002,
+              "value": -128.79
+            },
+            {
+              "year": 2003,
+              "value": -75.97
+            },
+            {
+              "year": 2004,
+              "value": -48.42
+            },
+            {
+              "year": 2005,
+              "value": -58.0
+            },
+            {
+              "year": 2006,
+              "value": -67.16
+            },
+            {
+              "year": 2007,
+              "value": -145.02
+            },
+            {
+              "year": 2008,
+              "value": 144.9
+            },
+            {
+              "year": 2009,
+              "value": -39.300000000000004
+            },
+            {
+              "year": 2010,
+              "value": -67.21000000000001
+            },
+            {
+              "year": 2011,
+              "value": -98.44
+            },
+            {
+              "year": 2012,
+              "value": -154.76
+            },
+            {
+              "year": 2013,
+              "value": -6.990000000000002
+            },
+            {
+              "year": 2014,
+              "value": -119.16
+            },
+            {
+              "year": 2015,
+              "value": -32.8
+            },
+            {
+              "year": 2016,
+              "value": -86.2
+            },
+            {
+              "year": 2017,
+              "value": -12.59
+            },
+            {
+              "year": 2018,
+              "value": -59.08
+            },
+            {
+              "year": 2019,
+              "value": -147.7
+            },
+            {
+              "year": 2020,
+              "value": -109.59
+            }
+          ],
+          "missing_years": [],
+          "mean": -77.90633333333334,
+          "sample_standard_deviation": 65.00461052525606,
+          "p10": -145.288,
+          "p90": -4.879999999999972,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 4,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 23.90666666666667
+            },
+            {
+              "year": 1992,
+              "value": 24.203333333333333
+            },
+            {
+              "year": 1993,
+              "value": 23.876666666666665
+            },
+            {
+              "year": 1994,
+              "value": 23.220000000000002
+            },
+            {
+              "year": 1995,
+              "value": 24.376666666666665
+            },
+            {
+              "year": 1996,
+              "value": 23.426666666666666
+            },
+            {
+              "year": 1997,
+              "value": 23.033333333333335
+            },
+            {
+              "year": 1998,
+              "value": 25.176666666666666
+            },
+            {
+              "year": 1999,
+              "value": 23.10666666666667
+            },
+            {
+              "year": 2000,
+              "value": 23.459999999999997
+            },
+            {
+              "year": 2001,
+              "value": 23.566666666666666
+            },
+            {
+              "year": 2002,
+              "value": 24.416666666666668
+            },
+            {
+              "year": 2003,
+              "value": 24.136666666666667
+            },
+            {
+              "year": 2004,
+              "value": 23.956666666666667
+            },
+            {
+              "year": 2005,
+              "value": 24.009999999999998
+            },
+            {
+              "year": 2006,
+              "value": 24.026666666666664
+            },
+            {
+              "year": 2007,
+              "value": 24.85
+            },
+            {
+              "year": 2008,
+              "value": 24.07
+            },
+            {
+              "year": 2009,
+              "value": 24.336666666666666
+            },
+            {
+              "year": 2010,
+              "value": 24.9
+            },
+            {
+              "year": 2011,
+              "value": 23.436666666666667
+            },
+            {
+              "year": 2012,
+              "value": 24.596666666666668
+            },
+            {
+              "year": 2013,
+              "value": 24.496666666666666
+            },
+            {
+              "year": 2014,
+              "value": 24.983333333333334
+            },
+            {
+              "year": 2015,
+              "value": 23.740000000000002
+            },
+            {
+              "year": 2016,
+              "value": 25.776666666666664
+            },
+            {
+              "year": 2017,
+              "value": 24.506666666666668
+            },
+            {
+              "year": 2018,
+              "value": 24.653333333333332
+            },
+            {
+              "year": 2019,
+              "value": 24.93
+            },
+            {
+              "year": 2020,
+              "value": 24.71333333333333
+            }
+          ],
+          "missing_years": [],
+          "mean": 24.19633333333333,
+          "sample_standard_deviation": 0.6591114127415254,
+          "p10": 23.406,
+          "p90": 24.935333333333332,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 205.2
+            },
+            {
+              "year": 1992,
+              "value": 158.1
+            },
+            {
+              "year": 1993,
+              "value": 120.3
+            },
+            {
+              "year": 1994,
+              "value": 280.3
+            },
+            {
+              "year": 1995,
+              "value": 129.1
+            },
+            {
+              "year": 1996,
+              "value": 279.4
+            },
+            {
+              "year": 1997,
+              "value": 110.4
+            },
+            {
+              "year": 1998,
+              "value": 184.5
+            },
+            {
+              "year": 1999,
+              "value": 167.4
+            },
+            {
+              "year": 2000,
+              "value": 220.7
+            },
+            {
+              "year": 2001,
+              "value": 186.8
+            },
+            {
+              "year": 2002,
+              "value": 121.60000000000001
+            },
+            {
+              "year": 2003,
+              "value": 125.7
+            },
+            {
+              "year": 2004,
+              "value": 238.5
+            },
+            {
+              "year": 2005,
+              "value": 211.7
+            },
+            {
+              "year": 2006,
+              "value": 120.7
+            },
+            {
+              "year": 2007,
+              "value": 121.5
+            },
+            {
+              "year": 2008,
+              "value": 73.6
+            },
+            {
+              "year": 2009,
+              "value": 209.4
+            },
+            {
+              "year": 2010,
+              "value": 248.4
+            },
+            {
+              "year": 2011,
+              "value": 241.29999999999998
+            },
+            {
+              "year": 2012,
+              "value": 177.5
+            },
+            {
+              "year": 2013,
+              "value": 170.9
+            },
+            {
+              "year": 2014,
+              "value": 123.2
+            },
+            {
+              "year": 2015,
+              "value": 208.4
+            },
+            {
+              "year": 2016,
+              "value": 69.2
+            },
+            {
+              "year": 2017,
+              "value": 227.1
+            },
+            {
+              "year": 2018,
+              "value": 80.6
+            },
+            {
+              "year": 2019,
+              "value": 105.9
+            },
+            {
+              "year": 2020,
+              "value": 122.7
+            }
+          ],
+          "missing_years": [],
+          "mean": 168.00333333333333,
+          "sample_standard_deviation": 60.239799441744566,
+          "p10": 103.37000000000002,
+          "p90": 242.01,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.35403333333333337
+            },
+            {
+              "year": 1992,
+              "value": 0.3098666666666666
+            },
+            {
+              "year": 1993,
+              "value": 0.34493333333333337
+            },
+            {
+              "year": 1994,
+              "value": 0.4017
+            },
+            {
+              "year": 1995,
+              "value": 0.31806666666666666
+            },
+            {
+              "year": 1996,
+              "value": 0.37723333333333336
+            },
+            {
+              "year": 1997,
+              "value": 0.35346666666666665
+            },
+            {
+              "year": 1998,
+              "value": 0.29486666666666667
+            },
+            {
+              "year": 1999,
+              "value": 0.35
+            },
+            {
+              "year": 2000,
+              "value": 0.3658
+            },
+            {
+              "year": 2001,
+              "value": 0.3644
+            },
+            {
+              "year": 2002,
+              "value": 0.3358666666666667
+            },
+            {
+              "year": 2003,
+              "value": 0.3457
+            },
+            {
+              "year": 2004,
+              "value": 0.3838666666666667
+            },
+            {
+              "year": 2005,
+              "value": 0.3602666666666667
+            },
+            {
+              "year": 2006,
+              "value": 0.31973333333333337
+            },
+            {
+              "year": 2007,
+              "value": 0.28526666666666667
+            },
+            {
+              "year": 2008,
+              "value": 0.32789999999999997
+            },
+            {
+              "year": 2009,
+              "value": 0.3347
+            },
+            {
+              "year": 2010,
+              "value": 0.3556666666666667
+            },
+            {
+              "year": 2011,
+              "value": 0.36679999999999996
+            },
+            {
+              "year": 2012,
+              "value": 0.27226666666666666
+            },
+            {
+              "year": 2013,
+              "value": 0.3401666666666667
+            },
+            {
+              "year": 2014,
+              "value": 0.29036666666666666
+            },
+            {
+              "year": 2015,
+              "value": 0.3708666666666666
+            },
+            {
+              "year": 2016,
+              "value": 0.31
+            },
+            {
+              "year": 2017,
+              "value": 0.35636666666666666
+            },
+            {
+              "year": 2018,
+              "value": 0.31023333333333336
+            },
+            {
+              "year": 2019,
+              "value": 0.2816666666666666
+            },
+            {
+              "year": 2020,
+              "value": 0.2937
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.3358588888888889,
+          "sample_standard_deviation": 0.03342628268596118,
+          "p10": 0.28985666666666665,
+          "p90": 0.3715033333333333,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 73.29
+            },
+            {
+              "year": 1992,
+              "value": 14.960000000000003
+            },
+            {
+              "year": 1993,
+              "value": -20.66
+            },
+            {
+              "year": 1994,
+              "value": 160.94
+            },
+            {
+              "year": 1995,
+              "value": -11.760000000000002
+            },
+            {
+              "year": 1996,
+              "value": 150.74
+            },
+            {
+              "year": 1997,
+              "value": -22.570000000000004
+            },
+            {
+              "year": 1998,
+              "value": 44.04
+            },
+            {
+              "year": 1999,
+              "value": 38.470000000000006
+            },
+            {
+              "year": 2000,
+              "value": 93.80000000000001
+            },
+            {
+              "year": 2001,
+              "value": 59.879999999999995
+            },
+            {
+              "year": 2002,
+              "value": -17.5
+            },
+            {
+              "year": 2003,
+              "value": -5.819999999999997
+            },
+            {
+              "year": 2004,
+              "value": 114.45
+            },
+            {
+              "year": 2005,
+              "value": 84.53
+            },
+            {
+              "year": 2006,
+              "value": -10.46
+            },
+            {
+              "year": 2007,
+              "value": -19.020000000000003
+            },
+            {
+              "year": 2008,
+              "value": -62.36
+            },
+            {
+              "year": 2009,
+              "value": 77.28999999999999
+            },
+            {
+              "year": 2010,
+              "value": 118.64
+            },
+            {
+              "year": 2011,
+              "value": 118.82
+            },
+            {
+              "year": 2012,
+              "value": 48.709999999999994
+            },
+            {
+              "year": 2013,
+              "value": 35.15
+            },
+            {
+              "year": 2014,
+              "value": -11.499999999999998
+            },
+            {
+              "year": 2015,
+              "value": 87.50999999999999
+            },
+            {
+              "year": 2016,
+              "value": -74.39
+            },
+            {
+              "year": 2017,
+              "value": 95.71
+            },
+            {
+              "year": 2018,
+              "value": -55.620000000000005
+            },
+            {
+              "year": 2019,
+              "value": -32.08
+            },
+            {
+              "year": 2020,
+              "value": -17.019999999999996
+            }
+          ],
+          "missing_years": [],
+          "mean": 35.205666666666666,
+          "sample_standard_deviation": 65.26630342936033,
+          "p10": -34.43399999999999,
+          "p90": 118.658,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 5,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 24.11935483870968
+            },
+            {
+              "year": 1992,
+              "value": 23.116129032258065
+            },
+            {
+              "year": 1993,
+              "value": 23.403225806451612
+            },
+            {
+              "year": 1994,
+              "value": 23.23225806451613
+            },
+            {
+              "year": 1995,
+              "value": 23.116129032258065
+            },
+            {
+              "year": 1996,
+              "value": 23.403225806451612
+            },
+            {
+              "year": 1997,
+              "value": 23.187096774193545
+            },
+            {
+              "year": 1998,
+              "value": 24.661290322580644
+            },
+            {
+              "year": 1999,
+              "value": 21.993548387096773
+            },
+            {
+              "year": 2000,
+              "value": 22.73225806451613
+            },
+            {
+              "year": 2001,
+              "value": 23.241935483870968
+            },
+            {
+              "year": 2002,
+              "value": 23.467741935483872
+            },
+            {
+              "year": 2003,
+              "value": 23.94516129032258
+            },
+            {
+              "year": 2004,
+              "value": 22.270967741935483
+            },
+            {
+              "year": 2005,
+              "value": 23.66774193548387
+            },
+            {
+              "year": 2006,
+              "value": 22.9741935483871
+            },
+            {
+              "year": 2007,
+              "value": 23.496774193548386
+            },
+            {
+              "year": 2008,
+              "value": 22.967741935483872
+            },
+            {
+              "year": 2009,
+              "value": 23.4741935483871
+            },
+            {
+              "year": 2010,
+              "value": 24.374193548387098
+            },
+            {
+              "year": 2011,
+              "value": 23.429032258064513
+            },
+            {
+              "year": 2012,
+              "value": 23.532258064516128
+            },
+            {
+              "year": 2013,
+              "value": 23.72258064516129
+            },
+            {
+              "year": 2014,
+              "value": 24.18064516129032
+            },
+            {
+              "year": 2015,
+              "value": 23.774193548387096
+            },
+            {
+              "year": 2016,
+              "value": 24.293548387096774
+            },
+            {
+              "year": 2017,
+              "value": 23.86774193548387
+            },
+            {
+              "year": 2018,
+              "value": 23.348387096774193
+            },
+            {
+              "year": 2019,
+              "value": 24.22258064516129
+            },
+            {
+              "year": 2020,
+              "value": 24.612903225806452
+            }
+          ],
+          "missing_years": [],
+          "mean": 23.52763440860215,
+          "sample_standard_deviation": 0.6248577624696853,
+          "p10": 22.944193548387098,
+          "p90": 24.301612903225806,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 393.2
+            },
+            {
+              "year": 1992,
+              "value": 296.8
+            },
+            {
+              "year": 1993,
+              "value": 308.5
+            },
+            {
+              "year": 1994,
+              "value": 311.0
+            },
+            {
+              "year": 1995,
+              "value": 206.6
+            },
+            {
+              "year": 1996,
+              "value": 318.4
+            },
+            {
+              "year": 1997,
+              "value": 274.1
+            },
+            {
+              "year": 1998,
+              "value": 224.9
+            },
+            {
+              "year": 1999,
+              "value": 335.7
+            },
+            {
+              "year": 2000,
+              "value": 192.7
+            },
+            {
+              "year": 2001,
+              "value": 167.1
+            },
+            {
+              "year": 2002,
+              "value": 214.8
+            },
+            {
+              "year": 2003,
+              "value": 243.1
+            },
+            {
+              "year": 2004,
+              "value": 431.8
+            },
+            {
+              "year": 2005,
+              "value": 275.6
+            },
+            {
+              "year": 2006,
+              "value": 401.4
+            },
+            {
+              "year": 2007,
+              "value": 272.1
+            },
+            {
+              "year": 2008,
+              "value": 309.6
+            },
+            {
+              "year": 2009,
+              "value": 273.8
+            },
+            {
+              "year": 2010,
+              "value": 195.0
+            },
+            {
+              "year": 2011,
+              "value": 255.20000000000002
+            },
+            {
+              "year": 2012,
+              "value": 244.6
+            },
+            {
+              "year": 2013,
+              "value": 336.6
+            },
+            {
+              "year": 2014,
+              "value": 350.8
+            },
+            {
+              "year": 2015,
+              "value": 310.1
+            },
+            {
+              "year": 2016,
+              "value": 247.2
+            },
+            {
+              "year": 2017,
+              "value": 269.7
+            },
+            {
+              "year": 2018,
+              "value": 641.3
+            },
+            {
+              "year": 2019,
+              "value": 288.1
+            },
+            {
+              "year": 2020,
+              "value": 181.5
+            }
+          ],
+          "missing_years": [],
+          "mean": 292.37666666666667,
+          "sample_standard_deviation": 92.43273671211922,
+          "p10": 194.77,
+          "p90": 394.02,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.4024516129032258
+            },
+            {
+              "year": 1992,
+              "value": 0.41000000000000003
+            },
+            {
+              "year": 1993,
+              "value": 0.4212903225806452
+            },
+            {
+              "year": 1994,
+              "value": 0.4131290322580645
+            },
+            {
+              "year": 1995,
+              "value": 0.3612258064516129
+            },
+            {
+              "year": 1996,
+              "value": 0.39799999999999996
+            },
+            {
+              "year": 1997,
+              "value": 0.4089032258064516
+            },
+            {
+              "year": 1998,
+              "value": 0.38332258064516134
+            },
+            {
+              "year": 1999,
+              "value": 0.43629032258064515
+            },
+            {
+              "year": 2000,
+              "value": 0.3843225806451613
+            },
+            {
+              "year": 2001,
+              "value": 0.3584838709677419
+            },
+            {
+              "year": 2002,
+              "value": 0.3805806451612903
+            },
+            {
+              "year": 2003,
+              "value": 0.3755483870967742
+            },
+            {
+              "year": 2004,
+              "value": 0.4225483870967742
+            },
+            {
+              "year": 2005,
+              "value": 0.3903225806451613
+            },
+            {
+              "year": 2006,
+              "value": 0.38564516129032256
+            },
+            {
+              "year": 2007,
+              "value": 0.39029032258064517
+            },
+            {
+              "year": 2008,
+              "value": 0.4032903225806452
+            },
+            {
+              "year": 2009,
+              "value": 0.40680645161290324
+            },
+            {
+              "year": 2010,
+              "value": 0.4037096774193549
+            },
+            {
+              "year": 2011,
+              "value": 0.4059677419354839
+            },
+            {
+              "year": 2012,
+              "value": 0.41145161290322585
+            },
+            {
+              "year": 2013,
+              "value": 0.39374193548387093
+            },
+            {
+              "year": 2014,
+              "value": 0.40077419354838706
+            },
+            {
+              "year": 2015,
+              "value": 0.424483870967742
+            },
+            {
+              "year": 2016,
+              "value": 0.3959677419354839
+            },
+            {
+              "year": 2017,
+              "value": 0.4080967741935484
+            },
+            {
+              "year": 2018,
+              "value": 0.4342903225806452
+            },
+            {
+              "year": 2019,
+              "value": 0.4073225806451613
+            },
+            {
+              "year": 2020,
+              "value": 0.36435483870967744
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.39942043010752687,
+          "sample_standard_deviation": 0.019659979659098232,
+          "p10": 0.3744290322580645,
+          "p90": 0.422741935483871,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 262.61
+            },
+            {
+              "year": 1992,
+              "value": 174.43
+            },
+            {
+              "year": 1993,
+              "value": 186.9
+            },
+            {
+              "year": 1994,
+              "value": 189.1
+            },
+            {
+              "year": 1995,
+              "value": 83.24000000000001
+            },
+            {
+              "year": 1996,
+              "value": 186.32
+            },
+            {
+              "year": 1997,
+              "value": 147.16
+            },
+            {
+              "year": 1998,
+              "value": 92.58999999999999
+            },
+            {
+              "year": 1999,
+              "value": 233.03
+            },
+            {
+              "year": 2000,
+              "value": 67.38
+            },
+            {
+              "year": 2001,
+              "value": 36.68
+            },
+            {
+              "year": 2002,
+              "value": 94.75
+            },
+            {
+              "year": 2003,
+              "value": 117.89999999999999
+            },
+            {
+              "year": 2004,
+              "value": 334.67
+            },
+            {
+              "year": 2005,
+              "value": 153.09
+            },
+            {
+              "year": 2006,
+              "value": 287.29
+            },
+            {
+              "year": 2007,
+              "value": 151.10999999999999
+            },
+            {
+              "year": 2008,
+              "value": 189.01000000000002
+            },
+            {
+              "year": 2009,
+              "value": 156.48
+            },
+            {
+              "year": 2010,
+              "value": 71.51
+            },
+            {
+              "year": 2011,
+              "value": 127.58
+            },
+            {
+              "year": 2012,
+              "value": 121.67999999999999
+            },
+            {
+              "year": 2013,
+              "value": 218.79
+            },
+            {
+              "year": 2014,
+              "value": 227.4
+            },
+            {
+              "year": 2015,
+              "value": 201.41
+            },
+            {
+              "year": 2016,
+              "value": 127.31
+            },
+            {
+              "year": 2017,
+              "value": 151.14000000000001
+            },
+            {
+              "year": 2018,
+              "value": 531.13
+            },
+            {
+              "year": 2019,
+              "value": 163.22
+            },
+            {
+              "year": 2020,
+              "value": 56.099999999999994
+            }
+          ],
+          "missing_years": [],
+          "mean": 171.367,
+          "sample_standard_deviation": 96.90409692595294,
+          "p10": 71.09700000000001,
+          "p90": 265.07800000000003,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 6,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 22.0
+            },
+            {
+              "year": 1992,
+              "value": 21.64
+            },
+            {
+              "year": 1993,
+              "value": 21.85
+            },
+            {
+              "year": 1994,
+              "value": 21.486666666666668
+            },
+            {
+              "year": 1995,
+              "value": 22.226666666666667
+            },
+            {
+              "year": 1996,
+              "value": 22.16
+            },
+            {
+              "year": 1997,
+              "value": 21.90666666666667
+            },
+            {
+              "year": 1998,
+              "value": 22.36
+            },
+            {
+              "year": 1999,
+              "value": 21.196666666666665
+            },
+            {
+              "year": 2000,
+              "value": 20.970000000000002
+            },
+            {
+              "year": 2001,
+              "value": 21.246666666666666
+            },
+            {
+              "year": 2002,
+              "value": 21.903333333333332
+            },
+            {
+              "year": 2003,
+              "value": 22.316666666666666
+            },
+            {
+              "year": 2004,
+              "value": 21.509999999999998
+            },
+            {
+              "year": 2005,
+              "value": 22.2
+            },
+            {
+              "year": 2006,
+              "value": 21.90666666666667
+            },
+            {
+              "year": 2007,
+              "value": 22.173333333333336
+            },
+            {
+              "year": 2008,
+              "value": 21.666666666666668
+            },
+            {
+              "year": 2009,
+              "value": 22.366666666666667
+            },
+            {
+              "year": 2010,
+              "value": 22.616666666666667
+            },
+            {
+              "year": 2011,
+              "value": 21.846666666666668
+            },
+            {
+              "year": 2012,
+              "value": 22.029999999999998
+            },
+            {
+              "year": 2013,
+              "value": 21.4
+            },
+            {
+              "year": 2014,
+              "value": 23.096666666666668
+            },
+            {
+              "year": 2015,
+              "value": 22.52
+            },
+            {
+              "year": 2016,
+              "value": 21.966666666666665
+            },
+            {
+              "year": 2017,
+              "value": 22.243333333333332
+            },
+            {
+              "year": 2018,
+              "value": 21.983333333333334
+            },
+            {
+              "year": 2019,
+              "value": 23.323333333333334
+            },
+            {
+              "year": 2020,
+              "value": 22.516666666666666
+            }
+          ],
+          "missing_years": [],
+          "mean": 22.021,
+          "sample_standard_deviation": 0.5213371769855663,
+          "p10": 21.384666666666664,
+          "p90": 22.529666666666667,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 490.0
+            },
+            {
+              "year": 1992,
+              "value": 359.3
+            },
+            {
+              "year": 1993,
+              "value": 290.5
+            },
+            {
+              "year": 1994,
+              "value": 298.8
+            },
+            {
+              "year": 1995,
+              "value": 258.3
+            },
+            {
+              "year": 1996,
+              "value": 523.4
+            },
+            {
+              "year": 1997,
+              "value": 313.1
+            },
+            {
+              "year": 1998,
+              "value": 352.1
+            },
+            {
+              "year": 1999,
+              "value": 145.7
+            },
+            {
+              "year": 2000,
+              "value": 336.4
+            },
+            {
+              "year": 2001,
+              "value": 285.0
+            },
+            {
+              "year": 2002,
+              "value": 209.8
+            },
+            {
+              "year": 2003,
+              "value": 365.5
+            },
+            {
+              "year": 2004,
+              "value": 318.2
+            },
+            {
+              "year": 2005,
+              "value": 259.4
+            },
+            {
+              "year": 2006,
+              "value": 329.8
+            },
+            {
+              "year": 2007,
+              "value": 535.8
+            },
+            {
+              "year": 2008,
+              "value": 251.2
+            },
+            {
+              "year": 2009,
+              "value": 254.1
+            },
+            {
+              "year": 2010,
+              "value": 412.3
+            },
+            {
+              "year": 2011,
+              "value": 332.7
+            },
+            {
+              "year": 2012,
+              "value": 260.0
+            },
+            {
+              "year": 2013,
+              "value": 551.5
+            },
+            {
+              "year": 2014,
+              "value": 179.4
+            },
+            {
+              "year": 2015,
+              "value": 285.9
+            },
+            {
+              "year": 2016,
+              "value": 339.2
+            },
+            {
+              "year": 2017,
+              "value": 278.6
+            },
+            {
+              "year": 2018,
+              "value": 386.2
+            },
+            {
+              "year": 2019,
+              "value": 259.2
+            },
+            {
+              "year": 2020,
+              "value": 232.2
+            }
+          ],
+          "missing_years": [],
+          "mean": 323.12,
+          "sample_standard_deviation": 99.6389011415203,
+          "p10": 229.96,
+          "p90": 493.34000000000003,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.4448666666666667
+            },
+            {
+              "year": 1992,
+              "value": 0.44166666666666665
+            },
+            {
+              "year": 1993,
+              "value": 0.4297333333333333
+            },
+            {
+              "year": 1994,
+              "value": 0.42773333333333335
+            },
+            {
+              "year": 1995,
+              "value": 0.4288666666666667
+            },
+            {
+              "year": 1996,
+              "value": 0.4379
+            },
+            {
+              "year": 1997,
+              "value": 0.42443333333333333
+            },
+            {
+              "year": 1998,
+              "value": 0.40090000000000003
+            },
+            {
+              "year": 1999,
+              "value": 0.4173
+            },
+            {
+              "year": 2000,
+              "value": 0.43183333333333335
+            },
+            {
+              "year": 2001,
+              "value": 0.42516666666666664
+            },
+            {
+              "year": 2002,
+              "value": 0.425
+            },
+            {
+              "year": 2003,
+              "value": 0.41910000000000003
+            },
+            {
+              "year": 2004,
+              "value": 0.4341
+            },
+            {
+              "year": 2005,
+              "value": 0.4342666666666667
+            },
+            {
+              "year": 2006,
+              "value": 0.43200000000000005
+            },
+            {
+              "year": 2007,
+              "value": 0.42783333333333334
+            },
+            {
+              "year": 2008,
+              "value": 0.4357333333333333
+            },
+            {
+              "year": 2009,
+              "value": 0.4257666666666667
+            },
+            {
+              "year": 2010,
+              "value": 0.4351333333333333
+            },
+            {
+              "year": 2011,
+              "value": 0.43643333333333334
+            },
+            {
+              "year": 2012,
+              "value": 0.4186333333333333
+            },
+            {
+              "year": 2013,
+              "value": 0.4557333333333334
+            },
+            {
+              "year": 2014,
+              "value": 0.41233333333333333
+            },
+            {
+              "year": 2015,
+              "value": 0.43039999999999995
+            },
+            {
+              "year": 2016,
+              "value": 0.4435
+            },
+            {
+              "year": 2017,
+              "value": 0.43383333333333335
+            },
+            {
+              "year": 2018,
+              "value": 0.4488333333333333
+            },
+            {
+              "year": 2019,
+              "value": 0.4323666666666667
+            },
+            {
+              "year": 2020,
+              "value": 0.4425666666666667
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.43113222222222225,
+          "sample_standard_deviation": 0.0111080464547493,
+          "p10": 0.4185,
+          "p90": 0.4436366666666667,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 409.18
+            },
+            {
+              "year": 1992,
+              "value": 267.78
+            },
+            {
+              "year": 1993,
+              "value": 195.6
+            },
+            {
+              "year": 1994,
+              "value": 212.19
+            },
+            {
+              "year": 1995,
+              "value": 166.14000000000001
+            },
+            {
+              "year": 1996,
+              "value": 428.0
+            },
+            {
+              "year": 1997,
+              "value": 210.3
+            },
+            {
+              "year": 1998,
+              "value": 257.71
+            },
+            {
+              "year": 1999,
+              "value": 44.790000000000006
+            },
+            {
+              "year": 2000,
+              "value": 255.68
+            },
+            {
+              "year": 2001,
+              "value": 199.87
+            },
+            {
+              "year": 2002,
+              "value": 111.39
+            },
+            {
+              "year": 2003,
+              "value": 273.65
+            },
+            {
+              "year": 2004,
+              "value": 226.57
+            },
+            {
+              "year": 2005,
+              "value": 169.19
+            },
+            {
+              "year": 2006,
+              "value": 237.89
+            },
+            {
+              "year": 2007,
+              "value": 449.89
+            },
+            {
+              "year": 2008,
+              "value": 162.5
+            },
+            {
+              "year": 2009,
+              "value": 158.79
+            },
+            {
+              "year": 2010,
+              "value": 326.92
+            },
+            {
+              "year": 2011,
+              "value": 243.73000000000002
+            },
+            {
+              "year": 2012,
+              "value": 168.73
+            },
+            {
+              "year": 2013,
+              "value": 486.34
+            },
+            {
+              "year": 2014,
+              "value": 77.14
+            },
+            {
+              "year": 2015,
+              "value": 196.9
+            },
+            {
+              "year": 2016,
+              "value": 262.48
+            },
+            {
+              "year": 2017,
+              "value": 200.96
+            },
+            {
+              "year": 2018,
+              "value": 310.47
+            },
+            {
+              "year": 2019,
+              "value": 159.46
+            },
+            {
+              "year": 2020,
+              "value": 147.29999999999998
+            }
+          ],
+          "missing_years": [],
+          "mean": 233.918,
+          "sample_standard_deviation": 104.43642152376562,
+          "p10": 143.709,
+          "p90": 411.062,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 7,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 20.903225806451612
+            },
+            {
+              "year": 1992,
+              "value": 20.774193548387096
+            },
+            {
+              "year": 1993,
+              "value": 20.741935483870968
+            },
+            {
+              "year": 1994,
+              "value": 20.403225806451612
+            },
+            {
+              "year": 1995,
+              "value": 21.01290322580645
+            },
+            {
+              "year": 1996,
+              "value": 21.103225806451615
+            },
+            {
+              "year": 1997,
+              "value": 21.05483870967742
+            },
+            {
+              "year": 1998,
+              "value": 21.5258064516129
+            },
+            {
+              "year": 1999,
+              "value": 20.648387096774194
+            },
+            {
+              "year": 2000,
+              "value": 20.848387096774193
+            },
+            {
+              "year": 2001,
+              "value": 20.929032258064513
+            },
+            {
+              "year": 2002,
+              "value": 21.312903225806455
+            },
+            {
+              "year": 2003,
+              "value": 21.251612903225805
+            },
+            {
+              "year": 2004,
+              "value": 21.08709677419355
+            },
+            {
+              "year": 2005,
+              "value": 21.493548387096773
+            },
+            {
+              "year": 2006,
+              "value": 21.358064516129033
+            },
+            {
+              "year": 2007,
+              "value": 21.348387096774193
+            },
+            {
+              "year": 2008,
+              "value": 21.41290322580645
+            },
+            {
+              "year": 2009,
+              "value": 21.483870967741936
+            },
+            {
+              "year": 2010,
+              "value": 21.432258064516127
+            },
+            {
+              "year": 2011,
+              "value": 21.55806451612903
+            },
+            {
+              "year": 2012,
+              "value": 21.635483870967743
+            },
+            {
+              "year": 2013,
+              "value": 21.0258064516129
+            },
+            {
+              "year": 2014,
+              "value": 21.68064516129032
+            },
+            {
+              "year": 2015,
+              "value": 22.148387096774194
+            },
+            {
+              "year": 2016,
+              "value": 21.703225806451613
+            },
+            {
+              "year": 2017,
+              "value": 21.858064516129033
+            },
+            {
+              "year": 2018,
+              "value": 21.37741935483871
+            },
+            {
+              "year": 2019,
+              "value": 22.151612903225807
+            },
+            {
+              "year": 2020,
+              "value": 22.1
+            }
+          ],
+          "missing_years": [],
+          "mean": 21.31215053763441,
+          "sample_standard_deviation": 0.4418934102503699,
+          "p10": 20.770967741935483,
+          "p90": 21.88225806451613,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 418.09999999999997
+            },
+            {
+              "year": 1992,
+              "value": 420.8
+            },
+            {
+              "year": 1993,
+              "value": 400.6
+            },
+            {
+              "year": 1994,
+              "value": 394.9
+            },
+            {
+              "year": 1995,
+              "value": 349.8
+            },
+            {
+              "year": 1996,
+              "value": 500.1
+            },
+            {
+              "year": 1997,
+              "value": 349.5
+            },
+            {
+              "year": 1998,
+              "value": 394.4
+            },
+            {
+              "year": 1999,
+              "value": 371.7
+            },
+            {
+              "year": 2000,
+              "value": 192.6
+            },
+            {
+              "year": 2001,
+              "value": 352.6
+            },
+            {
+              "year": 2002,
+              "value": 136.4
+            },
+            {
+              "year": 2003,
+              "value": 361.5
+            },
+            {
+              "year": 2004,
+              "value": 234.0
+            },
+            {
+              "year": 2005,
+              "value": 330.2
+            },
+            {
+              "year": 2006,
+              "value": 230.6
+            },
+            {
+              "year": 2007,
+              "value": 365.1
+            },
+            {
+              "year": 2008,
+              "value": 417.3
+            },
+            {
+              "year": 2009,
+              "value": 516.7
+            },
+            {
+              "year": 2010,
+              "value": 556.4
+            },
+            {
+              "year": 2011,
+              "value": 395.2
+            },
+            {
+              "year": 2012,
+              "value": 185.8
+            },
+            {
+              "year": 2013,
+              "value": 353.3
+            },
+            {
+              "year": 2014,
+              "value": 431.8
+            },
+            {
+              "year": 2015,
+              "value": 310.4
+            },
+            {
+              "year": 2016,
+              "value": 384.6
+            },
+            {
+              "year": 2017,
+              "value": 186.9
+            },
+            {
+              "year": 2018,
+              "value": 358.8
+            },
+            {
+              "year": 2019,
+              "value": 404.09999999999997
+            },
+            {
+              "year": 2020,
+              "value": 446.5
+            }
+          ],
+          "missing_years": [],
+          "mean": 358.3566666666667,
+          "sample_standard_deviation": 99.70381545403342,
+          "p10": 192.03,
+          "p90": 451.86000000000007,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.4474516129032258
+            },
+            {
+              "year": 1992,
+              "value": 0.4483870967741936
+            },
+            {
+              "year": 1993,
+              "value": 0.44958064516129037
+            },
+            {
+              "year": 1994,
+              "value": 0.4448709677419355
+            },
+            {
+              "year": 1995,
+              "value": 0.44264516129032255
+            },
+            {
+              "year": 1996,
+              "value": 0.4329354838709677
+            },
+            {
+              "year": 1997,
+              "value": 0.44848387096774195
+            },
+            {
+              "year": 1998,
+              "value": 0.4499677419354839
+            },
+            {
+              "year": 1999,
+              "value": 0.4386129032258064
+            },
+            {
+              "year": 2000,
+              "value": 0.42061290322580647
+            },
+            {
+              "year": 2001,
+              "value": 0.43529032258064515
+            },
+            {
+              "year": 2002,
+              "value": 0.403258064516129
+            },
+            {
+              "year": 2003,
+              "value": 0.4458709677419355
+            },
+            {
+              "year": 2004,
+              "value": 0.43732258064516133
+            },
+            {
+              "year": 2005,
+              "value": 0.4400967741935484
+            },
+            {
+              "year": 2006,
+              "value": 0.4317741935483871
+            },
+            {
+              "year": 2007,
+              "value": 0.45029032258064516
+            },
+            {
+              "year": 2008,
+              "value": 0.442741935483871
+            },
+            {
+              "year": 2009,
+              "value": 0.44432258064516134
+            },
+            {
+              "year": 2010,
+              "value": 0.4538064516129032
+            },
+            {
+              "year": 2011,
+              "value": 0.4487741935483871
+            },
+            {
+              "year": 2012,
+              "value": 0.4342258064516129
+            },
+            {
+              "year": 2013,
+              "value": 0.45
+            },
+            {
+              "year": 2014,
+              "value": 0.44277419354838715
+            },
+            {
+              "year": 2015,
+              "value": 0.43077419354838714
+            },
+            {
+              "year": 2016,
+              "value": 0.4493225806451613
+            },
+            {
+              "year": 2017,
+              "value": 0.43274193548387097
+            },
+            {
+              "year": 2018,
+              "value": 0.4458064516129032
+            },
+            {
+              "year": 2019,
+              "value": 0.44006451612903225
+            },
+            {
+              "year": 2020,
+              "value": 0.45048387096774195
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.44110967741935486,
+          "sample_standard_deviation": 0.010506149341819222,
+          "p10": 0.4316741935483871,
+          "p90": 0.4500290322580645,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 338.01
+            },
+            {
+              "year": 1992,
+              "value": 341.05
+            },
+            {
+              "year": 1993,
+              "value": 322.85
+            },
+            {
+              "year": 1994,
+              "value": 317.97
+            },
+            {
+              "year": 1995,
+              "value": 265.4
+            },
+            {
+              "year": 1996,
+              "value": 413.23
+            },
+            {
+              "year": 1997,
+              "value": 270.02
+            },
+            {
+              "year": 1998,
+              "value": 310.21
+            },
+            {
+              "year": 1999,
+              "value": 292.11
+            },
+            {
+              "year": 2000,
+              "value": 93.6
+            },
+            {
+              "year": 2001,
+              "value": 263.47
+            },
+            {
+              "year": 2002,
+              "value": 39.0
+            },
+            {
+              "year": 2003,
+              "value": 283.89
+            },
+            {
+              "year": 2004,
+              "value": 147.64
+            },
+            {
+              "year": 2005,
+              "value": 246.27
+            },
+            {
+              "year": 2006,
+              "value": 135.3
+            },
+            {
+              "year": 2007,
+              "value": 289.87
+            },
+            {
+              "year": 2008,
+              "value": 325.55
+            },
+            {
+              "year": 2009,
+              "value": 441.68
+            },
+            {
+              "year": 2010,
+              "value": 484.26
+            },
+            {
+              "year": 2011,
+              "value": 314.69
+            },
+            {
+              "year": 2012,
+              "value": 94.55
+            },
+            {
+              "year": 2013,
+              "value": 276.55
+            },
+            {
+              "year": 2014,
+              "value": 351.73
+            },
+            {
+              "year": 2015,
+              "value": 216.68
+            },
+            {
+              "year": 2016,
+              "value": 304.08
+            },
+            {
+              "year": 2017,
+              "value": 97.29
+            },
+            {
+              "year": 2018,
+              "value": 279.43
+            },
+            {
+              "year": 2019,
+              "value": 321.53
+            },
+            {
+              "year": 2020,
+              "value": 367.01
+            }
+          ],
+          "missing_years": [],
+          "mean": 274.8306666666667,
+          "sample_standard_deviation": 104.95566272227175,
+          "p10": 97.016,
+          "p90": 371.63200000000006,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 8,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 20.551612903225806
+            },
+            {
+              "year": 1992,
+              "value": 20.635483870967743
+            },
+            {
+              "year": 1993,
+              "value": 20.835483870967742
+            },
+            {
+              "year": 1994,
+              "value": 20.896774193548385
+            },
+            {
+              "year": 1995,
+              "value": 21.370967741935484
+            },
+            {
+              "year": 1996,
+              "value": 20.929032258064513
+            },
+            {
+              "year": 1997,
+              "value": 21.080645161290324
+            },
+            {
+              "year": 1998,
+              "value": 21.706451612903226
+            },
+            {
+              "year": 1999,
+              "value": 20.92258064516129
+            },
+            {
+              "year": 2000,
+              "value": 20.812903225806455
+            },
+            {
+              "year": 2001,
+              "value": 20.883870967741935
+            },
+            {
+              "year": 2002,
+              "value": 21.02258064516129
+            },
+            {
+              "year": 2003,
+              "value": 21.338709677419356
+            },
+            {
+              "year": 2004,
+              "value": 21.016129032258064
+            },
+            {
+              "year": 2005,
+              "value": 21.29032258064516
+            },
+            {
+              "year": 2006,
+              "value": 21.261290322580646
+            },
+            {
+              "year": 2007,
+              "value": 21.251612903225805
+            },
+            {
+              "year": 2008,
+              "value": 21.461290322580645
+            },
+            {
+              "year": 2009,
+              "value": 21.92258064516129
+            },
+            {
+              "year": 2010,
+              "value": 21.693548387096776
+            },
+            {
+              "year": 2011,
+              "value": 21.470967741935485
+            },
+            {
+              "year": 2012,
+              "value": 21.383870967741935
+            },
+            {
+              "year": 2013,
+              "value": 21.396774193548385
+            },
+            {
+              "year": 2014,
+              "value": 21.97741935483871
+            },
+            {
+              "year": 2015,
+              "value": 22.351612903225806
+            },
+            {
+              "year": 2016,
+              "value": 21.751612903225805
+            },
+            {
+              "year": 2017,
+              "value": 22.05483870967742
+            },
+            {
+              "year": 2018,
+              "value": 21.174193548387095
+            },
+            {
+              "year": 2019,
+              "value": 21.73225806451613
+            },
+            {
+              "year": 2020,
+              "value": 22.27741935483871
+            }
+          ],
+          "missing_years": [],
+          "mean": 21.348494623655913,
+          "sample_standard_deviation": 0.473139797097233,
+          "p10": 20.833225806451615,
+          "p90": 21.98516129032258,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 244.9
+            },
+            {
+              "year": 1992,
+              "value": 295.7
+            },
+            {
+              "year": 1993,
+              "value": 152.3
+            },
+            {
+              "year": 1994,
+              "value": 177.9
+            },
+            {
+              "year": 1995,
+              "value": 350.7
+            },
+            {
+              "year": 1996,
+              "value": 281.9
+            },
+            {
+              "year": 1997,
+              "value": 235.3
+            },
+            {
+              "year": 1998,
+              "value": 416.8
+            },
+            {
+              "year": 1999,
+              "value": 152.1
+            },
+            {
+              "year": 2000,
+              "value": 470.8
+            },
+            {
+              "year": 2001,
+              "value": 222.1
+            },
+            {
+              "year": 2002,
+              "value": 252.5
+            },
+            {
+              "year": 2003,
+              "value": 177.9
+            },
+            {
+              "year": 2004,
+              "value": 192.2
+            },
+            {
+              "year": 2005,
+              "value": 238.4
+            },
+            {
+              "year": 2006,
+              "value": 201.2
+            },
+            {
+              "year": 2007,
+              "value": 318.6
+            },
+            {
+              "year": 2008,
+              "value": 380.2
+            },
+            {
+              "year": 2009,
+              "value": 270.2
+            },
+            {
+              "year": 2010,
+              "value": 353.7
+            },
+            {
+              "year": 2011,
+              "value": 480.7
+            },
+            {
+              "year": 2012,
+              "value": 433.4
+            },
+            {
+              "year": 2013,
+              "value": 302.5
+            },
+            {
+              "year": 2014,
+              "value": 455.8
+            },
+            {
+              "year": 2015,
+              "value": 259.2
+            },
+            {
+              "year": 2016,
+              "value": 167.7
+            },
+            {
+              "year": 2017,
+              "value": 380.2
+            },
+            {
+              "year": 2018,
+              "value": 532.3
+            },
+            {
+              "year": 2019,
+              "value": 522.6
+            },
+            {
+              "year": 2020,
+              "value": 425.2
+            }
+          ],
+          "missing_years": [],
+          "mean": 311.5,
+          "sample_standard_deviation": 115.37955654692696,
+          "p10": 176.88,
+          "p90": 471.79,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.44387096774193546
+            },
+            {
+              "year": 1992,
+              "value": 0.4398064516129032
+            },
+            {
+              "year": 1993,
+              "value": 0.4245806451612903
+            },
+            {
+              "year": 1994,
+              "value": 0.42993548387096775
+            },
+            {
+              "year": 1995,
+              "value": 0.4377741935483871
+            },
+            {
+              "year": 1996,
+              "value": 0.4419677419354839
+            },
+            {
+              "year": 1997,
+              "value": 0.4403548387096774
+            },
+            {
+              "year": 1998,
+              "value": 0.44393548387096776
+            },
+            {
+              "year": 1999,
+              "value": 0.43348387096774194
+            },
+            {
+              "year": 2000,
+              "value": 0.4445161290322581
+            },
+            {
+              "year": 2001,
+              "value": 0.4328709677419355
+            },
+            {
+              "year": 2002,
+              "value": 0.43251612903225806
+            },
+            {
+              "year": 2003,
+              "value": 0.432258064516129
+            },
+            {
+              "year": 2004,
+              "value": 0.42674193548387096
+            },
+            {
+              "year": 2005,
+              "value": 0.4315483870967742
+            },
+            {
+              "year": 2006,
+              "value": 0.4191935483870968
+            },
+            {
+              "year": 2007,
+              "value": 0.44109677419354837
+            },
+            {
+              "year": 2008,
+              "value": 0.4433548387096774
+            },
+            {
+              "year": 2009,
+              "value": 0.4241935483870968
+            },
+            {
+              "year": 2010,
+              "value": 0.44448387096774195
+            },
+            {
+              "year": 2011,
+              "value": 0.4491290322580645
+            },
+            {
+              "year": 2012,
+              "value": 0.4366129032258065
+            },
+            {
+              "year": 2013,
+              "value": 0.4400967741935484
+            },
+            {
+              "year": 2014,
+              "value": 0.4480967741935484
+            },
+            {
+              "year": 2015,
+              "value": 0.43664516129032255
+            },
+            {
+              "year": 2016,
+              "value": 0.42474193548387096
+            },
+            {
+              "year": 2017,
+              "value": 0.45003225806451613
+            },
+            {
+              "year": 2018,
+              "value": 0.44170967741935485
+            },
+            {
+              "year": 2019,
+              "value": 0.4476451612903226
+            },
+            {
+              "year": 2020,
+              "value": 0.4280967741935484
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.4370430107526882,
+          "sample_standard_deviation": 0.008338717028516879,
+          "p10": 0.4247258064516129,
+          "p90": 0.4476903225806452,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 158.97
+            },
+            {
+              "year": 1992,
+              "value": 210.82
+            },
+            {
+              "year": 1993,
+              "value": 54.2
+            },
+            {
+              "year": 1994,
+              "value": 82.12
+            },
+            {
+              "year": 1995,
+              "value": 258.45
+            },
+            {
+              "year": 1996,
+              "value": 190.92000000000002
+            },
+            {
+              "year": 1997,
+              "value": 142.54
+            },
+            {
+              "year": 1998,
+              "value": 327.16999999999996
+            },
+            {
+              "year": 1999,
+              "value": 53.96
+            },
+            {
+              "year": 2000,
+              "value": 389.01
+            },
+            {
+              "year": 2001,
+              "value": 133.09
+            },
+            {
+              "year": 2002,
+              "value": 162.71
+            },
+            {
+              "year": 2003,
+              "value": 87.09
+            },
+            {
+              "year": 2004,
+              "value": 93.41
+            },
+            {
+              "year": 2005,
+              "value": 136.63
+            },
+            {
+              "year": 2006,
+              "value": 102.96
+            },
+            {
+              "year": 2007,
+              "value": 234.93
+            },
+            {
+              "year": 2008,
+              "value": 290.90000000000003
+            },
+            {
+              "year": 2009,
+              "value": 168.87
+            },
+            {
+              "year": 2010,
+              "value": 273.72
+            },
+            {
+              "year": 2011,
+              "value": 404.16
+            },
+            {
+              "year": 2012,
+              "value": 349.86
+            },
+            {
+              "year": 2013,
+              "value": 211.67
+            },
+            {
+              "year": 2014,
+              "value": 372.7
+            },
+            {
+              "year": 2015,
+              "value": 156.59
+            },
+            {
+              "year": 2016,
+              "value": 70.62
+            },
+            {
+              "year": 2017,
+              "value": 301.66
+            },
+            {
+              "year": 2018,
+              "value": 454.03
+            },
+            {
+              "year": 2019,
+              "value": 450.83
+            },
+            {
+              "year": 2020,
+              "value": 335.45
+            }
+          ],
+          "missing_years": [],
+          "mean": 222.00133333333332,
+          "sample_standard_deviation": 121.854466665924,
+          "p10": 80.97000000000001,
+          "p90": 390.52500000000003,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 9,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 21.633333333333333
+            },
+            {
+              "year": 1992,
+              "value": 20.916666666666668
+            },
+            {
+              "year": 1993,
+              "value": 21.183333333333334
+            },
+            {
+              "year": 1994,
+              "value": 21.206666666666667
+            },
+            {
+              "year": 1995,
+              "value": 21.403333333333332
+            },
+            {
+              "year": 1996,
+              "value": 21.240000000000002
+            },
+            {
+              "year": 1997,
+              "value": 21.64
+            },
+            {
+              "year": 1998,
+              "value": 21.243333333333332
+            },
+            {
+              "year": 1999,
+              "value": 21.23
+            },
+            {
+              "year": 2000,
+              "value": 21.586666666666666
+            },
+            {
+              "year": 2001,
+              "value": 21.373333333333335
+            },
+            {
+              "year": 2002,
+              "value": 21.506666666666668
+            },
+            {
+              "year": 2003,
+              "value": 21.403333333333332
+            },
+            {
+              "year": 2004,
+              "value": 21.466666666666665
+            },
+            {
+              "year": 2005,
+              "value": 21.470000000000002
+            },
+            {
+              "year": 2006,
+              "value": 21.696666666666665
+            },
+            {
+              "year": 2007,
+              "value": 21.529999999999998
+            },
+            {
+              "year": 2008,
+              "value": 21.64333333333333
+            },
+            {
+              "year": 2009,
+              "value": 21.696666666666665
+            },
+            {
+              "year": 2010,
+              "value": 21.993333333333332
+            },
+            {
+              "year": 2011,
+              "value": 21.8
+            },
+            {
+              "year": 2012,
+              "value": 21.95
+            },
+            {
+              "year": 2013,
+              "value": 21.64333333333333
+            },
+            {
+              "year": 2014,
+              "value": 22.279999999999998
+            },
+            {
+              "year": 2015,
+              "value": 22.573333333333334
+            },
+            {
+              "year": 2016,
+              "value": 21.6
+            },
+            {
+              "year": 2017,
+              "value": 22.493333333333332
+            },
+            {
+              "year": 2018,
+              "value": 22.336666666666666
+            },
+            {
+              "year": 2019,
+              "value": 22.386666666666667
+            },
+            {
+              "year": 2020,
+              "value": 21.94
+            }
+          ],
+          "missing_years": [],
+          "mean": 21.668888888888887,
+          "sample_standard_deviation": 0.417344582615576,
+          "p10": 21.227666666666668,
+          "p90": 22.341666666666665,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 236.6
+            },
+            {
+              "year": 1992,
+              "value": 389.5
+            },
+            {
+              "year": 1993,
+              "value": 185.0
+            },
+            {
+              "year": 1994,
+              "value": 237.4
+            },
+            {
+              "year": 1995,
+              "value": 176.0
+            },
+            {
+              "year": 1996,
+              "value": 253.9
+            },
+            {
+              "year": 1997,
+              "value": 190.7
+            },
+            {
+              "year": 1998,
+              "value": 181.5
+            },
+            {
+              "year": 1999,
+              "value": 204.3
+            },
+            {
+              "year": 2000,
+              "value": 300.4
+            },
+            {
+              "year": 2001,
+              "value": 246.0
+            },
+            {
+              "year": 2002,
+              "value": 153.6
+            },
+            {
+              "year": 2003,
+              "value": 119.1
+            },
+            {
+              "year": 2004,
+              "value": 271.7
+            },
+            {
+              "year": 2005,
+              "value": 143.6
+            },
+            {
+              "year": 2006,
+              "value": 262.09999999999997
+            },
+            {
+              "year": 2007,
+              "value": 319.9
+            },
+            {
+              "year": 2008,
+              "value": 138.9
+            },
+            {
+              "year": 2009,
+              "value": 327.8
+            },
+            {
+              "year": 2010,
+              "value": 226.9
+            },
+            {
+              "year": 2011,
+              "value": 215.6
+            },
+            {
+              "year": 2012,
+              "value": 106.39999999999999
+            },
+            {
+              "year": 2013,
+              "value": 223.2
+            },
+            {
+              "year": 2014,
+              "value": 273.6
+            },
+            {
+              "year": 2015,
+              "value": 378.6
+            },
+            {
+              "year": 2016,
+              "value": 102.1
+            },
+            {
+              "year": 2017,
+              "value": 404.4
+            },
+            {
+              "year": 2018,
+              "value": 232.7
+            },
+            {
+              "year": 2019,
+              "value": 227.5
+            },
+            {
+              "year": 2020,
+              "value": 462.2
+            }
+          ],
+          "missing_years": [],
+          "mean": 239.70666666666665,
+          "sample_standard_deviation": 89.54615813524111,
+          "p10": 136.92000000000002,
+          "p90": 379.69000000000005,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.4199333333333334
+            },
+            {
+              "year": 1992,
+              "value": 0.4401333333333334
+            },
+            {
+              "year": 1993,
+              "value": 0.42106666666666664
+            },
+            {
+              "year": 1994,
+              "value": 0.40709999999999996
+            },
+            {
+              "year": 1995,
+              "value": 0.41916666666666663
+            },
+            {
+              "year": 1996,
+              "value": 0.4358666666666667
+            },
+            {
+              "year": 1997,
+              "value": 0.4263
+            },
+            {
+              "year": 1998,
+              "value": 0.4265
+            },
+            {
+              "year": 1999,
+              "value": 0.4019666666666667
+            },
+            {
+              "year": 2000,
+              "value": 0.42923333333333336
+            },
+            {
+              "year": 2001,
+              "value": 0.4265
+            },
+            {
+              "year": 2002,
+              "value": 0.3937333333333333
+            },
+            {
+              "year": 2003,
+              "value": 0.4012333333333334
+            },
+            {
+              "year": 2004,
+              "value": 0.4267666666666667
+            },
+            {
+              "year": 2005,
+              "value": 0.4182666666666667
+            },
+            {
+              "year": 2006,
+              "value": 0.43853333333333333
+            },
+            {
+              "year": 2007,
+              "value": 0.4471666666666667
+            },
+            {
+              "year": 2008,
+              "value": 0.4016
+            },
+            {
+              "year": 2009,
+              "value": 0.44303333333333333
+            },
+            {
+              "year": 2010,
+              "value": 0.4327666666666667
+            },
+            {
+              "year": 2011,
+              "value": 0.4168
+            },
+            {
+              "year": 2012,
+              "value": 0.3954666666666667
+            },
+            {
+              "year": 2013,
+              "value": 0.4328666666666667
+            },
+            {
+              "year": 2014,
+              "value": 0.4282
+            },
+            {
+              "year": 2015,
+              "value": 0.41983333333333334
+            },
+            {
+              "year": 2016,
+              "value": 0.40976666666666667
+            },
+            {
+              "year": 2017,
+              "value": 0.44503333333333334
+            },
+            {
+              "year": 2018,
+              "value": 0.4112666666666666
+            },
+            {
+              "year": 2019,
+              "value": 0.4378
+            },
+            {
+              "year": 2020,
+              "value": 0.44356666666666666
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.4232488888888889,
+          "sample_standard_deviation": 0.015282037469557036,
+          "p10": 0.4015633333333333,
+          "p90": 0.4430866666666667,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 125.88
+            },
+            {
+              "year": 1992,
+              "value": 298.27
+            },
+            {
+              "year": 1993,
+              "value": 81.39
+            },
+            {
+              "year": 1994,
+              "value": 127.55
+            },
+            {
+              "year": 1995,
+              "value": 71.85
+            },
+            {
+              "year": 1996,
+              "value": 163.56
+            },
+            {
+              "year": 1997,
+              "value": 82.56
+            },
+            {
+              "year": 1998,
+              "value": 91.7
+            },
+            {
+              "year": 1999,
+              "value": 92.74
+            },
+            {
+              "year": 2000,
+              "value": 198.15
+            },
+            {
+              "year": 2001,
+              "value": 143.67000000000002
+            },
+            {
+              "year": 2002,
+              "value": 37.46
+            },
+            {
+              "year": 2003,
+              "value": 10.879999999999999
+            },
+            {
+              "year": 2004,
+              "value": 177.95000000000002
+            },
+            {
+              "year": 2005,
+              "value": 46.6
+            },
+            {
+              "year": 2006,
+              "value": 168.9
+            },
+            {
+              "year": 2007,
+              "value": 237.54
+            },
+            {
+              "year": 2008,
+              "value": 34.88
+            },
+            {
+              "year": 2009,
+              "value": 237.58
+            },
+            {
+              "year": 2010,
+              "value": 130.07
+            },
+            {
+              "year": 2011,
+              "value": 118.80999999999999
+            },
+            {
+              "year": 2012,
+              "value": 2.8399999999999985
+            },
+            {
+              "year": 2013,
+              "value": 132.23
+            },
+            {
+              "year": 2014,
+              "value": 173.38
+            },
+            {
+              "year": 2015,
+              "value": 274.79
+            },
+            {
+              "year": 2016,
+              "value": 4.34
+            },
+            {
+              "year": 2017,
+              "value": 314.21
+            },
+            {
+              "year": 2018,
+              "value": 118.00999999999999
+            },
+            {
+              "year": 2019,
+              "value": 141.17
+            },
+            {
+              "year": 2020,
+              "value": 384.81
+            }
+          ],
+          "missing_years": [],
+          "mean": 140.79233333333335,
+          "sample_standard_deviation": 94.94549807501483,
+          "p10": 32.48000000000001,
+          "p90": 277.13800000000003,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 10,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 21.429032258064513
+            },
+            {
+              "year": 1992,
+              "value": 21.241935483870968
+            },
+            {
+              "year": 1993,
+              "value": 21.43548387096774
+            },
+            {
+              "year": 1994,
+              "value": 21.27741935483871
+            },
+            {
+              "year": 1995,
+              "value": 21.89032258064516
+            },
+            {
+              "year": 1996,
+              "value": 21.10967741935484
+            },
+            {
+              "year": 1997,
+              "value": 21.770967741935483
+            },
+            {
+              "year": 1998,
+              "value": 21.36774193548387
+            },
+            {
+              "year": 1999,
+              "value": 21.425806451612903
+            },
+            {
+              "year": 2000,
+              "value": 21.23225806451613
+            },
+            {
+              "year": 2001,
+              "value": 21.52258064516129
+            },
+            {
+              "year": 2002,
+              "value": 21.835483870967742
+            },
+            {
+              "year": 2003,
+              "value": 21.561290322580643
+            },
+            {
+              "year": 2004,
+              "value": 21.651612903225807
+            },
+            {
+              "year": 2005,
+              "value": 21.780645161290323
+            },
+            {
+              "year": 2006,
+              "value": 21.770967741935483
+            },
+            {
+              "year": 2007,
+              "value": 21.493548387096773
+            },
+            {
+              "year": 2008,
+              "value": 21.98709677419355
+            },
+            {
+              "year": 2009,
+              "value": 21.925806451612903
+            },
+            {
+              "year": 2010,
+              "value": 21.741935483870968
+            },
+            {
+              "year": 2011,
+              "value": 22.12258064516129
+            },
+            {
+              "year": 2012,
+              "value": 21.980645161290322
+            },
+            {
+              "year": 2013,
+              "value": 21.79032258064516
+            },
+            {
+              "year": 2014,
+              "value": 22.59032258064516
+            },
+            {
+              "year": 2015,
+              "value": 22.983870967741936
+            },
+            {
+              "year": 2016,
+              "value": 22.248387096774195
+            },
+            {
+              "year": 2017,
+              "value": 22.325806451612905
+            },
+            {
+              "year": 2018,
+              "value": 22.438709677419357
+            },
+            {
+              "year": 2019,
+              "value": 22.27741935483871
+            },
+            {
+              "year": 2020,
+              "value": 22.10967741935484
+            }
+          ],
+          "missing_years": [],
+          "mean": 21.810645161290324,
+          "sample_standard_deviation": 0.4419847248129256,
+          "p10": 21.273870967741935,
+          "p90": 22.33709677419355,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 275.8
+            },
+            {
+              "year": 1992,
+              "value": 179.4
+            },
+            {
+              "year": 1993,
+              "value": 366.1
+            },
+            {
+              "year": 1994,
+              "value": 371.2
+            },
+            {
+              "year": 1995,
+              "value": 188.6
+            },
+            {
+              "year": 1996,
+              "value": 267.4
+            },
+            {
+              "year": 1997,
+              "value": 248.9
+            },
+            {
+              "year": 1998,
+              "value": 172.6
+            },
+            {
+              "year": 1999,
+              "value": 428.9
+            },
+            {
+              "year": 2000,
+              "value": 143.3
+            },
+            {
+              "year": 2001,
+              "value": 243.9
+            },
+            {
+              "year": 2002,
+              "value": 260.2
+            },
+            {
+              "year": 2003,
+              "value": 456.3
+            },
+            {
+              "year": 2004,
+              "value": 268.5
+            },
+            {
+              "year": 2005,
+              "value": 377.3
+            },
+            {
+              "year": 2006,
+              "value": 262.4
+            },
+            {
+              "year": 2007,
+              "value": 384.8
+            },
+            {
+              "year": 2008,
+              "value": 402.1
+            },
+            {
+              "year": 2009,
+              "value": 197.5
+            },
+            {
+              "year": 2010,
+              "value": 239.9
+            },
+            {
+              "year": 2011,
+              "value": 367.4
+            },
+            {
+              "year": 2012,
+              "value": 288.3
+            },
+            {
+              "year": 2013,
+              "value": 188.9
+            },
+            {
+              "year": 2014,
+              "value": 351.3
+            },
+            {
+              "year": 2015,
+              "value": 171.8
+            },
+            {
+              "year": 2016,
+              "value": 113.9
+            },
+            {
+              "year": 2017,
+              "value": 191.8
+            },
+            {
+              "year": 2018,
+              "value": 295.0
+            },
+            {
+              "year": 2019,
+              "value": 565.9
+            },
+            {
+              "year": 2020,
+              "value": 151.3
+            }
+          ],
+          "missing_years": [],
+          "mean": 280.69,
+          "sample_standard_deviation": 106.90196072522033,
+          "p10": 169.75000000000003,
+          "p90": 404.78000000000003,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.43248387096774193
+            },
+            {
+              "year": 1992,
+              "value": 0.4136774193548387
+            },
+            {
+              "year": 1993,
+              "value": 0.44467741935483873
+            },
+            {
+              "year": 1994,
+              "value": 0.44351612903225807
+            },
+            {
+              "year": 1995,
+              "value": 0.415
+            },
+            {
+              "year": 1996,
+              "value": 0.42035483870967744
+            },
+            {
+              "year": 1997,
+              "value": 0.42261290322580647
+            },
+            {
+              "year": 1998,
+              "value": 0.42235483870967744
+            },
+            {
+              "year": 1999,
+              "value": 0.4490645161290323
+            },
+            {
+              "year": 2000,
+              "value": 0.41377419354838707
+            },
+            {
+              "year": 2001,
+              "value": 0.4355806451612903
+            },
+            {
+              "year": 2002,
+              "value": 0.4228709677419355
+            },
+            {
+              "year": 2003,
+              "value": 0.44106451612903225
+            },
+            {
+              "year": 2004,
+              "value": 0.4280967741935484
+            },
+            {
+              "year": 2005,
+              "value": 0.4302903225806452
+            },
+            {
+              "year": 2006,
+              "value": 0.4270645161290323
+            },
+            {
+              "year": 2007,
+              "value": 0.4309677419354839
+            },
+            {
+              "year": 2008,
+              "value": 0.42548387096774193
+            },
+            {
+              "year": 2009,
+              "value": 0.4031935483870968
+            },
+            {
+              "year": 2010,
+              "value": 0.434258064516129
+            },
+            {
+              "year": 2011,
+              "value": 0.42438709677419356
+            },
+            {
+              "year": 2012,
+              "value": 0.397258064516129
+            },
+            {
+              "year": 2013,
+              "value": 0.412258064516129
+            },
+            {
+              "year": 2014,
+              "value": 0.44729032258064516
+            },
+            {
+              "year": 2015,
+              "value": 0.3985806451612903
+            },
+            {
+              "year": 2016,
+              "value": 0.36851612903225806
+            },
+            {
+              "year": 2017,
+              "value": 0.43316129032258066
+            },
+            {
+              "year": 2018,
+              "value": 0.4219032258064516
+            },
+            {
+              "year": 2019,
+              "value": 0.4527741935483871
+            },
+            {
+              "year": 2020,
+              "value": 0.40722580645161294
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.4239913978494624,
+          "sample_standard_deviation": 0.0178284389997873,
+          "p10": 0.4027322580645162,
+          "p90": 0.4449387096774194,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 177.63
+            },
+            {
+              "year": 1992,
+              "value": 76.72
+            },
+            {
+              "year": 1993,
+              "value": 276.55
+            },
+            {
+              "year": 1994,
+              "value": 274.94
+            },
+            {
+              "year": 1995,
+              "value": 77.65
+            },
+            {
+              "year": 1996,
+              "value": 159.85
+            },
+            {
+              "year": 1997,
+              "value": 139.57999999999998
+            },
+            {
+              "year": 1998,
+              "value": 77.9
+            },
+            {
+              "year": 1999,
+              "value": 340.32
+            },
+            {
+              "year": 2000,
+              "value": 39.470000000000006
+            },
+            {
+              "year": 2001,
+              "value": 146.76999999999998
+            },
+            {
+              "year": 2002,
+              "value": 165.13
+            },
+            {
+              "year": 2003,
+              "value": 364.94
+            },
+            {
+              "year": 2004,
+              "value": 166.2
+            },
+            {
+              "year": 2005,
+              "value": 287.76
+            },
+            {
+              "year": 2006,
+              "value": 166.51
+            },
+            {
+              "year": 2007,
+              "value": 289.5
+            },
+            {
+              "year": 2008,
+              "value": 301.23
+            },
+            {
+              "year": 2009,
+              "value": 88.31
+            },
+            {
+              "year": 2010,
+              "value": 150.1
+            },
+            {
+              "year": 2011,
+              "value": 265.19
+            },
+            {
+              "year": 2012,
+              "value": 188.44
+            },
+            {
+              "year": 2013,
+              "value": 86.60000000000001
+            },
+            {
+              "year": 2014,
+              "value": 258.68
+            },
+            {
+              "year": 2015,
+              "value": 60.74
+            },
+            {
+              "year": 2016,
+              "value": 2.7900000000000014
+            },
+            {
+              "year": 2017,
+              "value": 97.57
+            },
+            {
+              "year": 2018,
+              "value": 181.71
+            },
+            {
+              "year": 2019,
+              "value": 475.92
+            },
+            {
+              "year": 2020,
+              "value": 50.720000000000006
+            }
+          ],
+          "missing_years": [],
+          "mean": 181.18066666666667,
+          "sample_standard_deviation": 111.38723919153685,
+          "p10": 59.73800000000001,
+          "p90": 305.13900000000007,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 11,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 20.98
+            },
+            {
+              "year": 1992,
+              "value": 21.06
+            },
+            {
+              "year": 1993,
+              "value": 21.30666666666667
+            },
+            {
+              "year": 1994,
+              "value": 21.123333333333335
+            },
+            {
+              "year": 1995,
+              "value": 20.946666666666665
+            },
+            {
+              "year": 1996,
+              "value": 20.853333333333335
+            },
+            {
+              "year": 1997,
+              "value": 21.726666666666667
+            },
+            {
+              "year": 1998,
+              "value": 21.026666666666664
+            },
+            {
+              "year": 1999,
+              "value": 20.636666666666667
+            },
+            {
+              "year": 2000,
+              "value": 21.21333333333333
+            },
+            {
+              "year": 2001,
+              "value": 21.34333333333333
+            },
+            {
+              "year": 2002,
+              "value": 21.653333333333332
+            },
+            {
+              "year": 2003,
+              "value": 21.196666666666665
+            },
+            {
+              "year": 2004,
+              "value": 21.48
+            },
+            {
+              "year": 2005,
+              "value": 20.92
+            },
+            {
+              "year": 2006,
+              "value": 21.709999999999997
+            },
+            {
+              "year": 2007,
+              "value": 21.10666666666667
+            },
+            {
+              "year": 2008,
+              "value": 21.39
+            },
+            {
+              "year": 2009,
+              "value": 21.976666666666667
+            },
+            {
+              "year": 2010,
+              "value": 21.490000000000002
+            },
+            {
+              "year": 2011,
+              "value": 21.316666666666666
+            },
+            {
+              "year": 2012,
+              "value": 21.43
+            },
+            {
+              "year": 2013,
+              "value": 21.94
+            },
+            {
+              "year": 2014,
+              "value": 21.90666666666667
+            },
+            {
+              "year": 2015,
+              "value": 22.009999999999998
+            },
+            {
+              "year": 2016,
+              "value": 22.06
+            },
+            {
+              "year": 2017,
+              "value": 22.13
+            },
+            {
+              "year": 2018,
+              "value": 22.209999999999997
+            },
+            {
+              "year": 2019,
+              "value": 22.759999999999998
+            },
+            {
+              "year": 2020,
+              "value": 22.296666666666667
+            }
+          ],
+          "missing_years": [],
+          "mean": 21.506666666666668,
+          "sample_standard_deviation": 0.5078276172963504,
+          "p10": 20.944,
+          "p90": 22.137999999999998,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 94.8
+            },
+            {
+              "year": 1992,
+              "value": 226.4
+            },
+            {
+              "year": 1993,
+              "value": 211.7
+            },
+            {
+              "year": 1994,
+              "value": 142.1
+            },
+            {
+              "year": 1995,
+              "value": 188.7
+            },
+            {
+              "year": 1996,
+              "value": 111.3
+            },
+            {
+              "year": 1997,
+              "value": 226.7
+            },
+            {
+              "year": 1998,
+              "value": 198.9
+            },
+            {
+              "year": 1999,
+              "value": 95.9
+            },
+            {
+              "year": 2000,
+              "value": 84.5
+            },
+            {
+              "year": 2001,
+              "value": 151.0
+            },
+            {
+              "year": 2002,
+              "value": 143.3
+            },
+            {
+              "year": 2003,
+              "value": 89.10000000000001
+            },
+            {
+              "year": 2004,
+              "value": 141.1
+            },
+            {
+              "year": 2005,
+              "value": 312.5
+            },
+            {
+              "year": 2006,
+              "value": 263.3
+            },
+            {
+              "year": 2007,
+              "value": 91.6
+            },
+            {
+              "year": 2008,
+              "value": 73.2
+            },
+            {
+              "year": 2009,
+              "value": 395.3
+            },
+            {
+              "year": 2010,
+              "value": 374.5
+            },
+            {
+              "year": 2011,
+              "value": 249.6
+            },
+            {
+              "year": 2012,
+              "value": 69.8
+            },
+            {
+              "year": 2013,
+              "value": 73.9
+            },
+            {
+              "year": 2014,
+              "value": 119.8
+            },
+            {
+              "year": 2015,
+              "value": 344.3
+            },
+            {
+              "year": 2016,
+              "value": 40.5
+            },
+            {
+              "year": 2017,
+              "value": 126.7
+            },
+            {
+              "year": 2018,
+              "value": 133.2
+            },
+            {
+              "year": 2019,
+              "value": 148.5
+            },
+            {
+              "year": 2020,
+              "value": 112.7
+            }
+          ],
+          "missing_years": [],
+          "mean": 167.83,
+          "sample_standard_deviation": 94.62769569794801,
+          "p10": 73.83000000000001,
+          "p90": 315.68000000000006,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.40436666666666665
+            },
+            {
+              "year": 1992,
+              "value": 0.41140000000000004
+            },
+            {
+              "year": 1993,
+              "value": 0.4149333333333333
+            },
+            {
+              "year": 1994,
+              "value": 0.39103333333333334
+            },
+            {
+              "year": 1995,
+              "value": 0.4107
+            },
+            {
+              "year": 1996,
+              "value": 0.37703333333333333
+            },
+            {
+              "year": 1997,
+              "value": 0.43263333333333337
+            },
+            {
+              "year": 1998,
+              "value": 0.4057
+            },
+            {
+              "year": 1999,
+              "value": 0.3909
+            },
+            {
+              "year": 2000,
+              "value": 0.3256
+            },
+            {
+              "year": 2001,
+              "value": 0.42113333333333336
+            },
+            {
+              "year": 2002,
+              "value": 0.405
+            },
+            {
+              "year": 2003,
+              "value": 0.3857
+            },
+            {
+              "year": 2004,
+              "value": 0.40080000000000005
+            },
+            {
+              "year": 2005,
+              "value": 0.4306
+            },
+            {
+              "year": 2006,
+              "value": 0.4378
+            },
+            {
+              "year": 2007,
+              "value": 0.3661333333333333
+            },
+            {
+              "year": 2008,
+              "value": 0.33876666666666666
+            },
+            {
+              "year": 2009,
+              "value": 0.4239
+            },
+            {
+              "year": 2010,
+              "value": 0.4484333333333333
+            },
+            {
+              "year": 2011,
+              "value": 0.40166666666666667
+            },
+            {
+              "year": 2012,
+              "value": 0.3694
+            },
+            {
+              "year": 2013,
+              "value": 0.36283333333333334
+            },
+            {
+              "year": 2014,
+              "value": 0.3894
+            },
+            {
+              "year": 2015,
+              "value": 0.4423666666666667
+            },
+            {
+              "year": 2016,
+              "value": 0.3284333333333333
+            },
+            {
+              "year": 2017,
+              "value": 0.39476666666666665
+            },
+            {
+              "year": 2018,
+              "value": 0.35673333333333335
+            },
+            {
+              "year": 2019,
+              "value": 0.41956666666666664
+            },
+            {
+              "year": 2020,
+              "value": 0.3875
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.3958411111111111,
+          "sample_standard_deviation": 0.03212829368995251,
+          "p10": 0.3549366666666667,
+          "p90": 0.43315000000000003,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": -4.9200000000000035
+            },
+            {
+              "year": 1992,
+              "value": 132.52
+            },
+            {
+              "year": 1993,
+              "value": 116.21
+            },
+            {
+              "year": 1994,
+              "value": 44.23
+            },
+            {
+              "year": 1995,
+              "value": 95.36
+            },
+            {
+              "year": 1996,
+              "value": 11.939999999999998
+            },
+            {
+              "year": 1997,
+              "value": 133.88
+            },
+            {
+              "year": 1998,
+              "value": 104.01
+            },
+            {
+              "year": 1999,
+              "value": -9.629999999999997
+            },
+            {
+              "year": 2000,
+              "value": -23.98
+            },
+            {
+              "year": 2001,
+              "value": 51.190000000000005
+            },
+            {
+              "year": 2002,
+              "value": 43.12
+            },
+            {
+              "year": 2003,
+              "value": -13.159999999999998
+            },
+            {
+              "year": 2004,
+              "value": 36.94
+            },
+            {
+              "year": 2005,
+              "value": 226.78
+            },
+            {
+              "year": 2006,
+              "value": 177.55
+            },
+            {
+              "year": 2007,
+              "value": -20.970000000000002
+            },
+            {
+              "year": 2008,
+              "value": -28.84
+            },
+            {
+              "year": 2009,
+              "value": 306.9
+            },
+            {
+              "year": 2010,
+              "value": 296.86
+            },
+            {
+              "year": 2011,
+              "value": 148.08
+            },
+            {
+              "year": 2012,
+              "value": -43.87
+            },
+            {
+              "year": 2013,
+              "value": -29.44
+            },
+            {
+              "year": 2014,
+              "value": 18.270000000000003
+            },
+            {
+              "year": 2015,
+              "value": 267.07
+            },
+            {
+              "year": 2016,
+              "value": -72.15
+            },
+            {
+              "year": 2017,
+              "value": 31.330000000000002
+            },
+            {
+              "year": 2018,
+              "value": 31.15
+            },
+            {
+              "year": 2019,
+              "value": 46.65
+            },
+            {
+              "year": 2020,
+              "value": 12.049999999999995
+            }
+          ],
+          "missing_years": [],
+          "mean": 69.50433333333334,
+          "sample_standard_deviation": 102.5839888926456,
+          "p10": -28.9,
+          "p90": 230.80900000000005,
+          "reason": null
+        }
+      }
+    },
+    {
+      "calendar_month": 12,
+      "variables": {
+        "temperature_mean_c": {
+          "unit": "degC",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 19.896774193548385
+            },
+            {
+              "year": 1992,
+              "value": 19.62258064516129
+            },
+            {
+              "year": 1993,
+              "value": 20.17096774193548
+            },
+            {
+              "year": 1994,
+              "value": 20.338709677419356
+            },
+            {
+              "year": 1995,
+              "value": 19.65806451612903
+            },
+            {
+              "year": 1996,
+              "value": 19.509677419354837
+            },
+            {
+              "year": 1997,
+              "value": 21.503225806451614
+            },
+            {
+              "year": 1998,
+              "value": 20.27741935483871
+            },
+            {
+              "year": 1999,
+              "value": 20.103225806451615
+            },
+            {
+              "year": 2000,
+              "value": 19.774193548387096
+            },
+            {
+              "year": 2001,
+              "value": 20.229032258064517
+            },
+            {
+              "year": 2002,
+              "value": 20.532258064516128
+            },
+            {
+              "year": 2003,
+              "value": 20.051612903225806
+            },
+            {
+              "year": 2004,
+              "value": 20.825806451612905
+            },
+            {
+              "year": 2005,
+              "value": 20.596774193548388
+            },
+            {
+              "year": 2006,
+              "value": 20.532258064516128
+            },
+            {
+              "year": 2007,
+              "value": 20.93548387096774
+            },
+            {
+              "year": 2008,
+              "value": 20.74516129032258
+            },
+            {
+              "year": 2009,
+              "value": 21.480645161290322
+            },
+            {
+              "year": 2010,
+              "value": 20.467741935483872
+            },
+            {
+              "year": 2011,
+              "value": 20.419354838709676
+            },
+            {
+              "year": 2012,
+              "value": 21.274193548387096
+            },
+            {
+              "year": 2013,
+              "value": 20.700000000000003
+            },
+            {
+              "year": 2014,
+              "value": 21.55483870967742
+            },
+            {
+              "year": 2015,
+              "value": 22.116129032258065
+            },
+            {
+              "year": 2016,
+              "value": 20.870967741935484
+            },
+            {
+              "year": 2017,
+              "value": 20.751612903225805
+            },
+            {
+              "year": 2018,
+              "value": 21.458064516129035
+            },
+            {
+              "year": 2019,
+              "value": 21.703225806451613
+            },
+            {
+              "year": 2020,
+              "value": 21.22258064516129
+            }
+          ],
+          "missing_years": [],
+          "mean": 20.644086021505377,
+          "sample_standard_deviation": 0.6730956531739545,
+          "p10": 19.76258064516129,
+          "p90": 21.508387096774193,
+          "reason": null
+        },
+        "precipitation_sum_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 40.4
+            },
+            {
+              "year": 1992,
+              "value": 5.5
+            },
+            {
+              "year": 1993,
+              "value": 98.9
+            },
+            {
+              "year": 1994,
+              "value": 10.0
+            },
+            {
+              "year": 1995,
+              "value": 0.6
+            },
+            {
+              "year": 1996,
+              "value": 180.6
+            },
+            {
+              "year": 1997,
+              "value": 79.5
+            },
+            {
+              "year": 1998,
+              "value": 110.39999999999999
+            },
+            {
+              "year": 1999,
+              "value": 19.2
+            },
+            {
+              "year": 2000,
+              "value": 29.1
+            },
+            {
+              "year": 2001,
+              "value": 55.3
+            },
+            {
+              "year": 2002,
+              "value": 18.7
+            },
+            {
+              "year": 2003,
+              "value": 3.6
+            },
+            {
+              "year": 2004,
+              "value": 16.0
+            },
+            {
+              "year": 2005,
+              "value": 80.2
+            },
+            {
+              "year": 2006,
+              "value": 11.100000000000001
+            },
+            {
+              "year": 2007,
+              "value": 69.8
+            },
+            {
+              "year": 2008,
+              "value": 35.6
+            },
+            {
+              "year": 2009,
+              "value": 146.2
+            },
+            {
+              "year": 2010,
+              "value": 76.3
+            },
+            {
+              "year": 2011,
+              "value": 17.2
+            },
+            {
+              "year": 2012,
+              "value": 40.2
+            },
+            {
+              "year": 2013,
+              "value": 16.7
+            },
+            {
+              "year": 2014,
+              "value": 120.9
+            },
+            {
+              "year": 2015,
+              "value": 119.8
+            },
+            {
+              "year": 2016,
+              "value": 85.2
+            },
+            {
+              "year": 2017,
+              "value": 90.10000000000001
+            },
+            {
+              "year": 2018,
+              "value": 72.8
+            },
+            {
+              "year": 2019,
+              "value": 114.5
+            },
+            {
+              "year": 2020,
+              "value": 137.0
+            }
+          ],
+          "missing_years": [],
+          "mean": 63.38,
+          "sample_standard_deviation": 49.36030374913526,
+          "p10": 9.55,
+          "p90": 122.51000000000003,
+          "reason": null
+        },
+        "soil_moisture_mean_m3_m3": {
+          "unit": "m3/m3",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": 0.2928709677419355
+            },
+            {
+              "year": 1992,
+              "value": 0.2960967741935484
+            },
+            {
+              "year": 1993,
+              "value": 0.3793870967741935
+            },
+            {
+              "year": 1994,
+              "value": 0.2610967741935484
+            },
+            {
+              "year": 1995,
+              "value": 0.275741935483871
+            },
+            {
+              "year": 1996,
+              "value": 0.3863548387096774
+            },
+            {
+              "year": 1997,
+              "value": 0.39180645161290323
+            },
+            {
+              "year": 1998,
+              "value": 0.37029032258064515
+            },
+            {
+              "year": 1999,
+              "value": 0.3169677419354839
+            },
+            {
+              "year": 2000,
+              "value": 0.3183225806451613
+            },
+            {
+              "year": 2001,
+              "value": 0.339741935483871
+            },
+            {
+              "year": 2002,
+              "value": 0.2782903225806452
+            },
+            {
+              "year": 2003,
+              "value": 0.2792903225806451
+            },
+            {
+              "year": 2004,
+              "value": 0.2582258064516129
+            },
+            {
+              "year": 2005,
+              "value": 0.37722580645161286
+            },
+            {
+              "year": 2006,
+              "value": 0.2959032258064516
+            },
+            {
+              "year": 2007,
+              "value": 0.2964516129032258
+            },
+            {
+              "year": 2008,
+              "value": 0.3330967741935484
+            },
+            {
+              "year": 2009,
+              "value": 0.3867741935483871
+            },
+            {
+              "year": 2010,
+              "value": 0.36374193548387096
+            },
+            {
+              "year": 2011,
+              "value": 0.3220967741935484
+            },
+            {
+              "year": 2012,
+              "value": 0.29638709677419356
+            },
+            {
+              "year": 2013,
+              "value": 0.2968387096774194
+            },
+            {
+              "year": 2014,
+              "value": 0.3728064516129032
+            },
+            {
+              "year": 2015,
+              "value": 0.3995806451612903
+            },
+            {
+              "year": 2016,
+              "value": 0.34896774193548386
+            },
+            {
+              "year": 2017,
+              "value": 0.35180645161290325
+            },
+            {
+              "year": 2018,
+              "value": 0.3423548387096774
+            },
+            {
+              "year": 2019,
+              "value": 0.3661290322580645
+            },
+            {
+              "year": 2020,
+              "value": 0.3839677419354839
+            }
+          ],
+          "missing_years": [],
+          "mean": 0.3326204301075269,
+          "sample_standard_deviation": 0.04352219018694958,
+          "p10": 0.27803548387096777,
+          "p90": 0.3863967741935484,
+          "reason": null
+        },
+        "precipitation_minus_reference_et0_mm": {
+          "unit": "mm",
+          "available": true,
+          "complete_year_count": 30,
+          "samples": [
+            {
+              "year": 1991,
+              "value": -75.14
+            },
+            {
+              "year": 1992,
+              "value": -114.75
+            },
+            {
+              "year": 1993,
+              "value": 0.40999999999999726
+            },
+            {
+              "year": 1994,
+              "value": -111.07
+            },
+            {
+              "year": 1995,
+              "value": -128.91
+            },
+            {
+              "year": 1996,
+              "value": 80.24
+            },
+            {
+              "year": 1997,
+              "value": -23.64
+            },
+            {
+              "year": 1998,
+              "value": 9.590000000000002
+            },
+            {
+              "year": 1999,
+              "value": -93.74
+            },
+            {
+              "year": 2000,
+              "value": -86.33
+            },
+            {
+              "year": 2001,
+              "value": -55.59
+            },
+            {
+              "year": 2002,
+              "value": -104.73
+            },
+            {
+              "year": 2003,
+              "value": -118.09
+            },
+            {
+              "year": 2004,
+              "value": -113.03
+            },
+            {
+              "year": 2005,
+              "value": -27.599999999999994
+            },
+            {
+              "year": 2006,
+              "value": -116.18
+            },
+            {
+              "year": 2007,
+              "value": -40.82
+            },
+            {
+              "year": 2008,
+              "value": -80.24
+            },
+            {
+              "year": 2009,
+              "value": 46.690000000000005
+            },
+            {
+              "year": 2010,
+              "value": -23.919999999999998
+            },
+            {
+              "year": 2011,
+              "value": -96.61
+            },
+            {
+              "year": 2012,
+              "value": -78.67999999999999
+            },
+            {
+              "year": 2013,
+              "value": -104.51
+            },
+            {
+              "year": 2014,
+              "value": 26.13
+            },
+            {
+              "year": 2015,
+              "value": 15.999999999999995
+            },
+            {
+              "year": 2016,
+              "value": -26.46
+            },
+            {
+              "year": 2017,
+              "value": -18.39
+            },
+            {
+              "year": 2018,
+              "value": -31.190000000000005
+            },
+            {
+              "year": 2019,
+              "value": 12.170000000000002
+            },
+            {
+              "year": 2020,
+              "value": 38.49
+            }
+          ],
+          "missing_years": [],
+          "mean": -47.99666666666667,
+          "sample_standard_deviation": 58.4008000260113,
+          "p10": -114.893,
+          "p90": 27.366000000000017,
+          "reason": null
+        }
+      }
+    }
+  ],
+  "available_feature_months": 48,
+  "historical_availability_verified": false,
+  "model_input": false,
+  "limitations": [
+    "Reanalysis at one requested centroid and provider grid point; not in-situ forest measurements.",
+    "Standardized departures are not SPI, SPEI, calibrated probabilities, or validated ecological drought diagnoses.",
+    "Temperature exceedance compares monthly mean daily temperature with the reference monthly 90th percentile; it is not a heatwave or daily-maximum index.",
+    "Reference ET0 describes reference-grass atmospheric demand, not actual forest water use; P minus ET0 is a climatic balance.",
+    "Thirty complete reference years is this implementation's conservative eligibility rule, not WMO-method certification or ecological validation.",
+    "Complete-case reference selection can bias a climatology when missingness is systematic; excluded years remain explicit for review.",
+    "Observation-date separation does not establish historical product availability: ERA5 vintages may have been revised after a historical cutoff.",
+    "Hashes establish local artifact consistency, not provider authenticity, source rights, or independent scientific validation."
+  ],
+  "artifact_sha256": "83fad9e111d1569f0aeb26327880761ac690abaeeadb5a5fd93154a065a2211a"
+}
