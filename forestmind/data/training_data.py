@@ -329,6 +329,11 @@ def audit_training_manifest(manifest_path: str | Path) -> tuple[dict, list[dict]
             raise ValueError("Region identity crosses protected splits")
         regions[region] = split
         validate_bbox(example.get("bbox", []))
+        if "annual_loss" in document["target_spec"]:
+            from forestmind.data.reference_review import _area_ha, TARGET
+            area = _area_ha(example["bbox"])
+            if abs(area / TARGET["spatial_unit_ha"] - 1) > TARGET["spatial_area_tolerance_fraction"]:
+                raise ValueError("Annual-loss sequences require the frozen 100 ha study footprint within 5 percent")
         cutoff, available = _date(example.get("cutoff")), _date(example.get("features_available_at"))
         if available > cutoff:
             raise ValueError("Features are not available by the prediction cutoff")
