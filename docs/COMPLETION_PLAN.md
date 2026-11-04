@@ -1,5 +1,13 @@
 # Completing ForestMind
 
+## November 5: external evidence and an actual baseline study
+
+ForestMind has now downloaded 10,339 published, visually interpreted global forest-reference points and completed a fixed retrospective experiment on 24,567 eligible point/year examples. Train/validation/calibration/test geography and years are separate; the 1,422 test examples contain 11 loss events across 77 geographic cells. All methods missed those events at the predeclared 0.5 threshold. This establishes an actual reproducible baseline result, including its limitations, rather than validated operational warning performance. See [PUBLIC_REFERENCES.md](PUBLIC_REFERENCES.md) and the executed record in [VALIDATION.md](VALIDATION.md).
+
+The real Mudumalai climate packet now contains 1991–2020 reference and 2021–2025 observations, supporting all 48 reference month/feature pairs and 240 observed departures. This closes the short-climate-history dependency for these standalone diagnostics, while optical history remains sparse. The separate optional [annual-loss model contract](ANNUAL_LOSS_MODEL.md) now connects area-fraction labels to masked training, checkpoint support, evaluation and validated inference. The public point labels cannot supply the primary 100 ha area measurements, so no real trained annual-area model is claimed.
+
+Public reference acquisition means the project need not wait entirely for user-provided data. Remaining dependencies are now specific: suitable area-based baseline/loss evidence, longer aligned optical/radar histories, a shared pretrained/multimodal comparison, useful calibrated future-risk performance and ecological intervention/tipping evidence. Published interpretations and retrospective history do not establish prospective availability or population calibration. Further experiments must preserve this study's frozen results instead of tuning its inspected test set.
+
 ## November 2026 continuation
 
 The new [ordered implementation plan](BUILD_PLAN_20261102.md) covers every original section and preserves the existing local stack. The first build adds reviewed annual-loss reference packets and source integrity, optional validation and historical-trend comparison, fuller event metrics and spatial-block resampling, frozen climate reference/departure tools, and explicit scenario assumption ranges. Actual verification is recorded in `VALIDATION.md`. All O01–O59 rows in the authoritative matrix now have a Complete/Incomplete/Blocked verdict; an implemented interface alone does not close a scientific requirement.
