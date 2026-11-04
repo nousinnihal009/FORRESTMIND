@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "dataset_id": "guo-global-forest-reference-v1.1",
+  "source_record_id": 6403863,
+  "downloaded_at": "2026-11-04T19:57:34.277917+00:00",
+  "metadata_url": "https://zenodo.org/api/records/6403863",
+  "archive_url": "https://zenodo.org/api/records/6403863/files/global%20forest%20reference%20set%20version1.1.zip/content",
+  "files": {
+    "metadata.json": {
+      "sha256": "f05145ba28121d10c18e2218af7d5f1e2774b1297d23ccf503859ca61dbe9730",
+      "bytes": 7686
+    },
+    "reference.zip": {
+      "sha256": "d868e1a51a94e14d1d77a4fb4a8f298eaf841aeb2e3ac82643562296e44d0266",
+      "bytes": 229591,
+      "provider_md5": "e56c8251ca391693674bf00a9a1bfb77"
+    }
+  },
+  "download_tool_sha256": "3d556b0c6206f11172a76590957e8ebf7c5264a287dca34a25c6cddaf105f92e"
+}
