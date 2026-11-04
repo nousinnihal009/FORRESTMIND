@@ -66,6 +66,14 @@ def load_sequence(path: str | Path, config: dict, *, observed_through: str,
     with np.load(path, allow_pickle=False) as archive:
         # Read every field: hidden object arrays must also fail safe loading.
         data = {key: archive[key].copy() for key in archive.files}
+    from forestmind.models.heads.annual_loss import annual_loss_contract
+    if annual_loss_contract(config) is not None:
+        from forestmind.data.reference_review import _area_ha, TARGET
+        if "bbox" not in data or data["bbox"].shape != (4,):
+            raise ValueError("Annual-loss inference requires an explicit 100 ha bbox")
+        area = _area_ha(data["bbox"].tolist())
+        if abs(area / TARGET["spatial_unit_ha"] - 1) > TARGET["spatial_area_tolerance_fraction"]:
+            raise ValueError("Annual-loss inference bbox must be 100 ha within 5 percent")
     missing = set(REQUIRED_KEYS) - set(data)
     if missing:
         raise ValueError("Input NPZ requires explicit arrays: " + ", ".join(sorted(missing)))
@@ -254,9 +262,12 @@ def predict_checkpoint(checkpoint_path: str | Path, input_path: str | Path, *,
     if not info["sar_timesteps"]:
         caveats.append("No SAR observations were supplied; the SAR stream is explicitly masked as unavailable.")
     support = checkpoint.get("supervised_targets", data_config.get("supervised_targets"))
+    annual_spec = model.annual_loss_spec
     if support is not None:
         expected = {"health_state": None, "health_score": None, "drivers": 8,
                     "driver_strengths": 8, "trajectory": len(horizons)}
+        if annual_spec is not None:
+            expected["annual_loss"] = None
         if not isinstance(support, dict) or set(support) != set(expected):
             raise ValueError("supervised_targets must declare support for each output head")
         for key, count in expected.items():
@@ -297,6 +308,26 @@ def predict_checkpoint(checkpoint_path: str | Path, input_path: str | Path, *,
         for index, point in enumerate(prediction["trajectory"]):
             if not support["trajectory"][index]:
                 point.update(score=None, stddev=None)
+    if annual_spec is not None:
+        from forestmind.models.heads.annual_loss import annual_loss_target_date
+        target_date, reason, fraction = None, None, None
+        counts = checkpoint.get("training_target_counts", {}).get("annual_loss")
+        trained = checkpoint.get("supervised_targets", {}).get("annual_loss") is True and type(counts) is int and counts > 0
+        try:
+            target_date = annual_loss_target_date(observed_through, annual_spec["horizon_days"])
+        except ValueError:
+            reason = "This checkpoint requires a December 31 origin with its exact annual horizon."
+        if reason is None and not trained:
+            reason = "No positive supervised training count with an enabled annual-loss loss was recorded."
+        if reason is None:
+            value = outputs["annual_loss"]["mean"]
+            if value.shape != (1,) or not torch.isfinite(value).all() or ((value < 0) | (value > 1)).any():
+                raise ValueError("Annual-loss output violates the scalar fraction contract")
+            fraction = float(value[0])
+        report["predictions"]["annual_loss"] = {"fraction": fraction, "units": "fraction_0_1",
+            "protocol_id": annual_spec["id"], "horizon_days": annual_spec["horizon_days"],
+            "target_date": target_date, "calibration": "uncalibrated", "reason": reason}
+        caveats.append("Annual loss estimates a gross tree-cover-loss area fraction, not an event probability, forest health or a calibrated risk.")
     if sha256_file(checkpoint_path) != checkpoint_hash or sha256_file(input_path) != info["sha256"]:
         raise ValueError("A source file changed during inference; rerun with stable input files")
     return InferenceReport.model_validate(report).model_dump(mode="json", exclude_none=False)
