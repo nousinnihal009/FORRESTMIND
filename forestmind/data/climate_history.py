@@ -99,9 +99,64 @@ def _write_progress(value, path):
         stream.flush()
         os.fsync(stream.fileno())
     try:
-        os.replace(temporary, path)
+        for attempt in range(5):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError as error:
+                # Windows scanners/readers can briefly deny atomic replacement.
+                # Retry this metadata write only; never repeat a provider request.
+                if getattr(error, "winerror", None) not in {5, 32, 33} or attempt == 4:
+                    raise
+                sleep(.05 * (attempt + 1))
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def verify_climate_history(output_directory):
+    """Read-only audit of completed evidence, including an older pinned builder.
+
+    A stored builder fingerprint remains historical provenance. Current source
+    verification never rewrites that fingerprint or relaxes resume's code pin.
+    """
+    root = Path(output_directory).resolve()
+    plan, _ = _read(root / "plan.json")
+    progress, _ = _read(root / "progress.json")
+    if progress.get("plan_sha256") != plan["artifact_sha256"] or progress.get("status") != "complete":
+        raise ValueError("A complete climate history matching its plan is required")
+    windows = plan.get("windows")
+    if not isinstance(windows, list) or not 1 <= len(windows) <= 12 or len(progress.get("windows", [])) != len(windows):
+        raise ValueError("Invalid climate history window inventory")
+    sources, identity = {}, None
+    for window, row in zip(windows, progress["windows"]):
+        name = window.get("file")
+        if (not isinstance(name, str) or Path(name).name != name or "/" in name or "\\" in name
+                or row.get("status") != "accepted" or any(row.get(k) != v for k, v in window.items())):
+            raise ValueError("Invalid accepted climate source record")
+        path = root / name
+        if path.is_symlink():
+            raise ValueError("Climate sources must not be symlinks")
+        context, metadata = _read(path)
+        if metadata["file_sha256"] != row.get("file_sha256") or metadata["bytes"] != row.get("bytes"):
+            raise ValueError("Accepted climate source bytes changed")
+        current = _matching_source(context, window, plan["bbox"])
+        if identity is not None and current != identity:
+            raise ValueError("Climate sources have different grid identities")
+        identity = current
+        sources[name] = context
+    reference = freeze_climatology([sources[r["file"]] for r in windows if r["role"] == "reference"],
+                                   baseline_start=plan["baseline_start"], baseline_end=plan["baseline_end"])
+    departures = analyze_climate([sources[r["file"]] for r in windows if r["role"] == "observed"], reference,
+                                 cutoff=plan["observed_end"])
+    for name, expected, key in (("reference.json", reference, "reference_sha256"),
+                                ("departures.json", departures, "departures_sha256")):
+        actual, _ = _read(root / name)
+        if actual != expected or progress.get(key) != expected["artifact_sha256"]:
+            raise ValueError("Climate diagnostic artifact differs from its source evidence")
+    return {"status": "verified", "accepted_windows": len(windows), "requests_this_invocation": 0,
+            "available_reference_feature_months": reference["available_feature_months"],
+            "observed_months": len(departures["months"]),
+            "available_observed_feature_months": sum(v["available"] for m in departures["months"] for v in m["variables"].values())}
 
 
 def _matching_source(context, window, bbox):
