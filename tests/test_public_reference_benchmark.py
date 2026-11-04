@@ -61,17 +61,23 @@ def test_unknown_outcomes_are_excluded_and_do_not_become_negative():
     assert audit["excluded"]["origins_with_unknown_outcome"] >= 1
 
 
-@pytest.mark.parametrize("mutation", ["id", "coordinates", "invalid_coordinate"])
+@pytest.mark.parametrize("mutation", ["id", "invalid_coordinate"])
 def test_bad_or_duplicate_spatial_identity_is_rejected(mutation):
     packet = fixture_packet()
     if mutation == "id":
         packet["samples"][1]["id"] = packet["samples"][0]["id"]
-    elif mutation == "coordinates":
-        packet["samples"][1].update(lon=packet["samples"][0]["lon"], lat=packet["samples"][0]["lat"])
     else:
         packet["samples"][0]["lat"] = float("nan")
     with pytest.raises(ValueError):
         pb.build_examples(packet)
+
+
+def test_duplicate_coordinates_exclude_all_copies_without_consulting_labels():
+    packet = fixture_packet()
+    packet["samples"][1].update(lon=packet["samples"][0]["lon"], lat=packet["samples"][0]["lat"])
+    rows, audit = pb.build_examples(packet)
+    assert audit["excluded"]["samples_at_duplicated_coordinates"] == 2
+    assert not {s["id"] for s in packet["samples"][:2]} & {r["sample_id"] for r in rows}
 
 
 def test_metrics_known_values_and_missing_event_day():
