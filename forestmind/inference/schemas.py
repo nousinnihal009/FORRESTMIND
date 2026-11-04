@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import math
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, model_serializer
 
 
 HEALTH_NAMES = ("Healthy", "Stressed", "Degraded", "Severely Degraded", "Cleared")
@@ -130,10 +130,39 @@ class TrajectoryPrediction(ReportModel):
         return self
 
 
+class AnnualLossPrediction(ReportModel):
+    fraction: Fraction | None
+    units: Literal["fraction_0_1"]
+    protocol_id: Literal["annual-gross-tree-cover-loss-v1"]
+    horizon_days: Annotated[int, Field(strict=True, ge=365, le=366)]
+    target_date: str | None
+    calibration: Literal["uncalibrated"]
+    reason: str | None
+
+    @model_validator(mode="after")
+    def available_value(self):
+        if self.target_date is not None:
+            calendar_date(self.target_date)
+        if self.fraction is None:
+            if not self.reason:
+                raise ValueError("Unavailable annual loss requires its reason")
+        elif self.target_date is None or self.reason is not None:
+            raise ValueError("Annual-loss estimate requires a target date and no unavailable reason")
+        return self
+
+
 class Predictions(ReportModel):
     health: HealthPrediction
     drivers: list[DriverPrediction] = Field(min_length=8, max_length=8)
     trajectory: list[TrajectoryPrediction] = Field(min_length=1, max_length=64)
+    annual_loss: AnnualLossPrediction | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_shape(self, handler):
+        value = handler(self)
+        if self.annual_loss is None:
+            value.pop("annual_loss", None)
+        return value
 
     @model_validator(mode="after")
     def canonical_dimensions(self):
@@ -179,6 +208,12 @@ class InferenceReport(ReportModel):
 
     @model_validator(mode="after")
     def timing(self):
+        annual = self.predictions.annual_loss
+        if annual is not None and annual.target_date is not None:
+            origin = date.fromisoformat(self.observed_through)
+            expected = origin + timedelta(days=annual.horizon_days)
+            if (origin.month, origin.day) != (12, 31) or expected != date(origin.year + 1, 12, 31) or annual.target_date != expected.isoformat():
+                raise ValueError("Annual-loss prediction must cover the exact following calendar year")
         if self.input.observed_start and self.input.observed_start > self.observed_through:
             raise ValueError("Input start date cannot follow observed_through")
         if self.observed_through > datetime.fromisoformat(self.created_at).astimezone(timezone.utc).date().isoformat():
