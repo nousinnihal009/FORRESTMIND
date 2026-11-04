@@ -208,6 +208,10 @@ class ForestMindLoss(nn.Module):
         self.w_health = weights.get("task_health", 1.0)
         self.w_attribution = weights.get("task_attribution", 1.0)
         self.w_trajectory = weights.get("task_trajectory", 1.5)
+        self.w_annual_loss = weights.get("annual_loss_mse", 1.0)
+        import math
+        if type(self.w_annual_loss) not in (float, int) or not math.isfinite(self.w_annual_loss) or self.w_annual_loss < 0:
+            raise ValueError("annual_loss_mse weight must be finite and nonnegative")
 
     def forward(
         self,
@@ -261,6 +265,18 @@ class ForestMindLoss(nn.Module):
             + self.w_attribution * attr_losses["attribution_total"]
             + self.w_trajectory * traj_losses["trajectory_total"]
         )
+        if "annual_loss" in targets:
+            mask = masks["annual_loss"]
+            if "annual_loss" not in outputs:
+                if mask.any():
+                    raise ValueError("annual_loss labels require the separate enabled head")
+            else:
+                prediction = outputs["annual_loss"]["mean"]
+                if prediction.shape != targets["annual_loss"].shape:
+                    raise ValueError("annual_loss prediction and target shapes must match")
+                loss = ((prediction[mask] - targets["annual_loss"][mask]) ** 2).mean() if mask.any() else prediction[:0].sum()
+                all_losses["annual_loss_mse"] = loss
+                total = total + self.w_annual_loss * loss
         all_losses["total"] = total
 
         return all_losses
