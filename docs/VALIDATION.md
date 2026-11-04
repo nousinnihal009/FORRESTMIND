@@ -1,5 +1,17 @@
 # Build verification
 
+## Reference studies, frozen climate diagnostics and scenario ranges — November 4, 2026
+
+This increment defines the annual gross tree-cover-loss intake and review contract, preserves copied evidence and review availability, extends protected baseline comparisons and event metrics, adds spatial-block improvement intervals, freezes sufficiently long climate references, and displays explicit scenario assumption ranges. The existing FastAPI/SQLite/plain-JavaScript architecture is retained. Scope and remaining requirements are recorded in `BUILD_PLAN_20261102.md`, `REQUIREMENTS_MATRIX.md`, `DATA_CONTRIBUTION.md` and `CLIMATE_BASELINE.md`.
+
+- Full regression: **1,057 passed in 200.87 seconds**, no failures or skips, exit status 0. The run used `PYTHONPATH=artifacts/geo-validation` and `python -m pytest tests -q --tb=short -p no:cacheprovider --basetemp=artifacts/pytest-research-full-20261104`. Complete log: `artifacts/regression-research-20261104.txt`. Existing geospatial dependencies and isolated local API tests ran outside the Windows sandbox using the workspace temporary directory.
+- Focused reference verification: **66 passed in 58.91 seconds**, covering `test_reference_review.py`, `test_reference_statistics.py` and `test_reference_experiment.py`. The run used `artifacts/pytest-reference-reviewer-20261104` as its temporary directory. Focused checks overlap the full suite; their counts are not added to its total.
+- Focused climate verification: **48 passed in 4.75 seconds**, covering `test_climatology.py` with `artifacts/pytest-climatology-final-20261104`. Rehashed references with annual samples outside their declared source windows are rejected; adjacent windows covering a full month remain valid.
+- Every web JavaScript file passed `node --check`; `git diff --check` found no whitespace errors. The matrix contains 59 unique O01–O59 rows with explicit Complete/Incomplete/Blocked statuses.
+- The actual empty reference template produced `artifacts/reference-readiness-20261104/intake-report.json`: zero submitted/eligible labels, `ready_for_baseline_experiment: false`, and no `references.json`. This verifies refusal to invent training evidence; it is not a populated scientific dataset.
+
+Tests use controlled software fixtures, including generated climate histories and labels, and establish software behavior only. Source hashes and reviewer declarations cannot authenticate ecological truth. The available pilot climate history remains insufficient for the frozen reference. No real model was trained or evaluated, long climate dataset downloaded, existing observation records changed, or service deployed for this increment. Scenario ranges are arithmetic sensitivity to stated inputs, not calibrated uncertainty or causal effects. New UI behavior is covered by executable JavaScript and isolated API tests; actual browser layout was not reverified during this increment. Previously running services and packaged wheels may predate the current source.
+
 ## Download reliability and historical coverage — October 31, 2026
 
 - **935 tests passed in 216.33 seconds**, no failures or skips, with the existing raster/STAC dependency directory enabled. Command: `python -m pytest tests -q --tb=short -p no:cacheprovider --basetemp=artifacts/pytest-reliability-full-20261031`. Log: `artifacts/regression-reliability-20261031.txt`. Every web JavaScript file also passed `node --check`; `git diff --check` was clean.
