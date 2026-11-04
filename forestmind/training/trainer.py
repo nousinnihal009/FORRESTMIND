@@ -172,6 +172,8 @@ class ForestMindTrainer:
             "driver_strengths": batch["driver_strengths"].to(self.device),
             "trajectory": batch["trajectory"].to(self.device),
         }
+        if "annual_loss" in batch:
+            targets["annual_loss"] = batch["annual_loss"].to(self.device)
         from forestmind.training.targets import MASK_KEYS
         for key in MASK_KEYS:
             if key in batch:
@@ -292,6 +294,7 @@ class ForestMindTrainer:
                 "drivers": self.criterion.w_attribution * self.criterion.attribution_loss.bce_weight > 0,
                 "driver_strengths": self.criterion.w_attribution * self.criterion.attribution_loss.strength_weight > 0,
                 "trajectory": self.criterion.w_trajectory > 0 and (self.criterion.trajectory_loss.mse_weight > 0 or self.criterion.trajectory_loss.huber_weight > 0),
+                "annual_loss": self.model.annual_loss_spec is not None and self.criterion.w_annual_loss > 0,
             }
             state["supervised_targets"] = {key: ((value > 0) & enabled[key]).tolist() for key, value in self.training_target_counts.items()}
         if self.scheduler is not None:
@@ -305,6 +308,9 @@ class ForestMindTrainer:
     def load_checkpoint(self, path: str):
         """Load model checkpoint."""
         state = torch.load(path, map_location=self.device, weights_only=True)
+        from forestmind.models.heads.annual_loss import annual_loss_contract
+        if annual_loss_contract(state.get("config", {})) != annual_loss_contract(self.config):
+            raise ValueError("Resumed annual-loss target must match the checkpoint contract")
         self.model.load_state_dict(state["model_state_dict"])
         self.optimizer.load_state_dict(state["optimizer_state_dict"])
         self.current_epoch = state.get("epoch", -1) + 1
