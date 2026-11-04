@@ -67,6 +67,7 @@ Limits include a 25 km² maximum rectangular AOI, 60 months per acquisition requ
 | Model runs | Validated, persisted inference reports with checkpoint/input hashes, class/driver scores and configured horizons |
 | Reproducible evaluation | JSON metrics, raw predictions and targets, split identity, artifact/code hashes and per-horizon errors |
 | Real-reference experiments | Frozen targets/datasets, buffered holdouts, identical-example persistence/seasonal/regularized/random-forest/boosted baselines, calibration and event metrics; independent real reference data must be supplied |
+| Frozen climate diagnostics | Local CLI for complete-month temperature, rain, soil moisture and climatic-balance departures against sufficiently long, separate reference histories; no drought or heatwave diagnosis |
 | Operations | Local HTTP boundary, diagnostics, migrations, database snapshots, verified full workspace backup/restore and opt-in signed webhook outbox |
 
 ## Import observations
@@ -162,6 +163,8 @@ python scripts/review_references.py check --manifest data/my-reference-study/int
 
 The empty template intentionally reports that references are missing. Once reviewed real evidence is supplied, the existing baseline harness can compare dated historical-trend predictions alongside its five existing baselines, retain an optional validation partition, report additional event/calibration metrics, and estimate paired improvement intervals across separated spatial blocks. No real predictive study is bundled. See the [prioritized build plan](docs/BUILD_PLAN_20261102.md) and [requirements matrix](docs/REQUIREMENTS_MATRIX.md) for the remaining work.
 
+The [frozen climate diagnostic guide](docs/CLIMATE_BASELINE.md) describes a separate local workflow for saved ERA5 sources. `scripts/climate_diagnostics.py freeze` requires a declared 30–60-year reference, with at least 30 complete yearly observations for each calendar month and feature. `analyze` applies that reference only to later observations through an explicit cutoff. Short histories, incomplete months and zero reference variance remain explicit. The current pilot has insufficient climate history; no real climate reference or validated drought indicator is bundled.
+
 The Scenario lab also accepts optional lower/upper assumptions for five-year comparisons. Its shaded/table ranges describe sensitivity to those explicit assumptions with fixed coefficients. They are not calibrated confidence intervals or evidence that an intervention will work.
 
 ```powershell
@@ -180,7 +183,7 @@ python scripts/prepare_training_data.py --manifest data/my-training-manifest.jso
 python scripts/train.py --config data/my-training-dataset/training-config.yaml
 ```
 
-The paths above are placeholders for your references. Missing targets remain masked: an unknown driver is not a negative example, and a model output without training support is withheld. Partial supervision can cover any supported head without inventing the other labels. The trajectory head predicts condition on a declared 0–1 scale; canopy loss is a separate event target for the conventional reference experiment. Declaring a source independent does not establish its authenticity. Legacy manually prepared disk datasets remain supported, but lack the converter's stronger split and integrity audit.
+The paths above are placeholders for your references. Missing targets remain masked: an unknown driver is not a negative example, and a model output without training support is withheld. Partial supervision can cover any supported head without inventing the other labels. The trajectory head predicts condition on a declared 0–1 scale; the annual tree-cover-loss intake supplies a separate continuous target for the conventional reference experiment. Dated binary events use that harness's separate event contract. Declaring a source independent does not establish its authenticity. Legacy manually prepared disk datasets remain supported, but lack the converter's stronger split and integrity audit.
 
 ### Pretrained encoders
 
