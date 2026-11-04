@@ -28,12 +28,16 @@ DRIVERS = ("agriculture", "cattle_pasture", "mining", "logging", "road_construct
 STATES = ("healthy", "stressed", "degraded", "severely_degraded", "cleared")
 TARGET_UNITS = {"health_state": "canonical_five_state", "health_score": "score_0_100",
                 "drivers": "binary_presence", "driver_strengths": "strength_0_1",
-                "trajectory": "condition_0_1"}
+                "trajectory": "condition_0_1", "annual_loss": "fraction_0_1"}
 SPLITS = ("train", "val", "calibration", "test")
 CLIMATE_NAMES = ["temperature_mean_c", "precipitation_sum_mm", "reference_et0_sum_mm",
                  "soil_moisture_mean_m3_m3"]
 CLIMATE_UNITS = ["degC", "mm", "mm", "m3/m3"]
 MAX_FILE_BYTES = 512 * 1024 * 1024
+
+
+def _target_keys(document):
+    return [key for key in TARGET_UNITS if key != "annual_loss" or key in document["target_spec"]]
 
 
 def _hash_file(path):
@@ -223,18 +227,25 @@ def _labels(example, document):
     result = {"health_state": np.asarray(0, dtype=np.int64), "health_score": np.asarray(0., dtype=np.float32),
               "drivers": np.zeros(8, dtype=np.float32), "driver_strengths": np.zeros(8, dtype=np.float32),
               "trajectory": np.zeros(len(horizons), dtype=np.float32)}
+    if "annual_loss" in document["target_spec"]:
+        from forestmind.models.heads.annual_loss import annual_loss_target_date
+        spec = document["target_spec"]["annual_loss"]
+        annual_loss_target_date(example["cutoff"], spec["horizon_days"])
+        result["annual_loss"] = np.asarray(0., dtype=np.float32)
     for key, value in list(result.items()):
         result[key + "_mask"] = np.zeros(value.shape, dtype=bool)
     latest = _date(example["cutoff"])
     for field, entries in supplied.items():
         if field not in document["target_spec"]:
             raise ValueError(f"Missing frozen target_spec definition for {field}")
-        if field in {"health_state", "health_score"}:
+        if field in {"health_state", "health_score", "annual_loss"}:
             entries = {None: entries}
         elif not isinstance(entries, dict) or not entries:
             raise ValueError(f"{field} labels require a nonempty named mapping")
         for key, entry in entries.items():
-            if field == "trajectory":
+            if field == "annual_loss":
+                index, horizon = (), document["target_spec"]["annual_loss"]["horizon_days"]
+            elif field == "trajectory":
                 if key not in {str(h) for h in horizons}:
                     raise ValueError("Trajectory key must be a configured horizon in days")
                 index, horizon = horizons.index(int(key)), int(key)
@@ -250,6 +261,9 @@ def _labels(example, document):
             result[field + "_mask"][index] = True
             latest = max(latest, available)
     result.update(label_valid=np.asarray(True), trajectory_units=np.asarray("condition_0_1"))
+    if "annual_loss" in document["target_spec"]:
+        result.update(annual_loss_units=np.asarray("fraction_0_1"),
+                      annual_loss_horizon_days=np.asarray(document["target_spec"]["annual_loss"]["horizon_days"], dtype=np.int64))
     return result, latest
 
 
@@ -286,6 +300,9 @@ def audit_training_manifest(manifest_path: str | Path) -> tuple[dict, list[dict]
             raise ValueError(f"{key} target units must be {TARGET_UNITS[key]}; canopy loss is not health")
         for name in ("definition", "reference_protocol"):
             _text(definition.get(name), f"target_spec.{key}.{name}")
+        if key == "annual_loss":
+            from forestmind.models.heads.annual_loss import validate_annual_loss_spec
+            validate_annual_loss_spec(definition)
     policy = document.get("split_policy", {})
     buffer = _number(policy.get("spatial_buffer_km"), 0.001, 20000, "spatial_buffer_km")
     embargo = policy.get("temporal_embargo_days")
@@ -359,7 +376,7 @@ def audit_training_manifest(manifest_path: str | Path) -> tuple[dict, list[dict]
             raise ValueError(f"{left}/{right} labels cross the temporal embargo or protected cutoff")
     audit = {"passed": True, "counts": counts, "nearest_split_separation_lower_bound_km": nearest,
              "split_policy": policy, "label_counts": {split: {key: int(sum(r["labels"][key + "_mask"].sum() for r in values))
-                                                    for key in TARGET_UNITS} for split, values in partitions.items()},
+                                                    for key in _target_keys(document)} for split, values in partitions.items()},
              "limitations": ["Independent source declarations and label accuracy still require review.",
                              "Small sample counts are not evidence of scientific sufficiency.",
                              "No model has been trained, calibrated or validated by this conversion."]}
@@ -368,9 +385,9 @@ def audit_training_manifest(manifest_path: str | Path) -> tuple[dict, list[dict]
         "driver_strengths": dict(zip(DRIVERS, np.sum([r["labels"]["driver_strengths_mask"] for r in values], axis=0).astype(int).tolist())),
         "trajectory": dict(zip(map(str, horizons), np.sum([r["labels"]["trajectory_mask"] for r in values], axis=0).astype(int).tolist()))}
         for split, values in partitions.items()}
-    trained = {key: np.any([r["labels"][key + "_mask"] for r in partitions["train"]], axis=0) for key in TARGET_UNITS}
+    trained = {key: np.any([r["labels"][key + "_mask"] for r in partitions["train"]], axis=0) for key in _target_keys(document)}
     for row in rows:
-        for key in TARGET_UNITS:
+        for key in _target_keys(document):
             if np.any(row["labels"][key + "_mask"] & ~trained[key]):
                 raise ValueError(f"{key} has held-out labels without any matching training supervision")
     _normalization(rows)  # --check also audits missing training-only normalization support.
@@ -473,7 +490,7 @@ def prepare_training_dataset(manifest_path: str | Path, output: str | Path) -> d
     manifest_hash = _hash_json(document)
     supervised_targets = {key: np.any([row["labels"][key + "_mask"] for row in rows
                                        if row["example"]["split"] == "train"], axis=0).tolist()
-                          for key in TARGET_UNITS}
+                          for key in _target_keys(document)}
     input_contract = {"time_steps": document["time_steps"], "grid_shape": document["grid_shape"],
                       "horizon_days": document["horizons_days"], "trajectory_target_scale": "unit",
                       "optical_units": "surface_reflectance_0_1", "sar_units": sar_units,
@@ -502,6 +519,12 @@ def prepare_training_dataset(manifest_path: str | Path, output: str | Path) -> d
     if climate:
         config["data"].update(climate_feature_names=CLIMATE_NAMES, climate_feature_units=CLIMATE_UNITS)
         config["fusion"]["climate_dim"] = 4
+    if "annual_loss" in document["target_spec"]:
+        horizon = document["target_spec"]["annual_loss"]["horizon_days"]
+        input_contract["annual_loss_horizon_days"] = horizon
+        config["data"]["annual_loss_horizon_days"] = horizon
+        config["heads"]["annual_loss"] = {"enabled": True, "horizon_days": horizon,
+                                             "units": "fraction_0_1", "protocol_id": "annual-gross-tree-cover-loss-v1"}
     # Audit every source again immediately before writing to detect changed inputs.
     if any(_hash_file(row["path"]) != row["sha256"] for row in rows):
         raise ValueError("A reviewed source sequence changed during preparation")
