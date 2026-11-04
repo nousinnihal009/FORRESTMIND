@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "kind": "forestmind_climate_history_plan",
+  "bbox": [
+    76.5238,
+    11.5889,
+    76.5438,
+    11.6089
+  ],
+  "baseline_start": "1991-01-01",
+  "baseline_end": "2020-12-31",
+  "observed_start": "2021-01-01",
+  "observed_end": "2025-12-31",
+  "provider": "Open-Meteo",
+  "dataset": "ERA5",
+  "model_input": false,
+  "windows": [
+    {
+      "role": "reference",
+      "start": "1991-01-01",
+      "end": "2000-12-31",
+      "file": "reference-1991-01-01-2000-12-31.json"
+    },
+    {
+      "role": "reference",
+      "start": "2001-01-01",
+      "end": "2010-12-31",
+      "file": "reference-2001-01-01-2010-12-31.json"
+    },
+    {
+      "role": "reference",
+      "start": "2011-01-01",
+      "end": "2020-12-31",
+      "file": "reference-2011-01-01-2020-12-31.json"
+    },
+    {
+      "role": "observed",
+      "start": "2021-01-01",
+      "end": "2025-12-31",
+      "file": "observed-2021-01-01-2025-12-31.json"
+    }
+  ],
+  "maximum_attempts_per_window": 2,
+  "maximum_source_bytes": 16777216,
+  "request_interval_seconds": 35,
+  "implementation": {
+    "climate_history.py": "1ce5324566c2ef63dd6362aa4a8b7f2ad31eaab128251824f4422d6c75dde34f",
+    "climate.py": "2f80990ab08eed81802a244aeef55ea97c06d49eb1ab3834b4903cbc1cc278d2",
+    "climatology.py": "765875bb314f9b87c3cbb29f1689671d10e7c824dc9b7271878804e75b870911"
+  },
+  "artifact_sha256": "10b634b11e78d7fd22385100dc22312b96b24ffa35803cc09d80e028fb1eac98"
+}
