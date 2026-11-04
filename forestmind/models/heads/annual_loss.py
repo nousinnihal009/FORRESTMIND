@@ -38,6 +38,8 @@ def validate_annual_loss_spec(spec: dict) -> None:
 
 
 def annual_loss_target_date(cutoff: str, horizon_days: int) -> str:
+    if type(horizon_days) is not int or horizon_days not in (365, 366):
+        raise ValueError("annual_loss horizon must be 365 or 366 days")
     origin = date.fromisoformat(cutoff)
     target = origin + timedelta(days=horizon_days)
     if origin.isoformat() != cutoff or (origin.month, origin.day) != (12, 31) or target != date(origin.year + 1, 12, 31):
