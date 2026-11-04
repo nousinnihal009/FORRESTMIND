@@ -63,10 +63,13 @@ def audit_prepared_dataset(root: Path, config: dict):
         if report.get(key) != config.get(key):
             raise ValueError(f"Prepared dataset {key} differs from its audited configuration")
     contract = report.get("input_contract")
-    if not isinstance(contract, dict) or set(contract) != {
+    expected_contract = {
         "time_steps", "grid_shape", "horizon_days", "trajectory_target_scale", "optical_units",
         "sar_units", "climate_feature_names", "climate_feature_units",
-    }:
+    }
+    if "annual_loss" in report.get("target_spec", {}):
+        expected_contract.add("annual_loss_horizon_days")
+    if not isinstance(contract, dict) or set(contract) != expected_contract:
         raise ValueError("Prepared dataset lacks a complete input/horizon/unit contract")
     for key, value in contract.items():
         if config.get(key) != value:
@@ -412,6 +415,15 @@ def create_dataloaders(
         Tuple of (train_loader, val_loader, test_loader).
     """
     data_cfg = dict(config.get("data", config))
+    from forestmind.models.heads.annual_loss import annual_loss_contract, annual_loss_target_date
+    annual = annual_loss_contract(config)
+    if annual is not None:
+        if data_cfg.get("annual_loss_horizon_days") != annual["horizon_days"]:
+            raise ValueError("Annual-loss dataset and model horizons must match explicitly")
+        if data_cfg.get("source", "synthetic") == "synthetic":
+            raise ValueError("The synthetic generator has no annual-loss references")
+    elif "annual_loss" in data_cfg.get("target_spec", {}):
+        raise ValueError("Annual-loss target_spec requires its separate enabled model head")
     horizons = config.get("heads", {}).get("trajectory", {}).get("horizons")
     if horizons is not None:
         data_cfg["horizon_days"] = list(horizons)
@@ -459,6 +471,19 @@ def create_dataloaders(
         for split, path in zip(("train", "val", "test"), split_paths):
             for file in path.glob("*.npz"):
                 with np.load(file, allow_pickle=False) as record:
+                    if annual is not None:
+                        if not {"annual_loss", "annual_loss_mask", "annual_loss_units", "annual_loss_horizon_days", "cutoff"}.issubset(record.files):
+                            raise ValueError("Annual-loss samples require explicit target, mask, units, horizon and cutoff")
+                        if (record["annual_loss"].shape != () or record["annual_loss_mask"].shape != ()
+                                or record["annual_loss_mask"].dtype.kind != "b"
+                                or record["annual_loss_units"].shape != () or record["annual_loss_units"].item() != "fraction_0_1"
+                                or record["annual_loss_horizon_days"].shape != ()
+                                or record["annual_loss_horizon_days"].dtype.kind not in "iu"
+                                or record["annual_loss_horizon_days"].item() != annual["horizon_days"]):
+                            raise ValueError("Annual-loss sample violates its scalar fraction/horizon contract")
+                        annual_loss_target_date(str(record["cutoff"].item()), annual["horizon_days"])
+                    elif "annual_loss" in record.files or "annual_loss_mask" in record.files:
+                        raise ValueError("Annual-loss samples cannot be silently read by a legacy model")
                     targets = {"health_state", "health_score", "drivers", "driver_strengths", "trajectory"}
                     if not targets.issubset(record.files):
                         raise ValueError(f"{file} lacks supervised targets; raw caches cannot train a model")
