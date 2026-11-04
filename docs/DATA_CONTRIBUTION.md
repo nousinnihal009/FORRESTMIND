@@ -18,8 +18,8 @@ The versioned protocol `annual-gross-tree-cover-loss-v1` is defined in `forestmi
 | Horizon | December 31 cutoff through the following December 31. Freeze 365- and 366-day years separately. No invented exact event day. |
 | Continuous target | Reviewed loss area divided by baseline tree-covered area, on a 0–1 scale. This is not a condition score and must not enter the existing health trajectory head. |
 | Significant loss | At least 10% of baseline tree-covered area and at least 1 ha. These are study choices, not universal ecological thresholds or demonstrated sensor detection accuracy. |
-| Positive | The entire reviewed loss-area uncertainty interval meets that criterion. |
-| Negative | The entire interval lies below the criterion. This means below the criterion, not undisturbed or healthy. |
+| Positive | The propagated loss-fraction and loss-area uncertainty bounds both meet the significant-loss criterion. |
+| Negative | Even the upper uncertainty bounds fail at least one part of that criterion. This means below the criterion, not undisturbed or healthy. |
 | Unusable continuous reference | Missing/pending/rejected assessment, incomplete coverage, insufficient baseline forest or excessive measurement uncertainty. Excluded from continuous supervised targets. |
 | Uncertain event classification | A valid measurement interval straddles the significant-loss criterion. Its continuous target remains eligible; only the derived positive/negative interpretation is uncertain. This avoids selecting only easy outcomes. |
 | Quality | Complete reference coverage and a propagated loss-fraction bound no farther than 0.05 from the point estimate. Both loss-area and baseline-area uncertainty are included. Assessment bounds are not automatically statistical confidence intervals. |
