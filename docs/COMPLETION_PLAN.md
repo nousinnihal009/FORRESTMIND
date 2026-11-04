@@ -2,7 +2,7 @@
 
 ## November 2026 continuation
 
-The new [ordered implementation plan](BUILD_PLAN_20261102.md) covers every original section and preserves the existing local stack. The first build adds reviewed annual-loss reference packets and source integrity, optional validation and historical-trend comparison, fuller event metrics and spatial-block resampling, and explicit scenario assumption ranges. Actual verification is recorded in `VALIDATION.md`. All O01–O59 rows in the authoritative matrix now have a Complete/Incomplete/Blocked verdict; an implemented interface alone does not close a scientific requirement.
+The new [ordered implementation plan](BUILD_PLAN_20261102.md) covers every original section and preserves the existing local stack. The first build adds reviewed annual-loss reference packets and source integrity, optional validation and historical-trend comparison, fuller event metrics and spatial-block resampling, frozen climate reference/departure tools, and explicit scenario assumption ranges. Actual verification is recorded in `VALIDATION.md`. All O01–O59 rows in the authoritative matrix now have a Complete/Incomplete/Blocked verdict; an implemented interface alone does not close a scientific requirement.
 
 The user reconfirmed that no independently verified reference data is available. Real training, model superiority, calibrated risk maps and ecological/causal predictions remain unestablished. The current Mudumalai pilot retains nine actual observations with a longest consecutive run of eight; the older pilot counts below describe the October 26 build. Source datasets and original monitoring records are preserved. [The contribution guide](DATA_CONTRIBUTION.md) explains the evidence that would unlock the next training milestone.
 
