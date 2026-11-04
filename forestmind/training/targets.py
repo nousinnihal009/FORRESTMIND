@@ -5,14 +5,20 @@ import torch
 
 TARGET_KEYS = ("health_state", "health_score", "drivers", "driver_strengths", "trajectory")
 MASK_KEYS = tuple(f"{key}_mask" for key in TARGET_KEYS)
+OPTIONAL_TARGET_KEYS = ("annual_loss",)
+MASK_KEYS += ("annual_loss_mask",)
 
 
 def supervision_masks(targets: dict) -> dict:
     """Validate supplied masks and known labels; legacy complete labels remain supported."""
     masks = {}
-    for name in TARGET_KEYS:
+    if "annual_loss_mask" in targets and "annual_loss" not in targets:
+        raise ValueError("annual_loss_mask requires an annual_loss target")
+    for name in (*TARGET_KEYS, *(key for key in OPTIONAL_TARGET_KEYS if key in targets)):
         value = targets[name]
         mask = targets.get(f"{name}_mask")
+        if name == "annual_loss" and (mask is None or value.ndim != 1):
+            raise ValueError("annual_loss requires an explicit scalar-per-example target and mask")
         if mask is None:
             mask = torch.ones_like(value, dtype=torch.bool)
         if not isinstance(mask, torch.Tensor) or mask.dtype != torch.bool or mask.shape != value.shape:
@@ -28,6 +34,8 @@ def supervision_masks(targets: dict) -> dict:
             raise ValueError("Driver labels must be binary")
         if name == "driver_strengths" and ((known < 0) | (known > 1)).any():
             raise ValueError("Driver strengths must lie in [0, 1]")
+        if name == "annual_loss" and ((known < 0) | (known > 1)).any():
+            raise ValueError("annual_loss must use fraction_0_1 without implicit scaling")
         masks[name] = mask
     batch = targets["health_state"].shape[0]
     observed = torch.stack([mask.reshape(batch, -1).any(1) for mask in masks.values()]).any(0)
