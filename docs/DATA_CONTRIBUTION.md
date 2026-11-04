@@ -4,7 +4,7 @@
 
 You do not need to provide a trained model. Useful contributions are dated forest-department surveys, reviewed loss polygons, field observations, or access to a qualified person who can check annotations. Retain the boundary/coordinates, observation dates, measurement method and uncertainty, original files, provider/version, publication date, permission to use the data, reviewer and review rationale. Distinguish natural forest from plantations and other tree-covered land uses.
 
-Unlabeled imagery supports observation but does not supply confirmed health, driver or future-outcome labels. The user confirmed that no independently verified reference dataset is available. No real model training or ecological validation has been performed in this milestone.
+Unlabeled imagery supports observation but does not supply confirmed health, driver or future-outcome labels. The user has no independently verified dataset to contribute yet. ForestMind has now obtained [published point references and run a separate retrospective baseline experiment](PUBLIC_REFERENCES.md), so progress does not depend entirely on a personal data contribution. Those point histories do not supply the baseline and loss areas required by the primary protocol below. No real annual-area neural model or operational ecological validation is claimed.
 
 ## Primary target: annual gross tree-cover-loss fraction
 
