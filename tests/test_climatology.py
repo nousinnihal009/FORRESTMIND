@@ -232,6 +232,21 @@ def test_reference_integrity_and_recomputed_statistics(reference):
         cm.validate_climatology(changed)
 
 
+def test_rehashed_reference_cannot_claim_samples_outside_source_coverage(reference):
+    changed = deepcopy(reference)
+    changed["sources"][0]["start"] = "1991-01-02"
+    changed["artifact_sha256"] = cm.artifact_hash(changed)
+    with pytest.raises(ValueError, match="not fully covered"):
+        cm.validate_climatology(changed)
+
+
+def test_reference_month_can_span_adjacent_source_windows():
+    sources = [context("1991-01-01", "1991-01-15"), context("1991-01-16", "1991-01-31")]
+    frozen = cm.freeze_climatology(sources, baseline_start="1991-01-01", baseline_end="2020-12-31")
+    cm.validate_climatology(frozen)
+    assert frozen["months"][0]["variables"]["temperature_mean_c"]["complete_year_count"] == 1
+
+
 @pytest.mark.parametrize("change,error", [
     (lambda r: r.update(schema_version=True), "Unsupported"),
     (lambda r: r.update(baseline=None), "explicit start and end"),
