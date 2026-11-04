@@ -101,6 +101,8 @@ def _validate_targets(targets: dict, *, samples: int, classes: int, drivers: int
     shapes = {"health_state": (samples,), "health_score": (samples,),
               "drivers": (samples, drivers), "driver_strengths": (samples, drivers),
               "trajectory": (samples, horizons)}
+    if "annual_loss" in targets:
+        shapes["annual_loss"] = (samples,)
     for name, shape in shapes.items():
         if tuple(targets[name].shape) != shape:
             raise ValueError(f"Target {name} has shape {tuple(targets[name].shape)}, expected {shape}; check dataset and configured horizons")
@@ -153,6 +155,10 @@ def evaluate_checkpoint(
         raise ValueError("Checkpoint has no usable configuration; provide --config")
     config_hash = _json_hash(config)
     data_config = config.get("data", {})
+    from forestmind.models.heads.annual_loss import annual_loss_contract
+    annual_spec = annual_loss_contract(config)
+    if checkpoint_config is not None and annual_spec != annual_loss_contract(checkpoint_config):
+        raise ValueError("Evaluation annual-loss contract must match the checkpoint; overrides cannot relabel predictions")
     trajectory_scale = data_config.get("trajectory_target_scale", "unit")
     if trajectory_scale not in {"unit", "percent"}:
         raise ValueError("data.trajectory_target_scale must be 'unit' or 'percent'")
@@ -212,6 +218,8 @@ def evaluate_checkpoint(
             inputs = {name: batch[name].to(device) for name in INPUT_KEYS if name in batch}
             _finite_tensors(inputs, "inputs")
             original_targets = {name: batch[name].to(device) for name in TARGET_KEYS}
+            if "annual_loss" in batch:
+                original_targets["annual_loss"] = batch["annual_loss"].to(device)
             original_targets.update({name: batch[name].to(device) for name in MASK_KEYS if name in batch})
             targets = dict(original_targets)
             if trajectory_scale == "percent":
@@ -229,6 +237,7 @@ def evaluate_checkpoint(
             count_keys = {"health_ce": "health_state", "health_mse": "health_score",
                           "attribution_bce": "drivers", "attribution_strength_mse": "driver_strengths",
                           "trajectory_mse": "trajectory", "trajectory_huber": "trajectory", "trajectory_hetero": "trajectory"}
+            count_keys["annual_loss_mse"] = "annual_loss"
             for name, target in count_keys.items():
                 if name in losses:
                     count = int(masks[target].sum())
@@ -245,7 +254,7 @@ def evaluate_checkpoint(
                 })
                 predictions = {head: {name: tensor[index].detach().cpu().tolist()
                                       for name, tensor in outputs[head].items()}
-                               for head in ("health", "attribution", "trajectory")}
+                               for head in ("health", "attribution", "trajectory", "annual_loss") if head in outputs}
                 examples.append({
                     "sample_id": f"{split}:{sample_index}", "index": sample_index, "split": split,
                     "input_sha256": tensor_mapping_hash(sample_inputs),
@@ -269,6 +278,7 @@ def evaluate_checkpoint(
     averaged_losses["attribution_total"] = criterion.attribution_loss.bce_weight * averaged_losses.get("attribution_bce", 0) + criterion.attribution_loss.strength_weight * averaged_losses.get("attribution_strength_mse", 0)
     averaged_losses["trajectory_total"] = criterion.trajectory_loss.mse_weight * averaged_losses.get("trajectory_hetero", averaged_losses.get("trajectory_mse", 0)) + criterion.trajectory_loss.huber_weight * averaged_losses.get("trajectory_huber", 0)
     averaged_losses["total"] = criterion.w_health * averaged_losses["health_total"] + criterion.w_attribution * averaged_losses["attribution_total"] + criterion.w_trajectory * averaged_losses["trajectory_total"]
+    averaged_losses["total"] += criterion.w_annual_loss * averaged_losses.get("annual_loss_mse", 0.)
     synthetic = True if loader.dataset.source == "synthetic" else data_config.get("synthetic")
     if synthetic is not None and not isinstance(synthetic, bool):
         raise ValueError("data.synthetic must be a boolean when declared for a disk dataset")
@@ -300,11 +310,13 @@ def evaluate_checkpoint(
         },
         "counts": {"samples": sample_count, "batches": batches},
         "label_schema": {"health_states": HEALTH_STATES,
+                         "annual_loss": annual_spec,
                          "drivers": DRIVER_CLASSES if driver_count == len(DRIVER_CLASSES) else [f"driver_{index}" for index in range(driver_count)],
                          "horizon_days": list(horizons),
                          "mapping_provenance": "Canonical ForestMind class order; external labels must follow this order"},
         "metrics": result,
         "metric_units": {"health_mae": "score points [0, 100]", "trajectory_mae": "unit score [0, 1]",
+                         "annual_loss_mae": "gross loss fraction [0, 1]", "annual_loss_rmse": "gross loss fraction [0, 1]",
                          "trajectory_rmse": "unit score [0, 1]", "trajectory_per_horizon_mae": "unit score [0, 1]",
                          "aggregate_score": "heuristic weighted combination; not a probability"},
         "per_horizon": [{"horizon_days": int(day), "n": int(trajectory_mask[:, index].sum()),
