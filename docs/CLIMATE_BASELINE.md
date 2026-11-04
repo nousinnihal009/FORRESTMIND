@@ -48,7 +48,7 @@ Use an earlier reference period when the study's observation cutoff precedes 202
 
 The CLI accepts at most twelve source files, each at most 16 MiB. Duplicate JSON keys and nonfinite JSON literals are rejected. Outputs are new files, never replacements. Both commands return exit status 2 on invalid inputs or an existing output path. A successfully written reference can still contain unavailable feature/month pairs; inspect `available_feature_months`, counts and reasons. A successful command does not imply sufficient observations or scientific validity.
 
-Artifacts preserve source-context and canonical raw-response hashes, the supplied original provider-response hash, exact file-byte hashes, reference years, per-year aggregates, methods, units, missingness and limitations. The final canonical artifact hash covers these fields. Loading a reference rechecks the digest and recalculates its summary statistics from the stored annual aggregates. Retain the source files: summary hashes do not replace raw evidence. An interrupted/incomplete JSON file is not a valid reusable reference.
+Artifacts preserve source-context and canonical raw-response hashes, the supplied original provider-response hash, exact file-byte hashes, reference years, per-year aggregates, methods, units, missingness and limitations. The final canonical artifact hash covers these fields. Loading a reference rechecks the digest, recalculates its summary statistics from the stored annual aggregates, and rejects sample months outside the declared source windows. Retain the source files: summary hashes do not replace raw evidence or independently authenticate measurements. An interrupted/incomplete JSON file is not a valid reusable reference.
 
 ## Verification and current evidence
 
