@@ -25,6 +25,7 @@ from forestmind.models.fusion.multimodal import MultimodalFusion
 from forestmind.models.heads.attribution import CauseAttributionHead
 from forestmind.models.heads.health import ForestHealthHead
 from forestmind.models.heads.trajectory import TrajectoryHead
+from forestmind.models.heads.annual_loss import AnnualLossHead, annual_loss_contract
 from forestmind.models.temporal.transformer import TemporalTransformer
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ class ForestMindModel(nn.Module):
     def __init__(self, config: dict):
         super().__init__()
         self.config = config
+        self.annual_loss_spec = annual_loss_contract(config)
 
         foundation_cfg = config.get("foundation", {})
         fusion_cfg = config.get("fusion", {})
@@ -160,6 +162,9 @@ class ForestMindModel(nn.Module):
             horizon_days=traj_cfg.get("horizons", [30, 180, 365, 1095, 1825]),
             predict_uncertainty=traj_cfg.get("predict_uncertainty", True),
         )
+
+        # No parameters or state keys are added to legacy configurations.
+        self.annual_loss_head = AnnualLossHead(embed_dim) if self.annual_loss_spec is not None else None
 
         # Log total parameters
         total = sum(p.numel() for p in self.parameters())
@@ -284,11 +289,14 @@ class ForestMindModel(nn.Module):
         attribution_out = self.attribution_head(summary)
         trajectory_out = self.trajectory_head(sequence, summary, valid)
 
-        return {
+        outputs = {
             "health": health_out,
             "attribution": attribution_out,
             "trajectory": trajectory_out,
         }
+        if self.annual_loss_head is not None:
+            outputs["annual_loss"] = self.annual_loss_head(summary)
+        return outputs
 
     @torch.no_grad()
     def predict(
@@ -343,4 +351,7 @@ class ForestMindModel(nn.Module):
                 round(v * 100, 1) for v in traj["uncertainty"][0].tolist()
             ]
 
+        if self.annual_loss_spec is not None:
+            result["annual_loss"] = {"fraction": None, "units": "fraction_0_1",
+                                     "reason": "Use predict_checkpoint to verify training support and annual timing."}
         return result
