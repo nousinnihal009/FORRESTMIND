@@ -37,6 +37,7 @@ CONFIG = {
     "forest_leaf": 10, "boost_stages": 100, "boost_depth": 2,
     "boost_leaf": 10, "boost_rate": .05, "threshold": .5,
     "bootstrap_replicates": 1000, "minimum_bootstrap_blocks": 5,
+    "duplicate_coordinate_policy": "exclude_all_copies_before_label_inspection",
 }
 TARGET = {
     "id": "guo-retrospective-point-loss-next-calendar-year-v1",
@@ -135,7 +136,8 @@ def build_examples(packet: dict):
     """Fixed geography/time split; source strata and future summaries are excluded."""
     if not isinstance(packet.get("samples"), list) or not 1 <= len(packet["samples"]) <= 20000:
         raise ValueError("Expected a bounded public reference sample list")
-    rows, exclusions, ids, positions = [], Counter(), set(), set()
+    rows, exclusions, ids = [], Counter(), set()
+    positions = Counter((sample["lon"], sample["lat"]) for sample in packet["samples"])
     for sample in sorted(packet["samples"], key=lambda r: r["id"]):
         identity = sample.get("id")
         if not isinstance(identity, str) or not identity or identity in ids:
@@ -143,9 +145,9 @@ def build_examples(packet: dict):
         ids.add(identity)
         block, split, interior = spatial_assignment(sample["lon"], sample["lat"])
         position = (sample["lon"], sample["lat"])
-        if position in positions:
-            raise ValueError("Duplicate reference coordinates need source review before benchmarking")
-        positions.add(position)
+        if positions[position] > 1:
+            exclusions["samples_at_duplicated_coordinates"] += 1
+            continue
         if not interior:
             exclusions["samples_in_boundary_buffer"] += 1
             continue
