@@ -38,12 +38,21 @@
       "start": "2021-01-01",
       "end": "2025-12-31",
       "file": "observed-2021-01-01-2025-12-31.json",
-      "attempts": 0,
-      "status": "pending"
+      "attempts": 1,
+      "status": "accepted",
+      "file_sha256": "29fbcfa42e89549d8fd96db1bbee4c27b47deabdabcb902d278fce9b6d8e984b",
+      "bytes": 278596
     }
   ],
-  "status": "incomplete",
+  "status": "complete",
   "scientifically_validated": false,
   "model_input": false,
-  "artifact_sha256": "e0bf279457ca2bd0728b69efcea03194f72d4e6f14868d8b5107b65008ec2dd8"
+  "artifact_sha256": "0590be2e21e4d30cffd1051c523bd1a5f5edf07a572c7c9d300600aca3736b91",
+  "reference_sha256": "83fad9e111d1569f0aeb26327880761ac690abaeeadb5a5fd93154a065a2211a",
+  "departures_sha256": "f6ddce4953f63e9a1c0f81ead3d4a2912f71161d0350b5cf8c862906e6a66a19",
+  "available_reference_feature_months": 48,
+  "observed_months": 60,
+  "available_observed_feature_months": 240,
+  "requests_this_invocation": 4,
+  "accepted_windows": 4
 }
