@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from forestmind.data.climate_history import build_climate_history
+from forestmind.data.climate_history import build_climate_history, verify_climate_history
 from forestmind.monitoring.climatology import read_json_record
 
 
@@ -20,10 +20,13 @@ def main(argv=None):
     parser.add_argument("--max-requests", type=int, default=4)
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--check", action="store_true", help="Read-only verification of a completed packet; no downloads or writes")
     args = parser.parse_args(argv)
     try:
         area, _ = read_json_record(args.area)
-        result = build_climate_history(area["bbox"], args.output,
+        if args.check and args.resume:
+            raise ValueError("Use either --check or --resume")
+        result = verify_climate_history(args.output) if args.check else build_climate_history(area["bbox"], args.output,
                     baseline_start=args.baseline_start, baseline_end=args.baseline_end,
                     observed_start=args.observed_start, observed_end=args.observed_end,
                     max_requests=args.max_requests, timeout=args.timeout, resume=args.resume)
@@ -32,7 +35,7 @@ def main(argv=None):
             "available_reference_feature_months", "observed_months", "available_observed_feature_months") if key in result}, indent=2))
         print(f"Evidence and resumable progress: {args.output.resolve()}")
         print("Retrospective ERA5 diagnostics only; no validated drought, forest outcome, or historical-availability claim.")
-        return 0 if result["status"] == "complete" else 2
+        return 0 if result["status"] in {"complete", "verified"} else 2
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(f"Climate history unavailable: {error}", file=sys.stderr)
         return 2
