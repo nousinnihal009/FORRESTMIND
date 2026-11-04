@@ -158,6 +158,54 @@ def test_corrupt_product_is_refused_without_download(tmp_path, monkeypatch):
         ch.build_climate_history(BBOX, output, resume=True)
 
 
+def test_transient_windows_progress_lock_retries_only_atomic_write(tmp_path, monkeypatch):
+    original = ch.os.replace
+    calls = []
+    def replace(source, destination):
+        calls.append((source, destination))
+        if len(calls) < 3:
+            error = PermissionError("Controlled Windows sharing failure")
+            error.winerror = 32
+            raise error
+        return original(source, destination)
+    monkeypatch.setattr(ch.os, "replace", replace)
+    path = tmp_path / "progress.json"
+    ch._write_progress({"status": "fixture"}, path)
+    assert len(calls) == 3 and read(path)["status"] == "fixture"
+    assert not list(tmp_path.glob(".climate-progress-*.tmp"))
+
+
+def test_persistent_progress_failure_preserves_previous_record(tmp_path, monkeypatch):
+    path = tmp_path / "progress.json"
+    ch._write_progress({"status": "old"}, path)
+    original_bytes = path.read_bytes()
+    calls = []
+    def denied(*args):
+        calls.append(args)
+        error = PermissionError("Controlled persistent sharing failure")
+        error.winerror = 5
+        raise error
+    monkeypatch.setattr(ch.os, "replace", denied)
+    with pytest.raises(PermissionError):
+        ch._write_progress({"status": "new"}, path)
+    assert len(calls) == 5 and path.read_bytes() == original_bytes
+    assert not list(tmp_path.glob(".climate-progress-*.tmp"))
+
+
+def test_completed_packet_verification_is_read_only_and_rejects_changed_source(tmp_path, monkeypatch):
+    output = tmp_path / "build"
+    ch.build_climate_history(BBOX, output)
+    before = {p.name: p.read_bytes() for p in output.iterdir()}
+    monkeypatch.setattr(ch, "acquire_climate", lambda *a, **kw: pytest.fail("Read-only check accessed network"))
+    result = ch.verify_climate_history(output)
+    assert result["status"] == "verified" and result["requests_this_invocation"] == 0
+    assert before == {p.name: p.read_bytes() for p in output.iterdir()}
+    source = output / "reference-1991-01-01-2000-12-31.json"
+    source.write_text(source.read_text() + " ")
+    with pytest.raises(ValueError, match="bytes changed"):
+        ch.verify_climate_history(output)
+
+
 @pytest.mark.parametrize("changes", [
     {"baseline_start": "1992-01-01"}, {"observed_start": "2020-01-01"},
     {"observed_end": "2030-12-31"}, {"observed_start": "2021-01-02"},
