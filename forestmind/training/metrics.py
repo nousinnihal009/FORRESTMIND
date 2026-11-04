@@ -35,6 +35,8 @@ class MetricsResult:
     trajectory_mae: float | None = None
     trajectory_rmse: float | None = None
     trajectory_per_horizon_mae: list[float] = field(default_factory=list)
+    annual_loss_mae: float | None = None
+    annual_loss_rmse: float | None = None
 
     # Aggregate
     aggregate_score: float = 0.0
@@ -62,6 +64,8 @@ class ForestMindMetrics:
 
         self._traj_preds = []
         self._traj_targets = []
+        self._annual_loss_errors = []
+        self._annual_loss_present = False
 
     @torch.no_grad()
     def update(
@@ -103,6 +107,17 @@ class ForestMindMetrics:
             traj_gt = traj_gt / 100.0
         self._traj_preds.append(np.where(masks["trajectory"], traj_pred, np.nan))
         self._traj_targets.append(np.where(masks["trajectory"], traj_gt, np.nan))
+        if "annual_loss" in targets:
+            self._annual_loss_present = True
+            if "annual_loss" not in outputs:
+                if masks["annual_loss"].any():
+                    raise ValueError("Annual-loss metrics require the enabled separate head")
+            else:
+                prediction = outputs["annual_loss"]["mean"].cpu().numpy()
+                truth = targets["annual_loss"].cpu().numpy()
+                if prediction.shape != truth.shape or not np.isfinite(prediction).all():
+                    raise ValueError("Annual-loss predictions must be finite and match scalar targets")
+                self._annual_loss_errors.extend((prediction - truth)[masks["annual_loss"]].tolist())
 
     def compute(self) -> MetricsResult:
         """Compute all metrics from accumulated predictions."""
@@ -111,6 +126,12 @@ class ForestMindMetrics:
                                   "health_score": len(self._health_score_errors),
                                   "drivers": [0] * self.num_drivers,
                                   "trajectory": [0] * self.num_horizons}
+        if self._annual_loss_present:
+            result.observed_counts["annual_loss"] = len(self._annual_loss_errors)
+        if self._annual_loss_errors:
+            errors = np.asarray(self._annual_loss_errors)
+            result.annual_loss_mae = float(np.abs(errors).mean())
+            result.annual_loss_rmse = float(np.sqrt(np.mean(errors**2)))
 
         # ─── Health Metrics ────────────────────────────────
         if self._health_total > 0:
@@ -194,6 +215,8 @@ class ForestMindMetrics:
         # Score-only studies must also have a usable checkpoint-selection metric.
         if result.health_accuracy is None and result.health_mae is not None:
             terms.append((0.5, max(0, 1 - result.health_mae / 100)))
+        if result.annual_loss_mae is not None:
+            terms.append((1., max(0., 1 - result.annual_loss_mae)))
         known_terms = [(weight, value) for weight, value in terms if value is not None]
         result.aggregate_score = (sum(w * v for w, v in known_terms) / sum(w for w, _ in known_terms)
                                   if known_terms else 0.0)
