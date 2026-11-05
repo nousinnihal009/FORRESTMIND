@@ -26,6 +26,7 @@ from forestmind.api.security import LocalOnlyMiddleware
 from forestmind.monitoring.alerts import install_alerts
 from forestmind.api.operations import install_operations
 from forestmind.api.acquisition import install_acquisition
+from forestmind.api.landscapes import install_landscapes
 from forestmind.api.workflow import install_workflow
 from forestmind.monitoring.notifications import install_notifications
 
@@ -60,6 +61,7 @@ def create_app(db_path: str | Path | None = None, *, seed_demo: bool = True) -> 
     install_operations(app, store)
     install_workflow(app, store)
     install_acquisition(app, store)
+    install_landscapes(app, store)
     install_notifications(app, store)
 
     @app.exception_handler(RequestValidationError)
