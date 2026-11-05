@@ -44,3 +44,14 @@
 .workflow-section summary,.workflow-readiness summary{cursor:pointer}.workflow-section[open]>summary{margin-bottom:16px}
 .form-error{overflow-wrap:anywhere}textarea{font:inherit}.dialog-footer{align-items:center;flex-wrap:wrap}
 @media(max-width:700px){.workflow-summary-grid{grid-template-columns:1fr}.workflow-facts,.import-preview dl{grid-template-columns:1fr;gap:3px}.workflow-facts dd,.import-preview dd{margin-bottom:10px}.workflow-summary-card{padding:16px}.dialog-footer>.button{width:100%}.workflow-summary-card .table-scroll{max-width:100%}}
+
+/* Forest plans group geographically distinct evidence without inferring missing areas. */
+.forest-planner{margin:0 0 24px}.forest-planner-body{padding:0 23px 23px;min-width:0}
+.landscape-create>summary{cursor:pointer;font-size:13px;font-weight:600}.landscape-create[open]>summary{margin-bottom:12px}
+#landscape-form{display:grid;gap:14px;margin:16px 0 22px}.landscape-names{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.forest-planner label{font-size:11px;font-weight:600;color:var(--ink)}.forest-planner input,.forest-planner select{display:block;width:100%;max-width:100%;padding:10px;margin-top:6px;border:1px solid var(--border);border-radius:5px;background:#fff;color:var(--ink);font:inherit;font-size:12px}
+.landscape-plan-actions,.landscape-saved{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.landscape-plan-actions label{min-width:200px}.landscape-saved{align-items:center;padding-top:18px;border-top:1px solid var(--border)}.landscape-saved select{width:auto;max-width:min(100%,420px);margin:0}.landscape-saved label{flex-shrink:0}
+.landscape-summary{display:grid;gap:7px;padding:18px 0;font-size:12px;line-height:1.6;overflow-wrap:anywhere}.landscape-summary>strong{font-size:15px}.landscape-summary>small{color:var(--muted);font-size:11px;max-width:900px}
+.landscape-tile-table td{white-space:normal;vertical-align:top}.landscape-tile-table td:first-child{min-width:190px}.landscape-tile-table td:last-child{min-width:125px}.landscape-tile-table td small{display:block;line-height:1.7}.landscape-tile-table .text-button{display:block;margin-top:10px}.landscape-tile-table strong{overflow-wrap:anywhere}
+.landscape-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 0;font-size:11px}.landscape-pagination[hidden]{display:none}
+@media(max-width:700px){.forest-planner-body{padding:0 16px 16px}.forest-planner .panel-heading{align-items:flex-start;gap:12px;flex-wrap:wrap}.landscape-names{grid-template-columns:1fr}.landscape-plan-actions{align-items:stretch}.landscape-plan-actions>*{width:100%}.landscape-saved{align-items:flex-start;flex-direction:column}.landscape-saved select{width:100%;max-width:100%}.landscape-pagination{flex-wrap:wrap}.landscape-pagination>span{order:-1;width:100%;text-align:center}.landscape-tile-table{min-width:620px}}
