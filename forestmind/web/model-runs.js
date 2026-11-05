@@ -84,6 +84,8 @@ function modelFilePreview(report,regionId) {
   if(!validDate(report.observed_through)||(input.observed_start!==undefined&&input.observed_start!==null&&(!validDate(input.observed_start)||input.observed_start>report.observed_through)))throw new Error('This report has an invalid observation period. Ask the report provider to correct it.');
   const targets=[];
   if(Number.isFinite(predictions.health.score))targets.push('Condition score');
+  const annual=predictions.annual_loss;
+  if(Number.isFinite(annual?.fraction)&&annual.fraction>=0&&annual.fraction<=1)targets.push('Annual loss fraction');
   if(predictions.health.class_scores.some(item=>Number.isFinite(item?.score)))targets.push('Condition classes');
   const drivers=predictions.drivers.filter(item=>Number.isFinite(item?.score)).length,forecasts=predictions.trajectory.filter(item=>Number.isFinite(item?.score)).length;
   if(drivers)targets.push(drivers+' candidate driver '+(drivers===1?'score':'scores'));
