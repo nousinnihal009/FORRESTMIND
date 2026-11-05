@@ -1,5 +1,11 @@
 # ForestMind research implementation plan — 2 November 2026
 
+## Scope correction and continuation — 5 November 2026
+
+The user explicitly confirmed that Mudumalai was a test area and the product must serve forests worldwide. Preserve this scope in future continuations. Production acquisition/context code was already location-independent; the new persisted landscape planner extends the dashboard to larger study rectangles with deterministic bounded tiles, automatic date-line splitting, paginated browsing, observation-presence summaries and the existing acquisition handoff. The original database and frozen public experiment remain preserved. Full regression passed **1,186 tests in 468.58 seconds**; actual browser save/select/pagination/reload/export checks are recorded in `VALIDATION.md`.
+
+The planner is not an all-forest inventory, unattended global ingestion or proof of ecological transfer. Remaining regional model acceptance, protected satellite-feature comparisons, locally supported histories and whole-landscape spatial analysis stay on the research/software backlog. Use `GLOBAL_MONITORING.md` and `REQUIREMENTS_MATRIX.md` for the scope and limits; do not narrow the application to Mudumalai again.
+
 ## Audit and preserved behavior
 
 The source, configurations, tests, dataset preparation, checkpoint evidence, SQLite schema and original O01–O59 requirements were reviewed before implementation. The existing local FastAPI/SQLite/plain-JavaScript application remains the foundation. Preserve accepted acquisitions, immutable exports, partial-data masks, model eligibility, alert history, bounded workers, local access controls and all existing user observations.
