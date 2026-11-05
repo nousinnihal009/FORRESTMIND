@@ -47,6 +47,8 @@ All routes begin with `/api/v1`.
 | Method | Route | Purpose |
 |---|---|---|
 | GET | `/acquisition/capabilities` | Provider, limits, storage and worker state |
+| POST / GET | `/landscapes` | Save or list bounded-metadata worldwide forest study plans; no downloads |
+| GET | `/landscapes/{landscape_id}?offset=0&limit=50` | Page planned areas and inspect exact-footprint observation presence; limit ≤100 |
 | POST | `/acquisition/jobs` | Validate and enqueue a bounded AOI/history request |
 | GET | `/acquisition/jobs` | Latest 100 persisted jobs |
 | GET | `/acquisition/jobs/{job_id}` | Current counters and per-month progress |
