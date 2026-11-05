@@ -13,6 +13,7 @@
   <script src="/static/model-runs.js?v=8" defer></script>
   <script src="/static/coverage.js?v=8" defer></script>
   <script src="/static/acquisition.js?v=8" defer></script>
+  <script src="/static/landscapes.js?v=1" defer></script>
   <script src="/static/workflow.js?v=8" defer></script>
   <script src="/static/operations.js?v=8" defer></script>
 </head>
@@ -37,7 +38,27 @@
       <div id="error-banner" class="error-banner" hidden></div>
       <section id="view-explore" class="view" hidden>
         <div class="page-heading"><div><div class="eyebrow">FROM A PLACE TO AN OBSERVATION</div><h1>Find your forest<span>.</span></h1><p>Choose an area anywhere in the world. Collect real observations and keep the evidence together.</p></div><button class="button secondary import-trigger"><span data-icon="upload"></span>Import existing data</button></div>
-        <div class="notice"><span data-icon="info"></span><span><strong>A place name is a starting point.</strong> Confirm a small study rectangle. A search result does not verify forest cover or an official boundary; usable satellite data is not guaranteed everywhere.</span></div>
+        <div class="notice"><span data-icon="info"></span><span><strong>A worldwide workspace.</strong> Select a small study area below, or save a larger forest plan and work through its monitoring areas. Place names and rectangles do not verify forest cover or official boundaries; usable satellite data varies by location.</span></div>
+        <section class="panel forest-planner" aria-labelledby="landscape-heading">
+          <div class="panel-heading"><div><div class="eyebrow">PLAN A LARGER FOREST</div><h2 id="landscape-heading">One forest. Connected monitoring areas.</h2><p>Use the same observation workflow anywhere, with separate evidence for every area.</p></div><button type="button" id="refresh-landscapes" class="button secondary">Refresh plans</button></div>
+          <div class="forest-planner-body">
+            <details class="landscape-create" open><summary>Define a forest study area</summary>
+              <p class="form-help">Enter a rectangle around the forest you want to study. ForestMind divides it into manageable areas of up to 25 km². Saving a plan starts no downloads. This is a study footprint, not a verified forest boundary.</p>
+              <form id="landscape-form">
+                <div class="landscape-names"><label>Forest plan name<input id="landscape-name" type="text" minlength="2" maxlength="120" placeholder="My forest monitoring plan" required></label><label>Country / location<input id="landscape-country" type="text" maxlength="100" placeholder="Optional, including multiple countries"></label></div>
+                <div class="coordinate-inputs"><label>West longitude<input id="landscape-west" type="number" step="any" min="-180" max="180" required></label><label>South latitude<input id="landscape-south" type="number" step="any" min="-85" max="85" required></label><label>East longitude<input id="landscape-east" type="number" step="any" min="-180" max="180" required></label><label>North latitude<input id="landscape-north" type="number" step="any" min="-85" max="85" required></label></div>
+                <p class="form-help">Longitude −180° to 180°; latitude −85° to 85°. If west is greater than east, the plan crosses the international date line and is split automatically. Country labels do not restrict monitoring.</p>
+                <div class="landscape-plan-actions"><label>Maximum area per monitoring unit<select id="landscape-tile-area"><option value="25">25 km²</option><option value="10">10 km²</option><option value="1">1 km²</option></select></label><button type="button" id="landscape-use-map" class="button secondary">Use current map rectangle</button><button type="submit" id="save-landscape" class="button primary">Save forest plan</button></div>
+              </form>
+            </details>
+            <div class="landscape-saved"><label for="landscape-select">Saved forest plans</label><select id="landscape-select" disabled><option value="">Choose a saved forest plan</option></select><button type="button" id="export-landscape" class="text-button" disabled>Export plan definition</button></div>
+            <div id="landscape-error" class="form-error" role="alert" hidden></div>
+            <div id="landscape-summary" class="landscape-summary" role="status" aria-live="polite">Save a forest plan to track its monitoring areas together.</div>
+            <div id="landscape-tiles"></div>
+            <div id="landscape-pagination" class="landscape-pagination" hidden><button type="button" id="landscape-previous" class="button secondary">Previous areas</button><span id="landscape-page-label"></span><button type="button" id="landscape-next" class="button secondary">Next areas</button></div>
+            <p class="form-help">Select an area to confirm its exact boundary and collect a bounded batch of observations below. Refresh plans to see saved evidence. A planned area without observations stays unknown; model results remain subject to validation for that location.</p>
+          </div>
+        </section>
         <div class="explore-grid">
           <section class="panel area-picker" aria-label="Select a monitoring area">
             <div class="panel-heading"><div><div class="eyebrow">01 / LOCATE</div><h2>A world of places. One clear boundary.</h2></div></div>
