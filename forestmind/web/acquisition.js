@@ -97,6 +97,17 @@ function centerAreaOnPoint(point,label,country='') {
   $('#area-name').value=(label || 'My monitoring area').slice(0,120);$('#area-country').value=country.slice(0,100);
   updateArea([lon-dx,lat-.01,lon+dx,lat+.01],true);
 }
+function selectPlannedAcquisitionArea(tile,landscape) {
+  acquisition.place=null;
+  $('#area-name').value=tile.name;
+  $('#area-country').value=landscape.country || 'Unspecified';
+  updateArea([...tile.bbox],true);
+  // Preserve the planned footprint exactly when the user reapplies coordinates.
+  ['west','south','east','north'].forEach((key,i)=>{$('#area-'+key).value=String(tile.bbox[i]);});
+  $('#place-selection').textContent=`Monitoring area from ${landscape.name}. Confirm this rectangle and choose collection dates. Forest cover inside the study area has not been verified.`;
+  $('#acquisition-form').scrollIntoView({behavior:'smooth',block:'start'});
+  $('#area-name').focus();
+}
 async function searchPlaces(event) {
   event.preventDefault();const query=$('#place-query').value.trim();if(query.length<2)return;
   const button=$('#place-search-button');button.disabled=true;$('#place-results').innerHTML='<p class="inline-status" role="status">Searching worldwide places…</p>';
