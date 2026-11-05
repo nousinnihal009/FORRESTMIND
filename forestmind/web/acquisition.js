@@ -51,7 +51,9 @@ function areaError(message) {$('#area-error').textContent=message || '';$('#area
 function currentAreaLimit() {return acquisition.limits.max_area_km2 || 25;}
 function updateArea(bbox,fit=false) {
   acquisition.bbox=bbox;acquisition.confirmed=false;acquisition.requestKey=null;
-  ['west','south','east','north'].forEach((key,i)=>{$('#area-'+key).value=Number.isFinite(bbox[i])?bbox[i].toFixed(6):'';});
+  // Inputs are also the source for Apply coordinates. Keep all digits so a
+  // planned tile remains the same footprint after fitting or reapplying it.
+  ['west','south','east','north'].forEach((key,i)=>{$('#area-'+key).value=Number.isFinite(bbox[i])?String(bbox[i]):'';});
   $('#confirm-area').checked=false;
   const error=ForestArea.validateBbox(bbox,currentAreaLimit());areaError(error);
   $('#area-summary').textContent=bbox.every(Number.isFinite)?`${bbox.map(v=>v.toFixed(6)).join(', ')} · ${numeric(ForestArea.areaKm2(bbox),3)} km²`:'Choose a rectangle or enter its coordinates.';
@@ -102,8 +104,6 @@ function selectPlannedAcquisitionArea(tile,landscape) {
   $('#area-name').value=tile.name;
   $('#area-country').value=landscape.country || 'Unspecified';
   updateArea([...tile.bbox],true);
-  // Preserve the planned footprint exactly when the user reapplies coordinates.
-  ['west','south','east','north'].forEach((key,i)=>{$('#area-'+key).value=String(tile.bbox[i]);});
   $('#place-selection').textContent=`Monitoring area from ${landscape.name}. Confirm this rectangle and choose collection dates. Forest cover inside the study area has not been verified.`;
   $('#acquisition-form').scrollIntoView({behavior:'smooth',block:'start'});
   $('#area-name').focus();
