@@ -1,5 +1,11 @@
 # Completing ForestMind
 
+## Worldwide scope confirmed — November 5
+
+The application is intended for forests worldwide. Mudumalai is one pilot, not the product's geographical scope. A saved landscape planner now partitions larger study rectangles into reproducible, manageable monitoring areas, including date-line crossings. Plans are persisted and paginated; selecting an area connects to the existing confirmed acquisition workflow. Coverage counts only exact matching footprints with declared nonsynthetic measurements. Missing areas remain unknown, and regional model eligibility remains enforced. See [GLOBAL_MONITORING.md](GLOBAL_MONITORING.md).
+
+This closes the previous need to manually divide a larger forest into unrelated small studies. It does not provide unattended acquisition of every tile, a verified catalogue of every forest, whole-landscape fragmentation mosaics, or validated predictions across all biomes. Implementation and scientific acceptance continue separately. The later dated verification entry in `VALIDATION.md` records the executed planner checks.
+
 ## November 5: external evidence and an actual baseline study
 
 ForestMind has now downloaded 10,339 published, visually interpreted global forest-reference points and completed a fixed retrospective experiment on 24,567 eligible point/year examples. Train/validation/calibration/test geography and years are separate; the 1,422 test examples contain 11 loss events across 77 geographic cells. All methods missed those events at the predeclared 0.5 threshold. This establishes an actual reproducible baseline result, including its limitations, rather than validated operational warning performance. See [PUBLIC_REFERENCES.md](PUBLIC_REFERENCES.md) and the executed record in [VALIDATION.md](VALIDATION.md).
