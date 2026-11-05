@@ -49,6 +49,7 @@ Limits include a 25 km² maximum per acquired monitoring area, 60 months per acq
 | --- | --- |
 | Worldwide entry | Explicit attributed place search, interactive map, drawing/coordinates and confirmed bounded area |
 | Connected jobs | Durable acquisition, bounded retries, cancellation, restart recovery, resume and transactional saved-area updates |
+| Larger forests worldwide | Saved versioned study plans, automatic date-line splitting, paginated monitoring areas, exact-footprint observation presence and normal acquisition handoff |
 | Multimodal inputs | Past-only, grid-matched Sentinel-1 RTC and trailing ERA5 features aligned to optical dates, separate pixel/feature masks, unit and coverage checks, and registered model compatibility |
 | Reference datasets | Independent label manifests, spatial buffers and temporal embargoes, train-only normalization, partial supervision and artifact integrity checks |
 | Spatial evidence | Computable common-valid spectral change; classified-cover patches, internal edges, complete-boundary compactness and centroid connectivity |
