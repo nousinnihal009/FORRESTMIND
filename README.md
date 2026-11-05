@@ -2,7 +2,7 @@
 
 **Forest observation, evidence, and early-warning research in one local workspace.**
 
-ForestMind v0.7 connects worldwide place search, confirmed small-area selection, real satellite acquisition and continuing monitoring in one local application. It now prepares dated optical, radar and climate inputs, converts independently supplied references into protected training datasets, and supports offline loading of complete native model checkpoints. Inspect measured change, context, exploratory forecasts, alerts and hypothetical scenarios. No independently validated real-trained model is bundled.
+ForestMind v0.7 connects worldwide place search, larger-forest study plans, confirmed monitoring-area selection, real satellite acquisition and continuing monitoring in one local application. Its scope is forests worldwide; Mudumalai is one test site. It prepares dated optical, radar and climate inputs, converts independently supplied references into protected training datasets, and supports offline loading of complete native model checkpoints. Inspect measured change, context, exploratory forecasts, alerts and hypothetical scenarios. No independently validated real-trained model is bundled.
 
 The included Amazon regions are **synthetic demonstrations**. The dashboard's condition index, forecast envelopes and scenario coefficients are transparent, uncalibrated baselines. They do not establish ecological tipping points, causal drivers or intervention effectiveness. Imported measurements retain their source and an unverified-provenance label.
 
@@ -37,9 +37,11 @@ The frontend is packaged HTML/CSS/JavaScript served by FastAPI; no Node build is
 
 Normal monitoring needs no Python commands or manual model-report import. A registered model runs only if its checkpoint, independent evaluation, input compatibility and supported geography pass checks. No eligible real-trained model is bundled. Real observations are never run through the synthetic demonstration model as an ecological prediction.
 
-The saved [Mudumalai pilot in Tamil Nadu](docs/pilots/MUDUMALAI.md) documents a small real-data study area, its public sources and the user's ₹0 operating constraint. It is a local pilot, not a claim of complete reserve coverage. The app remembers the selected area across reloads and prefers an observed area when no selection is stored.
+For a large forest, **Find a forest → Plan a larger forest** saves a reproducible plan of manageable monitoring areas, including rectangles crossing the international date line. Browse the areas, choose one for collection, and return to inspect which have saved observations. Planning does not start downloads. See [worldwide monitoring](docs/GLOBAL_MONITORING.md) for coverage meanings, regional evidence requirements and remaining scale limits.
 
-Limits include a 25 km² maximum rectangular AOI, 60 months per acquisition request, a single worker and bounded downloads/storage. Forecasts need at least 12 consecutive usable months; descriptive autocorrelation/variance needs 36. These are software eligibility rules, not scientific validation. See the [operator guide](docs/OPERATOR_GUIDE.md), [acquisition limits and recovery](docs/ACQUISITION_OPERATIONS.md), [requirement-by-requirement status](docs/REQUIREMENTS_MATRIX.md) and [actual verification evidence](docs/VALIDATION.md).
+The saved [Mudumalai pilot in Tamil Nadu](docs/pilots/MUDUMALAI.md) documents a small real-data study area, its public sources and the user's ₹0 operating constraint. It is one pilot within the worldwide product scope. Its measured history and scientific results apply to that study, not every forest. The app remembers the selected area across reloads and prefers an observed area when no selection is stored.
+
+Limits include a 25 km² maximum per acquired monitoring area, 60 months per acquisition request, a single worker and bounded downloads/storage. A larger forest plan contains many such areas. Forecasts need at least 12 consecutive usable months; descriptive autocorrelation/variance needs 36. These are software eligibility rules, not scientific validation. See the [operator guide](docs/OPERATOR_GUIDE.md), [acquisition limits and recovery](docs/ACQUISITION_OPERATIONS.md), [requirement-by-requirement status](docs/REQUIREMENTS_MATRIX.md) and [actual verification evidence](docs/VALIDATION.md).
 
 ## Implemented capabilities
 
