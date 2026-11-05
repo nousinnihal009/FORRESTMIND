@@ -22,7 +22,7 @@ function landscapeInputError(values) {
   const b=values.bbox;
   if(!Array.isArray(b)||b.length!==4||b.some(v=>!Number.isFinite(v)))return 'Enter all four coordinates for the forest study area.';
   if(b[0]<-180||b[0]>180||b[2]<-180||b[2]>180||b[1]<-85||b[3]>85)return 'Use longitudes from −180° to 180° and latitudes from −85° to 85°.';
-  if(b[1]>=b[3]||b[0]===b[2])return 'North must be above south, and the west and east boundaries must differ.';
+  if(b[1]>=b[3]||b[0]===b[2]||(b[0]===180&&b[2]===-180))return 'North must be above south, and the west and east boundaries must enclose a nonzero span. Use −180 to 180 for all longitudes.';
   if(!Number.isFinite(values.tile_area_km2)||values.tile_area_km2<1||values.tile_area_km2>25)return 'Choose a maximum monitoring area from 1 to 25 km².';
   return null;
 }
@@ -41,11 +41,14 @@ async function refreshLandscapes(preferredId=null) {
     const result=await api('/landscapes');
     if(sequence!==landscapeState.listSequence)return;
     landscapeState.plans=result.landscapes || [];
-    const preferred=pageSequence===landscapeState.pageSequence?preferredId:null;
-    const selected=[preferred,landscapeState.selected,savedLandscapeId()].find(id=>landscapeState.plans.some(plan=>plan.id===id)) || landscapeState.plans[0]?.id || null;
+    const selectionChanged=pageSequence!==landscapeState.pageSequence;
+    const selected=selectionChanged?landscapeState.selected:([preferredId,landscapeState.selected,savedLandscapeId()].find(id=>landscapeState.plans.some(plan=>plan.id===id)) || landscapeState.plans[0]?.id || null);
     $('#landscape-select').innerHTML='<option value="">Choose a saved forest plan</option>'+landscapeState.plans.map(plan=>`<option value="${esc(plan.id)}">${esc(plan.name)} · ${numeric(plan.tile_count)} areas</option>`).join('');
     $('#landscape-select').value=selected || '';
     $('#landscape-select').disabled=!landscapeState.plans.length;
+    // A refresh must not replace a later page choice, including explicitly
+    // clearing the selection, or make that choice issue a duplicate request.
+    if(selectionChanged)return;
     if(selected)await loadLandscapePage(selected,selected===landscapeState.selected?landscapeState.offset:0);
     else {++landscapeState.pageSequence;landscapeState.selected=null;rememberLandscape(null);clearLandscapePage('No saved forest plans yet. Define a larger study area above to begin.');}
   } catch(error) {
