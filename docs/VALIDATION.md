@@ -1,5 +1,38 @@
 # Build verification
 
+## Public evidence, actual baseline experiment and annual-loss model — November 5, 2026
+
+### Actual data and experiment
+
+- Downloaded the pinned, published CC BY 4.0 global forest-reference archive from Zenodo record 6403863: **10,339 interpreted points**, 229,591 ZIP bytes, provider MD5 `e56c8251ca391693674bf00a9a1bfb77`. Original metadata, archive and SHA256 manifest are retained in `data/public-references/global-forest-v1.1/`. The decoder preserves unknown transitions and the original attributes; these are published visual interpretations, not fabricated fixture labels or a new field campaign. [PUBLIC_REFERENCES.md](PUBLIC_REFERENCES.md) records the source, definitions and limitations.
+- An initial identity audit refused duplicate coordinates before fitting or test-performance inspection. The final fixed rule excludes all 112 records at duplicated coordinates without selecting among their labels; 446 points are excluded by the cell boundary buffer. The study retains 24,567 eligible point/year examples: **21,679 train, 527 validation, 939 calibration, 1,422 test**. Nearest cross-partition centre distance is **20.7677 km**. Earlier/later calendar windows and disjoint geographic cells are explicit; interpretation publication dates are never backdated.
+- The frozen protocol is `artifacts/public-reference-study-20261105/protocol.json`; actual fits, metrics, bootstrap intervals and all test predictions are in `results.json` in that directory. The run exited 0; CLI output is retained in `run.log`. Logistic regression, random forest and gradient boosting used training-only predictors/transforms, with optional separate calibration. Validation/test did not select model settings. No deployable model was exported.
+- Test data contains **11 positive events across 1,422 origins and 77 geographic cells**. Every method has **zero positive recall at the fixed 0.5 threshold**. Small Brier changes do not establish useful warning performance. The sampling strata and retained histories are not a population prevalence sample; scores and calibration apply to this selected retrospective benchmark only. Inputs are past interpreted history and coordinates, not observed satellite features or pretrained embeddings. This is separate from the primary 100 ha annual-area target.
+
+| Method | Test Brier (lower is better) | AUROC | Average precision |
+| --- | ---: | ---: | ---: |
+| No new loss / last-year event / past event rate | 0.00773558 | 0.50000 | 0.00773558 |
+| Training event rate | 0.00767927 | 0.50000 | 0.00773558 |
+| Logistic | 0.00770235 | 0.58598 | 0.02118197 |
+| Logistic, calibrated | 0.00766580 | 0.58598 | 0.02118197 |
+| Random forest | 0.00773447 | 0.53254 | 0.00906374 |
+| Random forest, calibrated | 0.00769186 | 0.53254 | 0.00906374 |
+| Gradient boosting | 0.00768471 | 0.63063 | 0.01161677 |
+| Gradient boosting, calibrated | 0.00767785 | 0.63063 | 0.01161677 |
+
+These are observed results, not selected targets or guarantees. For example, the calibrated logistic Brier improvement interval over no-new-loss is approximately **[-0.00001226, 0.00017028]** and includes zero. The raw logistic and constant training-rate comparisons retain their positive conditional intervals as well; they still have zero event recall at the fixed threshold. All intervals are saved, use 1,000 paired geographic-cell replicates, and exclude fitting uncertainty. Annual labels cannot support exact-day lead times. Preserve this completed study; do not retune or refreeze its inspected test set.
+
+- Real Mudumalai ERA5 acquisition completed all four source windows: **1991–2020 reference plus 2021–2025 observations**. The packet `data/research-climate-mudumalai-20261105/` contains raw provider contexts, immutable reference and departure artifacts, plan and progress. All **48** reference feature/month pairs and **240** later departures across **60 months** are available. A completed resume made zero new requests and reproduced the saved products. These climate data do not fill missing optical observations or supply forest outcomes.
+- The primary annual-area neural contract now has a separate optional head, explicit units/horizon/footprint checks, masked training, actual supervised support counts, MAE/RMSE, checkpoint evaluation and inference withholding. The saved-run UI displays area fraction separately. No real trained annual-area model is claimed: the public point references do not measure the required areas. [ANNUAL_LOSS_MODEL.md](ANNUAL_LOSS_MODEL.md) documents that boundary.
+
+### Software verification
+
+- **141 focused tests passed in 49.12 seconds**, covering the annual-loss chain, public references/benchmark and existing conversion, partial-supervision and inference contracts. A separate executable JavaScript annual-loss display test passed. These tests use controlled fixtures; only the separately recorded public experiment uses real reference data.
+- The first complete suite finished with **1,121 passed and one failure in 186.97 seconds**. Log: `artifacts/regression-public-annual-20261105.txt`. The failure was Windows access denial during atomic climate-progress replacement. A bounded metadata-write retry and regression tests were added; persistent denial preserves prior progress and cannot repeat a provider download. The exact builder that obtained the real sources is preserved in `artifacts/climate-history-builder-used-20261105.py` and matches its original plan fingerprint. A new read-only completed-packet verifier preserves that history without altering the resume code pin.
+- Final full-suite verification is pending; this record will be updated only after the terminal result is observed.
+
+The original monitoring database was not targeted by this work. No paid compute, public deployment, external notification, field-data fabrication or operational model registration occurred. Existing native pretrained comparisons, annual-area reference evidence, optical/radar coverage, spatial calibrated risk and ecological intervention/tipping validation remain incomplete. Actual browser layout was not reverified; UI execution tests and final JavaScript syntax checks are distinct from browser QA.
+
 ## Reference studies, frozen climate diagnostics and scenario ranges — November 4, 2026
 
 This increment defines the annual gross tree-cover-loss intake and review contract, preserves copied evidence and review availability, extends protected baseline comparisons and event metrics, adds spatial-block improvement intervals, freezes sufficiently long climate references, and displays explicit scenario assumption ranges. The existing FastAPI/SQLite/plain-JavaScript architecture is retained. Scope and remaining requirements are recorded in `BUILD_PLAN_20261102.md`, `REQUIREMENTS_MATRIX.md`, `DATA_CONTRIBUTION.md` and `CLIMATE_BASELINE.md`.
