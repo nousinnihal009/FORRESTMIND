@@ -43,4 +43,6 @@ python scripts/benchmark_public_references.py run --packet data/public-reference
 
 Freeze pins source contents, decoded examples, geography, target, settings, code and numerical runtime before performance inspection. Writers refuse existing output files. A changed implementation/source requires a scientifically justified new study, not refreezing inspected test data to tune results. Actual executed results belong in `VALIDATION.md`; commands here alone do not establish that an experiment passed.
 
+The actual November 5 run completed successfully and preserved all method results, including zero recall for the 11 test events at the fixed threshold. Original implementation files are copied into the study's `implementation/` directory with hashes matching the frozen protocol. Restore those exact versions and the pinned numerical runtime when reproducing this study; keep later scientific development as a separate experiment.
+
 The change-enriched source sample and exclusion rules do not represent global event prevalence. Unweighted probability/calibration scores apply only to retained samples. Interpretation may depend on later imagery; annotation errors, selection effects and spatial dependence remain possible. This experiment produces reproducible results and predictions, not an operational checkpoint or calibrated Mudumalai risk map.
